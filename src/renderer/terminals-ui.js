@@ -23,7 +23,8 @@
   var paneSeq = 0;
   var focused = null;
   var bound = false, snapBound = false;
-  var notifier = function () {}, actionHandler = function () {};
+  var notifier = function () {}, actionHandler = function () {}, maxObserver = function () {};
+  function notifyMax() { try { maxObserver(isMaximized()); } catch (e) {} }
 
   var THEME = {
     background: '#0a0a0b', foreground: '#e6e6e6', cursor: '#4ade80', cursorAccent: '#0a0a0b',
@@ -56,8 +57,9 @@
           '<button class="dk-newbtn dk-new-term" title="nueva terminal">' + svg('term', 12, 2) + ' terminal</button>' +
           '<button class="dk-newbtn dk-new-claude" title="nueva sesión claude">' + svg('dispatch', 12, 2) + ' claude</button>' +
           '<span class="dk-div"></span>' +
+          '<button class="dk-newbtn dk-exit" title="salir de pantalla completa (volver al board)">' + svg('chevD', 13, 2.4) + ' salir</button>' +
           '<button class="dk-pb dk-max" title="pantalla completa / restaurar">' + maxIcon() + '</button>' +
-          '<button class="dk-pb dk-min" title="minimizar / restaurar">' + svg('chevD', 15, 2.4) + '</button>' +
+          '<button class="dk-pb dk-min" title="minimizar / ocultar">' + svg('chevD', 15, 2.4) + '</button>' +
         '</span>' +
       '</div>' +
       '<div class="dk-root"></div>' +
@@ -67,6 +69,7 @@
     countEl = host.querySelector('.dk-count');
     host.querySelector('.dk-new-term').addEventListener('click', function () { spawn('shell'); });
     host.querySelector('.dk-new-claude').addEventListener('click', function () { spawn('claude'); });
+    host.querySelector('.dk-exit').addEventListener('click', function () { host.classList.remove('maximized'); notifyMax(); refitSoon(); });
     host.querySelector('.dk-max').addEventListener('click', toggleMax);
     host.querySelector('.dk-min').addEventListener('click', toggleMin);
     host.querySelector('.dk-tb-title').addEventListener('click', function () { if (host.classList.contains('minimized')) restore(); });
@@ -212,6 +215,8 @@
     // re-fit automático ante CUALQUIER cambio de tamaño del panel (split, drag, dock-resize…)
     var ro = null;
     if (g.ResizeObserver) { ro = new g.ResizeObserver(function () { try { fit.fit(); } catch (e) {} }); ro.observe(body); }
+    // re-fit cuando termina de cargar la fuente (Geist Mono async → métricas de celda correctas)
+    if (g.document && g.document.fonts && g.document.fonts.ready) g.document.fonts.ready.then(function () { try { fit.fit(); } catch (e) {} });
 
     requestAnimationFrame(function () {
       try { fit.fit(); } catch (e) {}
@@ -367,19 +372,19 @@
     ensureDock(); if (!host) return;
     host.hidden = false; host.classList.remove('minimized');
     document.body.classList.add('dock-open'); document.body.classList.remove('dock-min');
-    refitSoon();
+    notifyMax(); refitSoon();
   }
-  function minimize() { ensureDock(); if (!host || host.hidden) return; host.classList.remove('maximized'); host.classList.add('minimized'); document.body.classList.add('dock-min'); }
-  function restore() { ensureDock(); host.classList.remove('minimized'); host.hidden = false; document.body.classList.add('dock-open'); document.body.classList.remove('dock-min'); refitSoon(); }
+  function minimize() { ensureDock(); if (!host || host.hidden) return; host.classList.remove('maximized'); host.classList.add('minimized'); document.body.classList.add('dock-min'); notifyMax(); }
+  function restore() { ensureDock(); host.classList.remove('minimized'); host.hidden = false; document.body.classList.add('dock-open'); document.body.classList.remove('dock-min'); notifyMax(); refitSoon(); }
   function toggleMin() { if (host.classList.contains('minimized')) restore(); else minimize(); }
-  function toggleMax() { ensureDock(); host.classList.remove('minimized'); document.body.classList.remove('dock-min'); host.classList.toggle('maximized'); refitSoon(); }
-  function hide() { if (!host) return; host.hidden = true; host.classList.remove('maximized', 'minimized'); document.body.classList.remove('dock-open', 'dock-min'); }
+  function toggleMax() { ensureDock(); host.classList.remove('minimized'); document.body.classList.remove('dock-min'); host.classList.toggle('maximized'); notifyMax(); refitSoon(); }
+  function hide() { if (!host) return; host.hidden = true; host.classList.remove('maximized', 'minimized'); document.body.classList.remove('dock-open', 'dock-min'); notifyMax(); }
   function home() {
     ensureDock(); bindIpc();
     if (!rootEl.querySelector('.dk-pane')) spawn('shell');
     host.hidden = false; host.classList.remove('minimized'); host.classList.add('maximized');
     document.body.classList.add('dock-open'); document.body.classList.remove('dock-min');
-    refitSoon();
+    notifyMax(); refitSoon();
   }
   function toggle() {
     if (!isOpen()) { ensureDock(); if (rootEl.querySelector('.dk-pane')) show(); else spawn('shell'); }
@@ -391,6 +396,7 @@
   function refreshActive() { sessions.forEach(function (pane) { renderSession(pane); }); }
   function setNotifier(fn) { if (typeof fn === 'function') notifier = fn; }
   function setActionHandler(fn) { if (typeof fn === 'function') actionHandler = fn; }
+  function setMaxObserver(fn) { if (typeof fn === 'function') maxObserver = fn; }
 
   var rt = null;
   window.addEventListener('resize', function () { if (isOpen()) { if (rt) clearTimeout(rt); rt = setTimeout(refitAll, 120); } });
@@ -399,7 +405,7 @@
     spawn: spawn, open: function (o) { o = o || {}; spawn(o.kind === 'claude' ? 'claude' : 'shell', o.cwd); },
     openSession: openSession, show: show, hide: hide, minimize: minimize, restore: restore,
     toggle: toggle, home: home, isOpen: isOpen, count: count, refreshActive: refreshActive,
-    setNotifier: setNotifier, setActionHandler: setActionHandler,
+    setNotifier: setNotifier, setActionHandler: setActionHandler, setMaxObserver: setMaxObserver,
     isMaximized: function () { return !!host && host.classList.contains('maximized'); }
   };
 })(window);

@@ -189,13 +189,20 @@ body.dock-open .board{ padding-bottom: var(--dock-h); }
 .dk-pb{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:transparent;border:1px solid transparent;color:var(--text-3);transition:.13s;cursor:pointer;}
 .dk-pb:hover{color:var(--text-1);background:var(--surface-input);border-color:var(--border);}
 #terminals.dock.maximized .dk-max{color:var(--green);}
+.dk-exit{display:none;color:var(--amber);border-color:rgba(245,158,11,.35);}
+.dk-exit:hover{border-color:var(--amber);}
+#terminals.dock.maximized .dk-exit{display:inline-flex;}
 
-/* tiling: árbol de splits + paneles + divisores */
+/* tiling: árbol de splits + paneles + divisores.
+   El stretch cross-axis del flex no propagaba el alto por el árbol anidado, así que
+   forzamos el llenado con height/width 100% sobre el eje cruzado (eje principal = flex). */
 .dk-root{flex:1;min-height:0;min-width:0;display:flex;}
-.dk-root>.dk-pane,.dk-root>.dk-split{flex:1 1 0;}
+.dk-root>.dk-pane,.dk-root>.dk-split{flex:1 1 0;height:100%;width:100%;}
 .dk-split{display:flex;min-width:0;min-height:0;}
 .dk-split.row{flex-direction:row;}
 .dk-split.col{flex-direction:column;}
+.dk-split.row>.dk-pane,.dk-split.row>.dk-split{height:100%;}   /* fila → cada hijo llena el alto */
+.dk-split.col>.dk-pane,.dk-split.col>.dk-split{width:100%;}    /* columna → cada hijo llena el ancho */
 .dk-splitter{flex:none;background:var(--border);transition:background .13s;}
 .dk-split.row>.dk-splitter{width:5px;cursor:col-resize;}
 .dk-split.col>.dk-splitter{height:5px;cursor:row-resize;}
@@ -212,8 +219,9 @@ body.dock-open .board{ padding-bottom: var(--dock-h); }
 .dk-pbtn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:5px;background:transparent;border:1px solid transparent;color:var(--text-4);transition:.13s;cursor:pointer;}
 .dk-pbtn:hover{color:var(--text-1);background:var(--surface-input);border-color:var(--border);}
 .dk-pane-body{flex:1;min-height:0;min-width:0;position:relative;overflow:hidden;}
-.dk-pane--shell .dk-pane-body,.dk-pane--claude .dk-pane-body{padding:5px 4px 4px 8px;}
-.dk-pane-body .xterm{height:100%;}
+/* xterm en ABSOLUTE: llena el body (flex) sin inflarlo con su contenido (rows*cellHeight).
+   Esto hace que el panel respete SIEMPRE el alto del contenedor (como la terminal de VS Code). */
+.dk-pane-body .xterm{position:absolute;top:4px;left:7px;right:3px;bottom:2px;height:auto;}
 .dk-pane-body .xterm-viewport::-webkit-scrollbar{width:9px;}
 .dk-pane-body .xterm-viewport::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:5px;}
 
@@ -254,6 +262,8 @@ body.dk-dragging,body.dk-dragging *{cursor:grabbing !important;user-select:none 
 /* el chevron del toggle apunta « (colapsar) cuando está expandido, » (expandir) cuando colapsado */
 .sb-toggle svg{transition:transform .18s;}
 .sidebar:not(.collapsed) .sb-toggle svg{transform:rotate(180deg);}
+/* versión al lado del wordmark (visible, on-brand) */
+.brand-ver{font-size:9px;line-height:1;color:var(--text-4);letter-spacing:.4px;align-self:flex-start;margin-top:3px;margin-left:1px;}
 
 /* ── atención: banner E4 + inline approve/deny (.perm) ── */
 .attn-banner{flex:none;display:flex;align-items:center;gap:11px;padding:9px 16px;background:linear-gradient(90deg, rgba(245,158,11,.14), rgba(245,158,11,.05) 60%, transparent);border-bottom:1px solid rgba(245,158,11,.25);position:relative;z-index:9;}

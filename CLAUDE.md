@@ -234,6 +234,17 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
   `body.dock-open .board{padding-bottom:var(--dock-h)}`; `.maximized{inset:0}`. z-index 40 (overlays 50).
 - **Tamaño/resize:** xterm se monta, `fit()` mide cols/rows, recién ahí se crea la PTY; en split / drag
   de divisor / drag del alto del dock / resize de ventana se re-`fit()` (todas las visibles) y `resize()`.
+- **⚠️ Gotcha de ALTO (resuelto v0.6.3):** `.xterm{height:100%}` sobre un body sin alto definido era
+  circular → el contenido de xterm (`rows*cellHeight`) INFLABA el panel (peor al reanudar sesiones que
+  vuelcan mucho texto: "toda en vertical alto"). Fix: **xterm en `position:absolute;inset` dentro de
+  `.dk-pane-body`** (no aporta alto) + **forzar el llenado del árbol con `height:100%`/`width:100%`**
+  (`.dk-split.row>* {height:100%}`, `.dk-split.col>* {width:100%}`, `.dk-root>* {height:100%;width:100%}`)
+  porque el `align-items:stretch` del flex NO propagaba el alto por el árbol anidado. Verificado:
+  pane=split (lleno). Además `ResizeObserver` por panel + re-fit en `document.fonts.ready`.
+- **Pantalla completa NO tapa el sidebar (v0.6.3):** `.maximized` arranca en `left:var(--sb-w)`; al
+  maximizar se **comprime** el sidebar de forma NO pegajosa (`setMaxObserver` guarda el estado previo y
+  lo restaura al salir). Botón **"salir"** (ámbar, visible sólo en maximized) vuelve al dock. Drag de
+  panel: `preventDefault` en mousedown + `user-select:none` para no seleccionar texto al arrastrar.
 - **Seguridad:** sigue **cero API de Anthropic** — Consomni sólo hospeda el proceso; `claude` hace
   lo suyo. Se borra `ELECTRON_RUN_AS_NODE` del env del hijo.
 

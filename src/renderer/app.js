@@ -840,7 +840,7 @@
     var pill = t.closest && t.closest('.fpill[data-mode]'); if (pill) { toggleMode(pill.getAttribute('data-mode')); return; }
     var sortBtn = t.closest && t.closest('.tbtn'); if (sortBtn) { openSortMenu(sortBtn); return; }
     if (t.closest && t.closest('[data-act="sbtoggle"]')) { setSidebarCollapsed(!state.collapsed); return; }
-    if (t.closest && t.closest('[data-act="home"]')) { setSidebarCollapsed(true); if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
+    if (t.closest && t.closest('[data-act="home"]')) { if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
 
     // ── CARDS PRIMERO (van adentro de la columna, que tiene data-proj) ──
     // closed row → detalle
@@ -1022,7 +1022,21 @@
       if (act === 'detail') { openDetail(sid); return; }
       dispatchAction(act, sid);
     });
+    // pantalla completa de terminales → comprime el sidebar, pero NO de forma pegajosa:
+    // al salir de pantalla completa, restaura el estado previo del sidebar.
+    var preMaxCollapse; // undefined = no guardado
+    window.ConsomniTerms.setMaxObserver(function (isMax) {
+      if (isMax) {
+        if (preMaxCollapse === undefined) preMaxCollapse = state.userCollapsed;
+        setSidebarCollapsed(true);
+      } else if (preMaxCollapse !== undefined) {
+        state.userCollapsed = preMaxCollapse; preMaxCollapse = undefined;
+        var should = (state.userCollapsed != null) ? state.userCollapsed : (window.innerWidth < BREAKPOINT);
+        state.collapsed = should; render();
+      }
+    });
   }
+  state.userCollapsed = null;
   state.collapsed = window.innerWidth < BREAKPOINT;
   if (api) {
     api.getSnapshot().then(setSnapshot).catch(function () { render(); });
