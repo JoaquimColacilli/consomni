@@ -1,0 +1,84 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consomni — Entregables</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  html,body{height:auto;min-height:100%;}
+  body{overflow-x:hidden;}
+  .wrap{max-width:1240px;margin:0 auto;padding:48px 40px 90px;}
+  .hero{display:flex;align-items:center;gap:18px;padding-bottom:30px;margin-bottom:8px;}
+  .hero .ttl{font-size:22px;letter-spacing:4px;font-weight:600;color:#ededed;text-shadow:0 0 18px rgba(239,68,68,.3);}
+  .hero .tag{font-size:12px;color:var(--text-2);margin-top:5px;letter-spacing:1px;}
+  .meta-line{display:flex;gap:10px;flex-wrap:wrap;font-size:11px;color:var(--text-3);padding:14px 0 34px;border-bottom:1px solid var(--border-soft);margin-bottom:34px;}
+  .meta-line .chip{display:inline-flex;align-items:center;gap:6px;padding:5px 10px;border:1px solid var(--border);border-radius:7px;background:var(--surface-card);}
+  .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(348px,1fr));gap:20px;}
+  .cardlink{display:block;border:1px solid var(--border);border-radius:13px;overflow:hidden;background:var(--surface-card);transition:.16s;position:relative;}
+  .cardlink:hover{border-color:rgba(239,68,68,.4);transform:translateY(-3px);box-shadow:0 18px 44px -22px rgba(0,0,0,.8),0 0 0 1px rgba(239,68,68,.08);}
+  .thumb{position:relative;height:210px;overflow:hidden;background:#0a0a0b;border-bottom:1px solid var(--border);}
+  .thumb iframe{position:absolute;top:0;left:0;width:1320px;height:760px;border:0;transform:scale(.264);transform-origin:top left;pointer-events:none;}
+  .thumb .cover{position:absolute;inset:0;z-index:2;}
+  .num{position:absolute;top:11px;left:11px;z-index:3;width:30px;height:24px;border-radius:6px;background:rgba(10,10,11,.82);border:1px solid rgba(255,255,255,.12);display:flex;align-items:center;justify-content:center;font-size:11px;font-weight:600;color:#cfcfd4;backdrop-filter:blur(4px);}
+  .cardlink .body{padding:14px 16px 16px;}
+  .cardlink .nm{font-size:14px;color:var(--text-1);font-weight:600;margin-bottom:5px;display:flex;align-items:center;gap:8px;}
+  .cardlink .desc{font-size:11.5px;color:var(--text-3);line-height:1.5;}
+  .cardlink .go{position:absolute;bottom:15px;right:16px;color:var(--text-4);transition:.16s;}
+  .cardlink:hover .go{color:var(--red);transform:translateX(2px);}
+  .foot{margin-top:46px;padding-top:24px;border-top:1px solid var(--border-soft);font-size:11px;color:var(--text-4);display:flex;gap:18px;flex-wrap:wrap;}
+</style>
+</head>
+<body>
+<div class="wrap">
+  <div class="hero">
+    <span id="heroEye"></span>
+    <div style="flex:1">
+      <div class="ttl">CONSOMNI</div>
+      <div class="tag">lo ve todo · orquestador de sesiones de Claude Code</div>
+    </div>
+  </div>
+  <div class="meta-line">
+    <span class="chip">7 entregables</span>
+    <span class="chip">tokens.css — fuente de verdad</span>
+    <span class="chip">Geist Mono</span>
+    <span class="chip">dark near-black</span>
+    <span class="chip">self-contained · sin build</span>
+  </div>
+
+  <div class="grid" id="grid"></div>
+
+  <div class="foot">
+    <span>Consomni v0.4.2</span>
+    <span>consola + omni · un ojo que lo ve todo</span>
+    <span style="margin-left:auto">tokens.css · chrome.js · 7 pantallas</span>
+  </div>
+</div>
+
+<div class="crt-vignette"></div>
+<div class="crt-scan"></div>
+
+<script src="chrome.js"></script>
+<script>
+  document.getElementById('heroEye').innerHTML = Chrome.eye(46);
+  var screens = [
+    ['01','e1-dashboard.html','Dashboard','Estado normal — board kanban, cards en todos los estados, sidebar de proyectos, top bar y status bar.'],
+    ['02','e2-detalle.html','Panel de detalle','Sesión expandida — resumen, contexto, metadatos, sparkline, archivos, subagentes, feed en vivo y barra de acciones.'],
+    ['03','e3-command-palette.html','Command palette','Overlay ⌘K — fuzzy search agrupado en dispatch, sesiones, proyectos y acciones con atajos.'],
+    ['04','e4-atencion.html','Atención','El momento — banner, ojo pulsando, permiso inline con aprobar/denegar y toast nativo.'],
+    ['05','e5-split.html','Split / grid','2–3 terminales lado a lado con feed de tool calls en vivo. Tmux pero hermoso.'],
+    ['06','e6-sidebar-colapsado.html','Sidebar colapsado','El dashboard con el sidebar reducido a iconos + dots de estado, board más ancho.'],
+    ['07','e7-sistema.html','Sistema de diseño','Paleta, tipografía y galería de componentes reutilizables desde tokens.css.']
+  ];
+  document.getElementById('grid').innerHTML = screens.map(function(s){
+    return '<a class="cardlink" href="'+s[1]+'">'+
+      '<div class="thumb"><span class="num">'+s[0]+'</span>'+
+        '<iframe src="'+s[1]+'" scrolling="no" tabindex="-1"></iframe>'+
+        '<div class="cover"></div></div>'+
+      '<div class="body"><div class="nm">'+s[2]+'</div><div class="desc">'+s[3]+'</div>'+
+        '<span class="go">'+Chrome.svg('ext',15,1.8)+'</span></div>'+
+    '</a>';
+  }).join('');
+</script>
+</body>
+</html>

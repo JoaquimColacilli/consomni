@@ -1,0 +1,22 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<!-- Hard Rule 3: cero red externa. CSP estricto: sólo recursos locales.
+     El @import de Google Fonts dentro de tokens.css queda bloqueado a propósito;
+     la fuente se sirve desde assets/fonts vía @font-face en app.css. -->
+<meta http-equiv="Content-Security-Policy"
+      content="default-src 'none'; script-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self'; img-src 'self' data:; connect-src 'self'; base-uri 'none'; form-action 'none';">
+<title>Consomni</title>
+<!-- app.css primero (registra @font-face); tokens.css verbatim después -->
+<link rel="stylesheet" href="app.css">
+<link rel="stylesheet" href="tokens.css">
+</head>
+<body>
+<div id="root"></div>
+<div id="overlays"></div>
+<script src="chrome.js"></script>
+<script src="app.js"></script>
+</body>
+</html>

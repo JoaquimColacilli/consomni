@@ -1,0 +1,42 @@
+appId: com.ironidevz.consomni
+productName: Consomni
+copyright: Copyright © 2026 Joaquim Colacilli
+
+directories:
+  output: release
+  buildResources: build
+
+files:
+  - dist/**/*
+  - src/renderer/**/*
+  - hooks/**/*
+  - package.json
+
+# El helper de hooks debe quedar fuera del asar: lo ejecuta `node` externo
+# (el proceso de Claude Code), que no puede leer dentro de app.asar.
+asarUnpack:
+  - hooks/**/*
+
+# La app es 100% offline y read-only sobre ~/.claude. No firma de código por ahora.
+win:
+  icon: build/icon.png
+  # No firmamos ni embebemos icono vía rcedit (requiere winCodeSign/Dev-Mode en la
+  # máquina de build). El icono igual va en el instalador NSIS, los accesos directos
+  # y la ventana de la app (BrowserWindow.icon). El .exe crudo muestra el icono default.
+  signAndEditExecutable: false
+  target:
+    - target: portable
+    - target: nsis
+  artifactName: ${productName}-${version}-${arch}.${ext}
+
+portable:
+  artifactName: ${productName}-${version}-portable.${ext}
+
+nsis:
+  oneClick: false
+  perMachine: false
+  allowToChangeInstallationDirectory: true
+  artifactName: ${productName}-Setup-${version}.${ext}
+  shortcutName: Consomni
+  # NSIS necesita .ico real; dejamos que electron-builder derive el icono del
+  # instalador/accesos directos desde win.icon (png→ico automático).

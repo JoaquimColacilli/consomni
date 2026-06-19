@@ -1,0 +1,186 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consomni — Sistema de diseño</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  html,body{height:auto;min-height:100%;}
+  body{overflow-x:hidden;}
+  .ds{max-width:1180px;margin:0 auto;padding:34px 40px 90px;}
+  .ds-head{display:flex;align-items:center;gap:14px;padding-bottom:26px;margin-bottom:30px;border-bottom:1px solid var(--border);}
+  .ds-sec{margin-bottom:46px;}
+  .ds-h{font-size:11px;letter-spacing:2px;color:var(--text-3);margin-bottom:18px;display:flex;align-items:center;gap:10px;}
+  .ds-h::after{content:"";flex:1;height:1px;background:var(--border-soft);}
+  .ds-sub{font-size:10px;letter-spacing:1px;color:var(--text-4);margin:18px 0 10px;}
+  .sw-grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(150px,1fr));gap:10px;}
+  .sw{border:1px solid var(--border);border-radius:9px;overflow:hidden;background:var(--surface-card);}
+  .sw .chip{height:56px;}
+  .sw .meta{padding:8px 10px;display:flex;flex-direction:column;gap:2px;}
+  .sw .nm{font-size:11px;color:#cfcfd4;}
+  .sw .hex{font-size:10px;color:var(--text-3);}
+  .type-row{display:flex;align-items:baseline;gap:18px;padding:12px 0;border-bottom:1px solid rgba(255,255,255,.035);}
+  .type-row .tag{flex:none;width:120px;font-size:10px;color:var(--text-3);}
+  .gal{display:flex;flex-wrap:wrap;gap:12px;align-items:flex-start;}
+  .gal .cardwrap{width:296px;}
+  .tile{border:1px solid var(--border);border-radius:10px;padding:18px;background:var(--surface-card);display:flex;flex-wrap:wrap;gap:12px;align-items:center;}
+  .lbl-mini{font-size:9.5px;color:var(--text-4);margin-top:6px;display:block;}
+  .eyebox{display:flex;gap:30px;align-items:center;flex-wrap:wrap;}
+  .eyecell{display:flex;flex-direction:column;align-items:center;gap:10px;padding:22px 30px;border:1px solid var(--border);border-radius:10px;background:#0c0c0f;}
+</style>
+</head>
+<body>
+<div class="ds">
+  <div class="ds-head">
+    <span id="dsEye"></span>
+    <div style="flex:1">
+      <div style="font-size:16px;letter-spacing:2px;color:#ededed;font-weight:600">CONSOMNI · SISTEMA DE DISEÑO</div>
+      <div style="font-size:11px;color:var(--text-3);margin-top:3px">tokens.css — única fuente de verdad · Geist Mono · dark near-black</div>
+    </div>
+    <span style="font-size:10px;color:var(--text-4)">v0.4.2</span>
+  </div>
+
+  <!-- SUPERFICIES -->
+  <div class="ds-sec">
+    <div class="ds-h">SUPERFICIES</div>
+    <div class="sw-grid" id="surfaces"></div>
+  </div>
+
+  <!-- TEXTO -->
+  <div class="ds-sec">
+    <div class="ds-h">TEXTO</div>
+    <div class="sw-grid" id="texts"></div>
+  </div>
+
+  <!-- ESTADO -->
+  <div class="ds-sec">
+    <div class="ds-h">COLORES DE ESTADO</div>
+    <div class="sw-grid" id="states"></div>
+  </div>
+
+  <!-- TIPOGRAFÍA -->
+  <div class="ds-sec">
+    <div class="ds-h">TIPOGRAFÍA — GEIST MONO</div>
+    <div class="type-row"><span class="tag">16 / 600 / +2</span><span style="font-size:16px;font-weight:600;letter-spacing:2px;color:#ededed">CONSOMNI lo ve todo</span></div>
+    <div class="type-row"><span class="tag">15 / 600</span><span style="font-size:15px;font-weight:600;color:var(--text-1)">Build dashboard UI</span></div>
+    <div class="type-row"><span class="tag">13 / 500 título</span><span style="font-size:13px;font-weight:500;color:var(--text-1)">Revisión 4 pantallas</span></div>
+    <div class="type-row"><span class="tag">12 / 400 cuerpo</span><span style="font-size:12px;color:#c8c8ce">coordinando subagentes (3)</span></div>
+    <div class="type-row"><span class="tag">11 / 400 dato</span><span style="font-size:11px;color:var(--text-2)">62% · 128k · opus 4.8</span></div>
+    <div class="type-row"><span class="tag">10 / label</span><span style="font-size:10px;letter-spacing:1.5px;color:var(--text-3)">ESPERANDO PERMISO</span></div>
+  </div>
+
+  <!-- BADGES DE MODO -->
+  <div class="ds-sec">
+    <div class="ds-h">BADGES DE MODO</div>
+    <div class="tile" id="badges"></div>
+  </div>
+
+  <!-- PILLS DE ESTADO -->
+  <div class="ds-sec">
+    <div class="ds-h">PILLS DE ESTADO</div>
+    <div class="tile" id="statepills"></div>
+  </div>
+
+  <!-- BARRA DE CONTEXTO -->
+  <div class="ds-sec">
+    <div class="ds-h">BARRA DE CONTEXTO — 3 NIVELES</div>
+    <div class="tile" style="gap:30px">
+      <div><div class="row" style="gap:9px"><span class="ctx" style="width:120px"><span class="ctx-fill ctx-fill--green" style="width:41%"></span></span><span class="ctx-pct">41%</span></div><span class="lbl-mini">green · &lt; 75%</span></div>
+      <div><div class="row" style="gap:9px"><span class="ctx" style="width:120px"><span class="ctx-fill ctx-fill--amber" style="width:78%"></span></span><span class="ctx-pct--amber">78%</span></div><span class="lbl-mini">amber · &gt; 75%</span></div>
+      <div><div class="row" style="gap:9px"><span class="ctx" style="width:120px"><span class="ctx-fill ctx-fill--red" style="width:91%"></span></span><span class="ctx-pct--red">91%</span></div><span class="lbl-mini">red · &gt; 90%</span></div>
+    </div>
+  </div>
+
+  <!-- PILLS DE FILTRO + BOTONES -->
+  <div class="ds-sec">
+    <div class="ds-h">PILLS DE FILTRO &amp; BOTONES</div>
+    <div class="tile">
+      <span class="fpill"><span class="d" style="background:var(--ask)"></span>ask</span>
+      <span class="fpill"><span class="d" style="background:var(--blue)"></span>plan</span>
+      <span class="fpill"><span class="d" style="background:var(--violet)"></span>edit</span>
+      <span class="fpill on"><span class="d" style="background:var(--red)"></span>auto</span>
+      <span style="width:18px"></span>
+      <button class="btn" id="b1"></button>
+      <button class="btn btn--green" id="b2"></button>
+      <button class="btn btn--red" id="b3"></button>
+      <button class="btn btn--amber" id="b4"></button>
+      <button class="btn btn--ghost" id="b5"></button>
+    </div>
+  </div>
+
+  <!-- CARD EN TODOS LOS ESTADOS -->
+  <div class="ds-sec">
+    <div class="ds-h">CARD DE SESIÓN — TODOS LOS ESTADOS</div>
+    <div class="gal" id="cards"></div>
+  </div>
+
+  <!-- OJO -->
+  <div class="ds-sec">
+    <div class="ds-h">EL OJO — "TODO LO VE"</div>
+    <div class="eyebox">
+      <div class="eyecell"><span id="eyeN"></span><span class="lbl-mini">normal · pulso 3.2s</span></div>
+      <div class="eyecell" style="border-color:rgba(239,68,68,.3)"><span id="eyeA"></span><span class="lbl-mini" style="color:var(--red)">atención · pulso 1.1s</span></div>
+      <div class="eyecell"><div class="row" style="gap:10px"><span id="eyeW"></span><span class="wordmark">CONSOMNI</span></div><span class="lbl-mini">lockup + wordmark</span></div>
+    </div>
+  </div>
+</div>
+
+<div class="crt-vignette"></div>
+<div class="crt-scan"></div>
+
+<script src="chrome.js"></script>
+<script>
+  document.getElementById('dsEye').innerHTML = Chrome.eye(40);
+  document.getElementById('eyeN').innerHTML = Chrome.eye(56);
+  document.getElementById('eyeA').innerHTML = Chrome.eye(56,true);
+  document.getElementById('eyeW').innerHTML = Chrome.eye(30);
+
+  function sw(nm,hex,val){
+    return '<div class="sw"><div class="chip" style="background:'+val+'"></div><div class="meta"><span class="nm">'+nm+'</span><span class="hex">'+hex+'</span></div></div>';
+  }
+  document.getElementById('surfaces').innerHTML =
+    sw('bg','#0a0a0b','#0a0a0b')+sw('chrome','#0c0c0f','#0c0c0f')+sw('sidebar','#0d0d10','#0d0d10')+
+    sw('card','#111114','#111114')+sw('card active','#121216','#121216')+sw('input','#141418','#141418')+
+    sw('raised','#16161a','#16161a')+sw('border','rgba/.06','rgba(255,255,255,.06)');
+  document.getElementById('texts').innerHTML =
+    sw('text-1','#e6e6e6','#e6e6e6')+sw('text-2','#8a8a90','#8a8a90')+sw('text-3','#5a5a60','#5a5a60')+sw('text-4','#46464c','#46464c');
+  document.getElementById('states').innerHTML =
+    sw('working','#4ade80','#4ade80')+sw('auto · ojo','#ef4444','#ef4444')+sw('plan','#3b82f6','#3b82f6')+
+    sw('edit','#a78bfa','#a78bfa')+sw('ask','#94a3b8','#94a3b8')+sw('atención','#f59e0b','#f59e0b')+
+    sw('standby','#7689a0','#7689a0')+sw('error','#fb7185','#fb7185')+sw('idle','#6a6a70','#6a6a70')+sw('cerrada','#3a3a40','#3a3a40');
+
+  document.getElementById('badges').innerHTML =
+    '<span class="badge badge--ask">ask</span><span class="badge badge--plan">plan</span><span class="badge badge--edit">edit</span><span class="badge badge--auto">auto</span>';
+
+  function pill(dotCls, color, txt, extra){
+    return '<span class="row" style="gap:7px;font-size:11.5px;color:'+color+';'+(extra||'')+'"><span class="dot dot--'+dotCls+'"></span>'+txt+'</span>';
+  }
+  document.getElementById('statepills').innerHTML =
+    pill('green','var(--green)','working','box-shadow:none')+
+    pill('amber','var(--amber)','atención')+
+    pill('idle','var(--idle)','idle')+
+    pill('standby','var(--standby)','standby')+
+    pill('error','var(--error)','error')+
+    '<span class="row" style="gap:7px;font-size:11.5px;color:var(--closed)"><span class="dot" style="background:var(--closed)"></span>cerrada</span>';
+
+  document.getElementById('b1').innerHTML = Chrome.svg('ext',13,1.8)+' VSCode';
+  document.getElementById('b2').innerHTML = Chrome.svg('check',13,2.4)+' aprobar';
+  document.getElementById('b3').innerHTML = Chrome.svg('x',13,2.4)+' denegar';
+  document.getElementById('b4').innerHTML = Chrome.svg('clock',13,1.8)+' atención';
+  document.getElementById('b5').innerHTML = Chrome.svg('term',13,1.8)+' terminal';
+
+  var gallery = [
+    { name:'Tickets', mode:'auto', ctx:41, lvl:'green', tokens:'45k', model:'opus 4.8', state:'attn', status:{kind:'attn',text:'esperando permiso ·',em:'Bash(rm -rf)'} },
+    { name:'Build dashboard UI', mode:'auto', ctx:78, lvl:'amber', tokens:'256k', model:'opus 4.8', state:'working', status:{kind:'green',spinner:true,text:'trabajando…',em:'Edit Card'} },
+    { name:'Fix auth flow', mode:'edit', ctx:28, lvl:'green', tokens:'31k', model:'sonnet 4.6', state:'idle', status:{kind:'idle',text:'idle · 12m'} },
+    { name:'Eye logo / branding', mode:'ask', ctx:8, lvl:'dim', tokens:'9k', model:'sonnet 4.6', state:'standby', status:{kind:'standby',text:'standby · esperando dispatch'} },
+    { name:'Endpoint /users', mode:'auto', ctx:54, lvl:'green', tokens:'88k', model:'opus 4.8', state:'error', status:{kind:'error',text:'error: build failed',em:'exit 1'}, qaBtns:['ext','term','redo','x'] },
+    { name:'Migración DB', mode:'plan', ctx:91, lvl:'red', tokens:'198k', model:'opus 4.8', state:'attn', status:{kind:'attn',text:'esperando permiso ·',em:'aplicar migración'} }
+  ];
+  document.getElementById('cards').innerHTML = gallery.map(function(d){
+    return '<div class="cardwrap">'+Chrome.card(d)+'<span class="lbl-mini">'+d.state+(d.lvl!=='green'?' · ctx '+d.lvl:'')+'</span></div>';
+  }).join('');
+</script>
+</body>
+</html>

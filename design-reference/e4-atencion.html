@@ -1,0 +1,83 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consomni — Atención</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  .attn-banner{flex:none;display:flex;align-items:center;gap:11px;padding:9px 16px;background:linear-gradient(90deg, rgba(245,158,11,.14), rgba(245,158,11,.05) 60%, transparent);border-bottom:1px solid rgba(245,158,11,.25);position:relative;z-index:9;}
+  .attn-banner .bdot{width:8px;height:8px;border-radius:50%;background:var(--amber);box-shadow:0 0 8px rgba(245,158,11,.9);animation:dotPulse 1.2s ease-in-out infinite;flex:none;}
+  .attn-banner .txt{flex:1;font-size:12.5px;color:#f0c270;}
+  .attn-banner .txt b{color:var(--amber);font-weight:600;}
+  /* inline permission block on the focused card */
+  .perm{display:flex;flex-direction:column;gap:9px;padding:11px;margin-top:2px;border:1px solid rgba(245,158,11,.3);border-radius:9px;background:rgba(245,158,11,.05);}
+  .perm .q{font-size:11.5px;color:#f0c270;}
+  .perm .cmd{font-size:12px;color:#e6c98a;background:rgba(0,0,0,.35);border:1px solid rgba(245,158,11,.2);border-radius:6px;padding:7px 9px;display:flex;align-items:center;gap:7px;}
+  .perm .cmd .pfx{color:var(--amber);}
+  .perm .btns{display:flex;gap:7px;}
+  .perm .btns .btn{flex:1;height:30px;}
+  /* native toast */
+  .toast{position:absolute;top:16px;right:16px;width:312px;background:#16161b;border:1px solid rgba(245,158,11,.3);border-radius:12px;padding:13px 14px;z-index:35;box-shadow:0 18px 50px -16px rgba(0,0,0,.7),var(--glow-amber);display:flex;gap:11px;}
+  .toast .ico{flex:none;width:30px;height:30px;border-radius:8px;background:rgba(245,158,11,.13);display:flex;align-items:center;justify-content:center;color:var(--amber);}
+  .toast .ttl{font-size:12px;color:var(--text-1);font-weight:600;margin-bottom:2px;}
+  .toast .desc{font-size:11px;color:var(--text-2);line-height:1.45;}
+  .toast .toast-app{font-size:9.5px;letter-spacing:1px;color:var(--text-4);margin-bottom:5px;display:flex;align-items:center;gap:5px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <span data-chrome="topbar"></span>
+
+  <div class="attn-banner">
+    <span class="bdot"></span>
+    <span class="txt"><b>2 sesiones</b> necesitan tu atención</span>
+    <button class="btn btn--amber btn--sm" id="goFirst"></button>
+  </div>
+
+  <div class="main-row">
+    <span data-chrome="sidebar"></span>
+    <span data-chrome="board"></span>
+  </div>
+  <span data-chrome="statusbar"></span>
+
+  <!-- native toast -->
+  <div class="toast">
+    <div class="ico" id="toastIco"></div>
+    <div style="flex:1">
+      <div class="toast-app" id="toastApp"></div>
+      <div class="ttl">Tickets · esperando permiso</div>
+      <div class="desc">Sar4 — la sesión quiere ejecutar <span style="color:#e6c98a">Bash(rm -rf)</span>. Aprobá o denegá.</div>
+    </div>
+  </div>
+
+  <span data-chrome="crt"></span>
+</div>
+
+<script src="chrome.js"></script>
+<script>
+  Chrome.mount({ alert: true });
+  document.getElementById('goFirst').innerHTML = Chrome.svg('chevR',12,2.4) + ' ir a la primera';
+  document.getElementById('toastIco').innerHTML = Chrome.svg('clock',16,1.9);
+  document.getElementById('toastApp').innerHTML = Chrome.eye(13,true) + ' CONSOMNI';
+
+  // promote + expand the focused attention card with inline permission
+  var attn = document.querySelector('.card--attn');
+  if (attn){
+    var statusEl = attn.querySelector('.card-status');
+    var perm = document.createElement('div');
+    perm.className = 'perm';
+    perm.innerHTML =
+      '<div class="q">esperando permiso para ejecutar:</div>'+
+      '<div class="cmd"><span class="pfx">$</span> rm -rf ./dist ./.cache</div>'+
+      '<div class="btns">'+
+        '<button class="btn btn--green">'+Chrome.svg('check',13,2.4)+' aprobar <kbd class="kbd" style="background:rgba(74,222,128,.15);border-color:rgba(74,222,128,.3);color:#4ade80">a</kbd></button>'+
+        '<button class="btn btn--red">'+Chrome.svg('x',13,2.4)+' denegar <kbd class="kbd" style="background:rgba(239,68,68,.12);border-color:rgba(239,68,68,.3);color:#f87171">d</kbd></button>'+
+      '</div>';
+    if (statusEl) statusEl.style.display='none';
+    attn.appendChild(perm);
+    attn.style.borderColor='rgba(245,158,11,.6)';
+  }
+</script>
+</body>
+</html>

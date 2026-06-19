@@ -1,0 +1,206 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consomni — Panel de detalle</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  /* ── panel de detalle (page-specific) ── */
+  .scrim{position:absolute;inset:0;background:rgba(6,6,8,.55);backdrop-filter:blur(1.5px);z-index:20;}
+  .panel{position:absolute;top:54px;bottom:27px;right:0;width:452px;background:#0e0e12;border-left:1px solid var(--border);z-index:21;display:flex;flex-direction:column;box-shadow:-24px 0 60px -20px rgba(0,0,0,.7);}
+  .pn-scroll{flex:1;overflow-y:auto;min-height:0;}
+  .pn-sec{padding:15px 18px;border-bottom:1px solid var(--border-soft);}
+  .pn-lbl{font-size:10px;letter-spacing:1.5px;color:var(--text-3);margin-bottom:11px;}
+  .meta-grid{display:grid;grid-template-columns:1fr 1fr;gap:1px;background:var(--border-soft);border:1px solid var(--border-soft);border-radius:8px;overflow:hidden;}
+  .meta-cell{background:#0e0e12;padding:9px 11px;display:flex;flex-direction:column;gap:3px;}
+  .meta-cell .k{font-size:10px;color:var(--text-3);}
+  .meta-cell .v{font-size:12.5px;color:#cfcfd4;}
+  .sum-row{display:flex;gap:10px;padding:7px 0;font-size:12px;}
+  .sum-row+.sum-row{border-top:1px solid rgba(255,255,255,.035);}
+  .sum-k{flex:none;width:62px;color:var(--text-3);font-size:11px;padding-top:1px;}
+  .sum-v{flex:1;color:#c8c8ce;line-height:1.5;}
+  .feed{display:flex;flex-direction:column;gap:2px;font-size:11.5px;}
+  .feed-row{display:flex;align-items:baseline;gap:9px;padding:4px 0;animation:feedIn .3s ease;}
+  .feed-row .t{flex:none;color:var(--text-4);font-size:10px;width:42px;}
+  .feed-row .tool{flex:none;width:42px;font-weight:600;}
+  .feed-row .arg{flex:1;color:var(--text-2);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+  .file-row{display:flex;align-items:center;gap:9px;padding:5px 0;font-size:11.5px;color:#bcbcc2;}
+  .file-row .add{color:var(--green);font-size:10px;}
+  .file-row .del{color:var(--error);font-size:10px;}
+  .tree-row{display:flex;align-items:center;gap:8px;font-size:11.5px;color:#bcbcc2;padding:3px 0;}
+  .tree-row .br{color:var(--text-faint);}
+  .qreply{display:flex;align-items:center;gap:9px;padding:10px 12px;border:1px solid var(--border);border-radius:9px;background:#121216;}
+  .qreply input{flex:1;background:transparent;border:none;outline:none;color:var(--text-1);font-family:var(--mono);font-size:12px;}
+  .qreply input::placeholder{color:#56565c;}
+  .actionbar{flex:none;border-top:1px solid var(--border);padding:11px 14px;background:#0c0c0f;display:flex;flex-direction:column;gap:9px;}
+  .act-grid{display:flex;flex-wrap:wrap;gap:6px;}
+  .act{display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 10px;border-radius:7px;font-size:11px;background:var(--surface-input);border:1px solid rgba(255,255,255,.07);color:#a8a8ae;transition:.14s;}
+  .act:hover{border-color:var(--border-hover);color:var(--text-1);}
+  .caret{display:inline-block;width:7px;height:14px;background:var(--green);margin-left:1px;animation:caret 1.1s steps(1) infinite;vertical-align:-2px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <span data-chrome="topbar"></span>
+  <div class="main-row">
+    <span data-chrome="sidebar"></span>
+    <span data-chrome="board"></span>
+  </div>
+  <span data-chrome="statusbar"></span>
+
+  <!-- dim + panel -->
+  <div class="scrim"></div>
+  <aside class="panel">
+    <!-- header -->
+    <div class="pn-sec" style="padding-bottom:16px;">
+      <div class="row" style="gap:9px;margin-bottom:13px;">
+        <span class="dot dot--green pulse" style="box-shadow:0 0 6px rgba(74,222,128,.6)"></span>
+        <span style="flex:1;font-size:15px;font-weight:600;color:var(--text-1)">Build dashboard UI</span>
+        <span class="badge badge--auto">auto</span>
+        <button class="iconbtn" style="width:26px;height:26px" id="closeBtn"></button>
+      </div>
+      <div class="row" style="gap:10px;font-size:11px;color:var(--text-2)">
+        <span class="ctx-lg" style="flex:1"><span class="ctx-fill ctx-fill--amber" style="width:78%"></span></span>
+        <span class="ctx-pct--amber" style="font-weight:600">78.0%</span>
+      </div>
+      <div class="row" style="gap:8px;margin-top:9px;font-size:11px;color:var(--text-3)">
+        <span class="row" style="gap:5px;color:var(--green)" id="branchSlot"></span>
+        <span class="sep">·</span>
+        <span style="overflow:hidden;text-overflow:ellipsis;white-space:nowrap">~/Desktop/IronDevz/Consomni</span>
+      </div>
+    </div>
+
+    <div class="pn-scroll">
+      <!-- RESUMEN -->
+      <div class="pn-sec">
+        <div class="pn-lbl">RESUMEN</div>
+        <div class="sum-row"><span class="sum-k">pediste</span><span class="sum-v">Armar el board kanban con cards de sesión en todos los estados, top bar y status bar.</span></div>
+        <div class="sum-row"><span class="sum-k">claude</span><span class="sum-v">Construyó el shell, los tokens y el componente card. Ahora itera sobre el glow ámbar de “atención”.</span></div>
+        <div class="sum-row"><span class="sum-k">acciones</span><span class="sum-v"><b style="color:#cfcfd4">14</b> edits · <b style="color:#cfcfd4">6</b> bash · <b style="color:#cfcfd4">9</b> reads</span></div>
+        <div class="sum-row"><span class="sum-k">archivos</span><span class="sum-v">4 modificados, 1 nuevo</span></div>
+        <div class="sum-row"><span class="sum-k">estado</span><span class="sum-v"><span style="color:var(--green)">working</span> — editando <span style="color:#cfcfd4">Card.dc.html</span><span class="caret"></span></span></div>
+      </div>
+
+      <!-- CONTEXTO -->
+      <div class="pn-sec">
+        <div class="pn-lbl">CONTEXTO</div>
+        <div class="row" style="gap:11px">
+          <span class="ctx-lg" style="flex:1"><span class="ctx-fill ctx-fill--amber" style="width:78%"></span></span>
+          <span style="font-size:13px;color:var(--amber-2);font-weight:600">78.0%</span>
+        </div>
+        <div class="row" style="justify-content:space-between;margin-top:7px;font-size:10.5px;color:var(--text-3)">
+          <span>156.0k / 200k tokens</span>
+          <span style="color:var(--amber)">⚠ acercándose al límite</span>
+        </div>
+      </div>
+
+      <!-- METADATOS -->
+      <div class="pn-sec">
+        <div class="pn-lbl">METADATOS</div>
+        <div class="meta-grid">
+          <div class="meta-cell"><span class="k">modelo</span><span class="v">opus 4.8</span></div>
+          <div class="meta-cell"><span class="k">esfuerzo</span><span class="v">high</span></div>
+          <div class="meta-cell"><span class="k">entrada</span><span class="v">142.8k</span></div>
+          <div class="meta-cell"><span class="k">salida (Σ)</span><span class="v">113.2k</span></div>
+          <div class="meta-cell"><span class="k">cache</span><span class="v">1.2M hit</span></div>
+          <div class="meta-cell"><span class="k">ventana</span><span class="v">200k</span></div>
+          <div class="meta-cell"><span class="k">actividad</span><span class="v">hace 2s</span></div>
+          <div class="meta-cell"><span class="k">session id</span><span class="v" style="color:var(--text-2)">a3f9…e1c</span></div>
+        </div>
+      </div>
+
+      <!-- TOKENS / COSTO -->
+      <div class="pn-sec">
+        <div class="row" style="justify-content:space-between;margin-bottom:11px">
+          <span class="pn-lbl" style="margin:0">TOKENS EN EL TIEMPO</span>
+          <span style="font-size:11px;color:var(--text-2)">costo est. <b style="color:#cfcfd4">$4.82</b></span>
+        </div>
+        <svg width="100%" height="46" viewBox="0 0 400 46" preserveAspectRatio="none" style="display:block">
+          <defs><linearGradient id="sg" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="rgba(74,222,128,.25)"/><stop offset="1" stop-color="rgba(74,222,128,0)"/></linearGradient></defs>
+          <path d="M0,40 L30,38 L60,34 L90,35 L120,28 L150,30 L180,22 L210,24 L240,16 L270,18 L300,12 L330,14 L360,7 L400,5 L400,46 L0,46 Z" fill="url(#sg)"/>
+          <polyline points="0,40 30,38 60,34 90,35 120,28 150,30 180,22 210,24 240,16 270,18 300,12 330,14 360,7 400,5" fill="none" stroke="#4ade80" stroke-width="1.5" stroke-linejoin="round"/>
+          <circle cx="400" cy="5" r="2.4" fill="#4ade80"/>
+        </svg>
+      </div>
+
+      <!-- ARCHIVOS TOCADOS -->
+      <div class="pn-sec">
+        <div class="pn-lbl">ARCHIVOS TOCADOS</div>
+        <div class="file-row" id="f1"><span style="color:var(--text-3)"></span><span style="flex:1">Card.dc.html</span><span class="add">+42</span><span class="del">−8</span></div>
+        <div class="file-row" id="f2"><span style="color:var(--text-3)"></span><span style="flex:1">tokens.css</span><span class="add">+18</span></div>
+        <div class="file-row" id="f3"><span style="color:var(--text-3)"></span><span style="flex:1">Board.dc.html</span><span class="add">+7</span><span class="del">−3</span></div>
+        <div class="file-row" id="f4"><span style="color:var(--green)"></span><span style="flex:1">Sidebar.dc.html</span><span class="add">+96</span></div>
+      </div>
+
+      <!-- SUBAGENTES -->
+      <div class="pn-sec">
+        <div class="pn-lbl">SUBAGENTES (3)</div>
+        <div class="tree-row"><span class="br">├─</span><span class="dot dot--green pulse" style="width:6px;height:6px"></span><span style="flex:1">explorar tokens existentes</span><span style="color:var(--text-3);font-size:10px">running</span></div>
+        <div class="tree-row"><span class="br">├─</span><span class="dot" style="width:6px;height:6px;background:var(--idle-dot)"></span><span style="flex:1">recolectar componentes</span><span style="color:var(--text-3);font-size:10px">done</span></div>
+        <div class="tree-row"><span class="br">└─</span><span class="dot dot--green pulse" style="width:6px;height:6px"></span><span style="flex:1">validar accesibilidad</span><span style="color:var(--text-3);font-size:10px">running</span></div>
+      </div>
+
+      <!-- FEED EN VIVO -->
+      <div class="pn-sec">
+        <div class="row" style="justify-content:space-between;margin-bottom:11px">
+          <span class="pn-lbl" style="margin:0">ACTIVIDAD EN VIVO</span>
+          <span class="row" style="gap:5px;font-size:10px;color:var(--green)"><span class="dot dot--green pulse" style="width:5px;height:5px;box-shadow:none"></span>live</span>
+        </div>
+        <div class="feed" id="feed"></div>
+      </div>
+    </div>
+
+    <!-- ACTION BAR -->
+    <div class="actionbar">
+      <div class="qreply">
+        <span style="color:var(--green)" id="replyIcon"></span>
+        <input placeholder="responder a esta sesión… (r)">
+        <kbd class="kbd">⌘↵</kbd>
+      </div>
+      <div class="act-grid" id="acts"></div>
+    </div>
+  </aside>
+
+  <span data-chrome="crt"></span>
+</div>
+
+<script src="chrome.js"></script>
+<script>
+  Chrome.mount({ alert: true });
+  document.getElementById('closeBtn').innerHTML = Chrome.svg('x', 14, 2);
+  document.getElementById('branchSlot').innerHTML = Chrome.svg('branch', 12, 1.7) + ' feat/dashboard';
+  document.getElementById('replyIcon').innerHTML = Chrome.svg('reply', 14, 1.7);
+  ['f1','f2','f3','f4'].forEach(function(id,i){
+    var c=['edit','edit','edit','file'][i];
+    document.getElementById(id).firstElementChild.innerHTML = Chrome.svg(c==='file'?'file':'diff',12,1.7);
+  });
+
+  // action bar
+  var actions = [
+    ['ext','VSCode'],['term','terminal'],['copy','copiar path'],['branch','copiar branch'],
+    ['transcript','transcript'],['diff','ver diff'],['pin','pin'],['pause','pausar'],
+    ['skull','matar'],['redo','re-dispatch'],['archive','archivar'],['pr','abrir PR']
+  ];
+  document.getElementById('acts').innerHTML = actions.map(function(a){
+    return '<button class="act">'+Chrome.svg(a[0],12,1.8)+a[1]+'</button>';
+  }).join('');
+
+  // live feed
+  var feedData = [
+    ['12:04:42','Edit','Card.dc.html · línea 88','var(--violet)'],
+    ['12:04:40','Read','tokens.css','var(--blue-2)'],
+    ['12:04:37','Bash','npm run typecheck','var(--green)'],
+    ['12:04:33','Edit','Board.dc.html · línea 12','var(--violet)'],
+    ['12:04:29','Grep','breatheA · 3 matches','var(--amber-2)'],
+    ['12:04:25','Read','Sidebar.dc.html','var(--blue-2)'],
+    ['12:04:21','Write','Sidebar.dc.html','var(--green)']
+  ];
+  document.getElementById('feed').innerHTML = feedData.map(function(f,i){
+    return '<div class="feed-row" style="animation-delay:'+(i*0.05)+'s"><span class="t">'+f[0]+'</span>'+
+      '<span class="tool" style="color:'+f[3]+'">'+f[1]+'</span>'+
+      '<span class="arg">'+f[2]+'</span></div>';
+  }).join('');
+</script>
+</body>
+</html>

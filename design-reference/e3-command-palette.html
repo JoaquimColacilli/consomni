@@ -1,0 +1,93 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>Consomni — Command palette</title>
+<link rel="stylesheet" href="tokens.css">
+<style>
+  .cmd-scrim{position:absolute;inset:0;background:rgba(6,6,8,.6);backdrop-filter:blur(3px);z-index:30;display:flex;justify-content:center;align-items:flex-start;padding-top:88px;}
+  .palette{width:640px;max-width:calc(100% - 48px);background:#101014;border:1px solid rgba(255,255,255,.1);border-radius:14px;box-shadow:0 32px 80px -20px rgba(0,0,0,.8),0 0 0 1px rgba(239,68,68,.06);overflow:hidden;display:flex;flex-direction:column;max-height:520px;}
+  .pal-input{display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--border);}
+  .pal-input .q{flex:1;font-size:16px;color:var(--text-1);}
+  .pal-input .q .typed{color:var(--text-1);}
+  .pal-input .q .cur{display:inline-block;width:8px;height:18px;background:var(--green);vertical-align:-3px;margin-left:1px;animation:caret 1.1s steps(1) infinite;}
+  .pal-body{flex:1;overflow-y:auto;padding:8px 0;min-height:0;}
+  .pal-group{font-size:10px;letter-spacing:1.5px;color:var(--text-3);padding:11px 18px 6px;}
+  .pal-row{display:flex;align-items:center;gap:12px;padding:9px 18px;cursor:pointer;}
+  .pal-row.sel{background:rgba(255,255,255,.045);box-shadow:inset 2px 0 0 var(--red);}
+  .pal-row .ic{flex:none;width:18px;display:flex;justify-content:center;color:var(--text-2);}
+  .pal-row.sel .ic{color:var(--text-1);}
+  .pal-row .tx{flex:1;font-size:13px;color:#cfcfd4;}
+  .pal-row .tx .hl{color:var(--green);}
+  .pal-row .sub{font-size:11px;color:var(--text-3);}
+  .pal-row .sc{display:flex;gap:4px;flex:none;}
+  .pal-foot{flex:none;display:flex;align-items:center;gap:14px;padding:9px 18px;border-top:1px solid var(--border);font-size:10.5px;color:var(--text-3);background:#0d0d11;}
+  .pal-foot .it{display:inline-flex;align-items:center;gap:5px;}
+</style>
+</head>
+<body>
+<div class="app">
+  <span data-chrome="topbar"></span>
+  <div class="main-row">
+    <span data-chrome="sidebar"></span>
+    <span data-chrome="board"></span>
+  </div>
+  <span data-chrome="statusbar"></span>
+
+  <div class="cmd-scrim">
+    <div class="palette">
+      <div class="pal-input">
+        <span style="color:var(--text-2)" id="palSearch"></span>
+        <span class="q"><span class="typed">disp</span><span class="cur"></span></span>
+        <kbd class="kbd" style="font-size:10px">esc</kbd>
+      </div>
+      <div class="pal-body" id="palBody"></div>
+      <div class="pal-foot">
+        <span class="it"><kbd class="kbd">↑</kbd><kbd class="kbd">↓</kbd> navegar</span>
+        <span class="it"><kbd class="kbd">↵</kbd> ejecutar</span>
+        <span class="it"><kbd class="kbd">⌘↵</kbd> dispatch</span>
+        <span style="margin-left:auto;color:var(--text-4)">consomni · fuzzy search</span>
+      </div>
+    </div>
+  </div>
+
+  <span data-chrome="crt"></span>
+</div>
+
+<script src="chrome.js"></script>
+<script>
+  Chrome.mount({ alert: true });
+  document.getElementById('palSearch').innerHTML = Chrome.svg('search', 17, 2);
+
+  function hl(text){ return text.replace(/(disp)/i,'<span class="hl">$1</span>'); }
+  function row(ic, tx, sub, keys, sel){
+    return '<div class="pal-row'+(sel?' sel':'')+'"><span class="ic">'+Chrome.svg(ic,15,1.8)+'</span>'+
+      '<span class="tx">'+hl(tx)+(sub?' <span class="sub">'+sub+'</span>':'')+'</span>'+
+      '<span class="sc">'+(keys||[]).map(function(k){return '<kbd class="kbd">'+k+'</kbd>';}).join('')+'</span></div>';
+  }
+  var html = '';
+  html += '<div class="pal-group">DISPATCH</div>';
+  html += row('plus','Dispatch nueva sesión…','lanzar con prompt + modo + modelo',['⌘','↵'], true);
+  html += row('grid','Dispatch en paralelo (x3)','mismo prompt, 3 worktrees',[]);
+
+  html += '<div class="pal-group">SESIONES</div>';
+  html += row('target','Build dashboard UI','Consomni · working · 78%',['↵']);
+  html += row('clock','Tickets','Sar4 · atención · esperando permiso',[]);
+  html += row('warn','Endpoint /users','NI · error · build failed',[]);
+
+  html += '<div class="pal-group">PROYECTOS</div>';
+  html += row('star','Saltar a Sar4','15 sesiones',['⌘','1']);
+  html += row('repo','Saltar a NI','4 sesiones',['⌘','3']);
+
+  html += '<div class="pal-group">ACCIONES</div>';
+  html += row('ext','Abrir sesión en VSCode','',['o']);
+  html += row('term','Abrir terminal','',['t']);
+  html += row('sliders','Cambiar orden: actividad','',['s']);
+  html += row('bell','Mutear notificaciones','',['m']);
+  html += row('gear','Abrir settings','',[]);
+
+  document.getElementById('palBody').innerHTML = html;
+</script>
+</body>
+</html>
