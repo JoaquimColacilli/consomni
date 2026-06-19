@@ -222,8 +222,9 @@
     lastView = view;
     if (state.split) return buildSplit(view);
     var mf = activeModes().length ? state.modeFilter : null;
+    var ver = (state.snapshot && state.snapshot.appVersion) ? 'v' + state.snapshot.appVersion : undefined;
     var o = view
-      ? { counts: view.counts, tree: view.tree, status: view.status, modeFilter: mf, density: state.density, sortLabel: curSort().label, searchValue: (state.searchActive || state.search) ? state.search : '' }
+      ? { counts: view.counts, tree: view.tree, status: view.status, modeFilter: mf, density: state.density, sortLabel: curSort().label, searchValue: (state.searchActive || state.search) ? state.search : '', version: ver }
       : { alert: true };
     var sidebar = state.collapsed ? C.sidebar(Object.assign({}, o, { collapsed: true })) : C.sidebar(o);
     var cols = view ? view.cols : undefined;
@@ -264,6 +265,17 @@
     t.innerHTML = '<span class="tdot"></span><span>' + esc(msg) + '</span>';
     w.appendChild(t);
     setTimeout(function () { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(function () { t.remove(); }, 320); }, 2600);
+  }
+  // toast persistente y clickeable (p.ej. "actualización disponible")
+  function actionToast(msg, url) {
+    var w = ensureToastWrap();
+    var t = document.createElement('div');
+    t.className = 'cns-toast update';
+    t.style.cursor = 'pointer';
+    t.innerHTML = '<span class="tdot"></span><span>' + esc(msg) + '</span><span class="tx-go">' + C.svg('ext', 12, 2) + '</span>';
+    t.addEventListener('click', function () { if (url) openExternalUrl(url); t.remove(); });
+    w.appendChild(t);
+    setTimeout(function () { if (t.parentNode) { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(function () { t.remove(); }, 320); } }, 12000);
   }
 
   /* ── sesiones helpers ── */
@@ -688,6 +700,12 @@
           '<button class="btn btn--sm ' + (hk ? 'btn--red' : 'btn--green') + '" id="setHooksBtn" data-hk="' + (hk ? '1' : '0') + '">' + (hk ? 'desinstalar' : 'instalar') + ' hooks</button></div>' +
         '<div style="font-size:10px;color:var(--text-4);margin-top:4px">backup automático en ~/.consomni/backups · merge no-destructivo · cero API de Anthropic</div>' +
       '</div>' +
+      '<div class="set-sec"><div class="lbl">ACTUALIZACIONES</div>' +
+        '<div class="set-row"><span class="k">buscar al iniciar</span>' + seg2('checkUpdates', cfg.checkUpdates !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
+        '<div class="set-row"><span class="k" id="setUpdMsg">comprobar versión más reciente</span>' +
+          '<button class="btn btn--sm" id="setUpdBtn">' + C.svg('redo', 12, 2) + ' buscar</button></div>' +
+        '<div style="font-size:10px;color:var(--text-4);margin-top:4px">chequeo de sólo-lectura al repo del proyecto en GitHub · sin telemetría · es la única salida de red fuera de 127.0.0.1</div>' +
+      '</div>' +
       '</div></div>';
     setOverlay(html);
     wireSettings(cfg);
@@ -705,7 +723,7 @@
       el.addEventListener('click', function () {
         var key = el.getAttribute('data-set'), val = el.getAttribute('data-val');
         var patch = {};
-        if (key === 'sounds') patch.sounds = (val === 'on'); else patch[key] = val;
+        if (key === 'sounds' || key === 'checkUpdates') patch[key] = (val === 'on'); else patch[key] = val;
         saveSetting(patch);
       });
     });
@@ -722,6 +740,18 @@
         if (!d.length) { toast('tiene que quedar al menos un directorio', 'warn'); return; }
         saveSetting({ watchedDirs: d });
       });
+    });
+    var ub = card.querySelector('#setUpdBtn'); if (ub && api.checkUpdate) ub.addEventListener('click', function () {
+      var msg = card.querySelector('#setUpdMsg'); ub.disabled = true; if (msg) msg.textContent = 'buscando…';
+      api.checkUpdate().then(function (u) {
+        ub.disabled = false;
+        if (!msg) return;
+        if (!u) { msg.textContent = 'no se pudo comprobar'; return; }
+        if (u.error) { msg.textContent = 'sin conexión / sin releases (v' + u.current + ')'; }
+        else if (u.hasUpdate) { msg.innerHTML = 'v' + esc(u.latest) + ' disponible · <a data-href="' + esc(u.url) + '" style="color:var(--green);cursor:pointer">abrir releases</a>'; }
+        else if (u.latest) { msg.textContent = 'estás al día (v' + u.current + ')'; }
+        else { msg.textContent = 'sin releases publicadas aún (v' + u.current + ')'; }
+      }).catch(function () { ub.disabled = false; if (msg) msg.textContent = 'error al comprobar'; });
     });
     var hb = card.querySelector('#setHooksBtn'); if (hb) hb.addEventListener('click', function () {
       var wasInstalled = hb.getAttribute('data-hk') === '1';
@@ -746,9 +776,15 @@
   }
 
   /* ════════ EVENT DELEGATION (click) ════════ */
+  function openExternalUrl(url) { if (api && api.action && url) api.action('openExternal', { url: url }).catch(function () {}); }
+
   document.addEventListener('click', function (e) {
     var t = e.target;
     closeSortMenu();
+
+    // links externos (autor / github / releases) → navegador del SO
+    var href = t.closest && t.closest('[data-href]');
+    if (href) { e.preventDefault(); e.stopPropagation(); openExternalUrl(href.getAttribute('data-href')); return; }
 
     // sort menu options
     var opt = t.closest && t.closest('.sort-opt'); if (opt) { setSort(opt.getAttribute('data-sort')); return; }
@@ -769,12 +805,15 @@
       var ACTS = ['ext', 'term', 'folder', 'copy', 'x', 'redo', 'branch', 'transcript', 'diff', 'pin', 'pause', 'skull', 'archive', 'pr', 'approve', 'deny', 'reply', 'dispatch', 'copyId'];
       if (ACTS.indexOf(act) > -1) {
         var sidA = actEl.getAttribute('data-sid');
+        // los qa-btn de la card no llevan data-sid: lo tomamos de la card contenedora
+        if (!sidA && actEl.closest) { var pc = actEl.closest('.card[data-sid]'); if (pc) sidA = pc.getAttribute('data-sid'); }
         e.stopPropagation();
         dispatchAction(act, sidA);
         return;
       }
     }
     // topbar controls
+    if (t.closest && t.closest('.board-add')) { openPalette(); return; }
     if (t.closest && t.closest('.cmdk')) { openPalette(); return; }
     if (t.closest && t.closest('.search')) { activateSearch(); return; }
     var seg = t.closest && t.closest('.seg span[data-density]'); if (seg) { setDensity(seg.getAttribute('data-density')); return; }
@@ -893,6 +932,7 @@
           '<button class="btn btn--ghost" id="onbSkip">ahora no</button>' +
         '</div>' +
         '<div class="onb-foot">backup automático · merge no-destructivo · cero API de Anthropic</div>' +
+        '<a class="onb-author" data-href="https://github.com/JoaquimColacilli" title="github.com/JoaquimColacilli">' + C.gh(12) + '<span>by <b>Joaquim Colacilli</b></span></a>' +
       '</div></div>');
     startLogoBlink();
     document.getElementById('onbSkip').addEventListener('click', function () { setOnboarded(); closeOnboarding(); });
@@ -939,6 +979,9 @@
     api.getSnapshot().then(setSnapshot).catch(function () { render(); });
     api.onSnapshot(setSnapshot);
     if (api.onJump) api.onJump(function (sid) { state.split = false; state.activeProject = 'all'; state.focusSid = sid; render(); openDetail(sid); });
+    if (api.onUpdate) api.onUpdate(function (u) {
+      if (u && u.hasUpdate) { state.update = u; actionToast('⬆ Consomni v' + u.latest + ' disponible · abrir releases', u.url); }
+    });
     maybeOnboard();
   } else {
     render();

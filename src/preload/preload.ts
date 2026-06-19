@@ -48,6 +48,14 @@ const api = {
   getHooksStatus: (): Promise<Snapshot> => ipcRenderer.invoke('consomni:getHooksStatus'),
   installHooks: (): Promise<Snapshot> => ipcRenderer.invoke('consomni:installHooks'),
   uninstallHooks: (): Promise<Snapshot> => ipcRenderer.invoke('consomni:uninstallHooks'),
+
+  /* ── actualizaciones (chequeo al repo del proyecto, opt-out) ── */
+  checkUpdate: (): Promise<Snapshot> => ipcRenderer.invoke('consomni:checkUpdate'),
+  onUpdate: (cb: (info: Snapshot) => void): (() => void) => {
+    const listener = (_e: unknown, info: Snapshot): void => cb(info);
+    ipcRenderer.on('consomni:update', listener);
+    return () => ipcRenderer.removeListener('consomni:update', listener);
+  },
 };
 
 contextBridge.exposeInMainWorld('consomni', api);

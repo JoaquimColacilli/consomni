@@ -60,6 +60,13 @@
   }
   function icon(name, sz, sw) { return svg(name, sz, sw); }
 
+  /* ── marca de GitHub (octocat, relleno) ── */
+  function gh(sz) {
+    sz = sz || 14;
+    return '<svg width="' + sz + '" height="' + sz + '" viewBox="0 0 24 24" fill="currentColor" aria-hidden="true">' +
+      '<path d="M12 .5C5.37.5 0 5.87 0 12.5c0 5.3 3.44 9.8 8.21 11.39.6.11.82-.26.82-.58 0-.29-.01-1.04-.02-2.04-3.34.73-4.04-1.61-4.04-1.61-.55-1.39-1.34-1.76-1.34-1.76-1.09-.75.08-.73.08-.73 1.21.09 1.84 1.24 1.84 1.24 1.07 1.84 2.81 1.31 3.5 1 .11-.78.42-1.31.76-1.61-2.67-.3-5.47-1.34-5.47-5.96 0-1.32.47-2.39 1.24-3.23-.12-.3-.54-1.52.12-3.18 0 0 1.01-.32 3.3 1.23.96-.27 1.98-.4 3-.4 1.02 0 2.04.14 3 .4 2.29-1.55 3.3-1.23 3.3-1.23.66 1.66.24 2.88.12 3.18.77.84 1.24 1.91 1.24 3.23 0 4.63-2.81 5.65-5.49 5.95.43.37.81 1.1.81 2.22 0 1.61-.01 2.9-.01 3.29 0 .32.22.7.83.58A12 12 0 0 0 24 12.5C24 5.87 18.63.5 12 .5z"/></svg>';
+  }
+
   /* ── ojo (símbolo "todo lo ve") ── */
   function eye(w, alert) {
     w = w || 27; const h = Math.round(w * 19 / 27);
@@ -242,6 +249,7 @@
         '<div class="sb-head" style="justify-content:center;padding:15px 0 11px;"><button class="sb-add" style="padding:5px;">' + svg('plus', 13, 2.4) + '</button></div>' +
         '<div class="sb-scroll" style="gap:6px;">' + items + '</div>' +
         '<div class="sb-foot" style="flex-direction:column;gap:7px;padding:10px 0;">' +
+          '<a class="sbtn" data-href="https://github.com/JoaquimColacilli" title="by Joaquim Colacilli · github.com/JoaquimColacilli">' + gh(15) + '</a>' +
           '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
           '<button class="sbtn" data-act="theme">' + svg('moon', 14, 1.7) + '</button></div>' +
       '</aside>';
@@ -277,10 +285,12 @@
       '<div class="sb-head"><span class="lbl">proyectos</span>' +
         '<button class="sb-add">' + svg('plus', 11, 2.4) + ' agregar</button></div>' +
       '<div class="sb-scroll">' + body + '</div>' +
+      '<a class="sb-author" data-href="https://github.com/JoaquimColacilli" title="github.com/JoaquimColacilli">' +
+        gh(13) + '<span>by <b>Joaquim Colacilli</b></span></a>' +
       '<div class="sb-foot">' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
         '<button class="sbtn" data-act="theme">' + svg('moon', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v0.4.2') + '</span></div>' +
+        '<span class="ver">' + esc(o.version || 'v0.5.0') + '</span></div>' +
     '</aside>';
   }
 
@@ -363,7 +373,7 @@
   function board(cols) {
     cols = cols || [DATA.sar4, DATA.consomni, DATA.ni];
     return '<main class="board">' + cols.map(column).join('') +
-      '<button class="iconbtn" style="width:54px;align-self:stretch;border-radius:10px;border:1px dashed var(--border);background:transparent;color:var(--text-4);align-items:flex-start;padding-top:13px;">' + svg('plus', 16, 2) + '</button>' +
+      '<button class="iconbtn board-add" title="nueva sesión (⌘K)" style="width:54px;height:54px;align-self:flex-start;border-radius:10px;border:1px dashed var(--border);background:transparent;color:var(--text-4);">' + svg('plus', 16, 2) + '</button>' +
     '</main>';
   }
 
@@ -381,7 +391,7 @@
     });
   }
 
-  g.Chrome = { icon: icon, svg: svg, eye: eye, card: card, column: column, qa: qa,
+  g.Chrome = { icon: icon, svg: svg, gh: gh, eye: eye, card: card, column: column, qa: qa,
     topbar: topbar, sidebar: sidebar, statusbar: statusbar, board: board, crt: crt,
     mount: mount, esc: esc, DATA: DATA, I: I };
 })(window);

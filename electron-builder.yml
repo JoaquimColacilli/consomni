@@ -19,11 +19,12 @@ asarUnpack:
 
 # La app es 100% offline y read-only sobre ~/.claude. No firma de código por ahora.
 win:
-  icon: build/icon.png
-  # No firmamos ni embebemos icono vía rcedit (requiere winCodeSign/Dev-Mode en la
-  # máquina de build). El icono igual va en el instalador NSIS, los accesos directos
-  # y la ventana de la app (BrowserWindow.icon). El .exe crudo muestra el icono default.
-  signAndEditExecutable: false
+  icon: build/icon.ico
+  # Embebemos el icono en el .exe vía rcedit (signAndEditExecutable: true). NO firmamos
+  # (sin cert → el paso de firma se saltea solo). El winCodeSign que electron-builder
+  # necesita se pre-extrae sin los symlinks darwin (ver build/prep-wincodesign.ps1),
+  # evitando el fallo de privilegio en máquinas sin Developer Mode/admin.
+  signAndEditExecutable: true
   target:
     - target: portable
     - target: nsis

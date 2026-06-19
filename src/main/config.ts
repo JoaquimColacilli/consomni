@@ -18,6 +18,7 @@ export interface AppConfig {
   claudeProjectsDir: string;   // raíz de transcripts (read-only)
   watchedDirs: string[];       // dirs vigilados (incluye claudeProjectsDir)
   approveBlocking: boolean;    // interceptación bloqueante de permisos (opt-in)
+  checkUpdates: boolean;       // chequeo de updates al iniciar (sólo al repo del proyecto, opt-out)
 }
 
 export const HOME = os.homedir();
@@ -40,6 +41,7 @@ const DEFAULTS: AppConfig = {
   claudeProjectsDir: CLAUDE_PROJECTS_DIR,
   watchedDirs: [CLAUDE_PROJECTS_DIR],
   approveBlocking: false,
+  checkUpdates: true,
 };
 
 function ensureDir(p: string): void {

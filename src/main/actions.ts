@@ -128,7 +128,18 @@ async function openFile(file: string): Promise<ActionResult> {
   return err ? { ok: false, error: err } : { ok: true, message: 'transcript abierto' };
 }
 
-export interface ActionPayload { cwd?: string; branch?: string; id?: string; file?: string; }
+/* ── abrir una URL https en el navegador del SO (no es tráfico in-app:
+   shell.openExternal delega al navegador, no pasa por el network guard).
+   Sólo se permite https para evitar protocolos peligrosos. ── */
+async function openExternal(url: string): Promise<ActionResult> {
+  let u: URL;
+  try { u = new URL(String(url || '')); } catch { return { ok: false, error: 'URL inválida' }; }
+  if (u.protocol !== 'https:') return { ok: false, error: 'sólo https' };
+  await shell.openExternal(u.toString());
+  return { ok: true, message: 'abriendo en el navegador' };
+}
+
+export interface ActionPayload { cwd?: string; branch?: string; id?: string; file?: string; url?: string; }
 
 export async function runAction(name: string, p: ActionPayload): Promise<ActionResult> {
   const cwd = p.cwd || '';
@@ -143,6 +154,7 @@ export async function runAction(name: string, p: ActionPayload): Promise<ActionR
     case 'branch': return copy(p.branch || '', 'branch');
     case 'copyId': return copy(p.id || '', 'session id');
     case 'transcript': return openFile(p.file || '');
+    case 'openExternal': return openExternal(p.url || '');
     default: return { ok: false, error: 'acción desconocida: ' + name };
   }
 }

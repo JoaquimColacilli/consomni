@@ -63,4 +63,5 @@ export interface Snapshot {
   tokensToday: number;
   generatedAt: number;
   watchedRoots: string[];
+  appVersion: string;
 }

@@ -25,6 +25,9 @@ acciones reales sobre tus repos.
 - Toca `~/.claude/settings.json` **solo** para instalar/desinstalar los hooks, y **siempre
   con backup previo** en `~/.consomni/backups/` (merge no-destructivo, restaurable).
 - Sin telemetría, sin analytics. La fuente Geist Mono va vendorizada local (offline 100%).
+- **Única salida de red fuera de 127.0.0.1:** un chequeo de versión de sólo-lectura contra el
+  repo del propio proyecto en GitHub (`releases/latest`), para avisarte si hay update. No manda
+  datos tuyos, no hay telemetría, y es **opt-out** desde Settings (`buscar al iniciar`).
 
 ---
 
@@ -38,6 +41,11 @@ npm run dev        # compila TS + lanza la app
 npm run build      # solo compila TS (src/main + src/preload → dist/)
 npm run dist       # empaqueta Windows: portable + instalador NSIS → release/
 ```
+
+> **Icono embebido (máquina sin Developer Mode/admin):** `rcedit` (que embebe el icono en el `.exe`)
+> viene dentro del paquete `winCodeSign`, cuya extracción falla por unos symlinks de macOS. Antes del
+> primer `npm run dist`, corré una vez `powershell -File build\prep-wincodesign.ps1` (pre-extrae
+> `winCodeSign` sin la carpeta `darwin`). El `.ico` multi-resolución se genera con `build\make-ico.ps1`.
 
 Al primer arranque, un onboarding ofrece **instalar los hooks** (con backup). Sin hooks,
 Consomni igual funciona en modo read-only mostrando lo que infiere de los transcripts;
@@ -114,6 +122,12 @@ pin / favorito / archivar, y **notificación nativa** del SO al pedir atención
 Todas las acciones del SO se lanzan con `execFile`/`spawn` pasando **arrays de argumentos**
 (nunca shell strings) → sin inyección aunque los paths tengan espacios o metacaracteres.
 
+> **¿Cómo disparo una acción (p.ej. abrir la terminal)?** Tres formas: (1) pasá el mouse sobre una
+> card → aparecen los **mini-botones** arriba a la derecha (abrir editor · terminal · copiar · cerrar);
+> (2) clickeá la card para abrir el **panel de detalle** y usá su grilla de acciones; (3) con una card
+> enfocada, atajo `t` (terminal), `o` (editor), etc. La terminal abre Windows Terminal (`wt`) en el
+> `cwd` de la sesión, con fallback a PowerShell.
+
 ---
 
 ## 🏗 Arquitectura
@@ -135,3 +149,9 @@ board/sidebar/statusbar con los builders compartidos — markup pixel-idéntico 
 ---
 
 *Hecho con un ojo en todo. Cero nube.*
+
+<div align="center">
+
+**by [Joaquim Colacilli](https://github.com/JoaquimColacilli)**
+
+</div>

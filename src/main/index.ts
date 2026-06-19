@@ -10,6 +10,7 @@ import { runAction, type ActionPayload } from './actions';
 import { startHooksServer, stopHooksServer, isServerListening } from './hooks-server';
 import { install as installHooks, uninstall as uninstallHooks, getStatus as getHooksStatus, isInstalled } from './hooks-install';
 import { loadConfig, saveConfig, setLocalState, type AppConfig } from './config';
+import { checkForUpdate } from './updates';
 import type { Snapshot, LocalSessionState } from './types';
 
 const RENDERER_DIR = path.join(__dirname, '..', '..', 'src', 'renderer');
@@ -149,6 +150,9 @@ if (!gotLock) {
     });
     ipcMain.handle('consomni:setMuted', (_e, v: boolean) => { muted = !!v; return muted; });
 
+    // chequeo de actualizaciones (manual desde Settings; ver updates.ts)
+    ipcMain.handle('consomni:checkUpdate', () => checkForUpdate());
+
     // settings
     ipcMain.handle('consomni:getConfig', () => loadConfig());
     ipcMain.handle('consomni:saveConfig', (_e, patch: Partial<AppConfig>) => {
@@ -188,6 +192,15 @@ if (!gotLock) {
     // Server de hooks (127.0.0.1). Los eventos refinan el estado vivo.
     await startHooksServer(cfg.port, (event, payload) => applyHookEvent(event, payload));
     refreshHooksConn();
+
+    // Chequeo de updates al iniciar (opt-out). Sólo al repo del proyecto.
+    if (cfg.checkUpdates !== false) {
+      checkForUpdate().then((u) => {
+        if (u.hasUpdate && mainWindow && !mainWindow.isDestroyed()) {
+          mainWindow.webContents.send('consomni:update', u);
+        }
+      }).catch(() => { /* offline / sin red: silencioso */ });
+    }
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

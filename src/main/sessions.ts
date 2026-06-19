@@ -6,6 +6,7 @@
    ════════════════════════════════════════════════════════════════ */
 import * as fs from 'fs';
 import * as path from 'path';
+import { app } from 'electron';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { parseSessionFile, parseSessionDetail, type SessionDetail } from './jsonl';
 import { loadConfig, loadLocalState } from './config';
@@ -221,6 +222,7 @@ export function buildSnapshot(): Snapshot {
     tokensToday,
     generatedAt: Date.now(),
     watchedRoots: cfg.watchedDirs,
+    appVersion: app.getVersion(),
   };
 }
 

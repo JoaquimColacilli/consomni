@@ -27,6 +27,12 @@
    (nunca escribir/mover/borrar transcripts). **Backup de `settings.json` antes de tocarlo.**
    Sin telemetría, sin analytics. Única red permitida: `127.0.0.1` (server de hooks). La fuente
    Geist Mono se vendoriza local (offline 100%).
+   - **Única excepción sancionada (chequeo de updates):** un GET de sólo-lectura a
+     `api.github.com/repos/JoaquimColacilli/consomni/releases/latest` para comparar versión
+     (ver `src/main/updates.ts`). NO es API de Anthropic, NO manda datos del usuario, NO hay
+     telemetría, va sólo al repo del propio proyecto y es **opt-out** (`config.checkUpdates`,
+     toggle en Settings). Usa el módulo `https` de Node → no pasa por el network-guard del
+     renderer (ese guard sigue bloqueando TODO lo demás que no sea 127.0.0.1).
 
 ### Regla de proceso (también dura)
 - **NUNCA `git commit` ni `git push` sin aprobación explícita del usuario.** Todo lo demás
@@ -189,7 +195,8 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
 ## Config / puerto
 - Puerto hooks: **4517** default, configurable.
 - Settings persistidas en `~/.consomni/config.json`: editor, terminal, dirs vigilados, umbral ctx,
-  intervalo refresh, sonidos, puerto. Estado local (pin/fav/archivar) en `~/.consomni/state.json`.
+  intervalo refresh, sonidos, puerto, **`checkUpdates`** (chequeo de updates al iniciar, default `true`,
+  opt-out desde Settings). Estado local (pin/fav/archivar) en `~/.consomni/state.json`.
 
 ---
 
@@ -256,15 +263,32 @@ quedan para icono de la app en Fase 6.
       puerto + instalar/desinstalar hooks) con persistencia (config IPC getConfig/saveConfig; watcher se
       reinicia si cambian dirs). electron-builder (portable + nsis) con icono. README (setup, atajos,
       leyenda de estados, real-vs-stub, privacidad). icon en build/icon.png.
+- [x] **v0.5.0 — mantenimiento/feedback del usuario.** (1) **Fix terminal/QA:** los `qa-btn` de la card no
+      llevaban `data-sid` → al clickearlos `dispatchAction(act, null)` tiraba "elegí una sesión primero" y
+      NO abría la terminal. Ahora el handler de click toma el sid de la `.card[data-sid]` contenedora →
+      term/ext/copy funcionan sin foco previo. (2) **Botón "+" del board centrado** (54×54, `align-self:flex-start`
+      + `.iconbtn` centra el icono; antes `align-self:stretch` + `flex-start` lo empujaba arriba). Wired a
+      `openPalette()`. (3) **Atribución de autor:** `gh()` (octocat) + link `data-href` "by Joaquim Colacilli"
+      en sidebar (expandida + colapsada) y onboarding → `actions.openExternal` (https only, vía `shell.openExternal`,
+      no pasa por el network-guard). (4) **Update-check** (ver `src/main/updates.ts` + excepción a Hard Rule 3):
+      chequeo al iniciar (opt-out) + botón manual en Settings; toast clickeable si hay versión nueva. (5) **Icono
+      embebido real** (abajo). (6) Versión real del package → snapshot (`appVersion`) → sidebar (no más hardcode).
+      Onboarding ya existía (sólo aparece si los hooks NO están instalados y no fue dismisseado).
 
-### Packaging — gotcha winCodeSign (máquina sin Developer Mode/admin)
-electron-builder re-extrae `winCodeSign` y falla creando 2 symlinks darwin (.dylib) por falta de
-privilegio (necesita Developer Mode o admin). Como NO firmamos, lo evitamos con
-`win.signAndEditExecutable: false` (+ `CSC_IDENTITY_AUTO_DISCOVERY=false` al buildear). Trade-off: el
-`.exe` crudo no lleva icono/metadata embebidos vía rcedit; el icono SÍ va en el instalador NSIS, los
-accesos directos (win.icon png→ico auto) y la ventana de la app (`BrowserWindow.icon` = assets/logo/app-icon.png).
-NSIS necesita .ico real → no pasar `installerIcon` png; dejar que electron-builder derive de win.icon.
-Build: `Remove-Item Env:ELECTRON_RUN_AS_NODE; $env:CSC_IDENTITY_AUTO_DISCOVERY='false'; npm run dist`.
+### Packaging — icono embebido + winCodeSign (máquina sin Developer Mode/admin) — RESUELTO
+- **El problema:** `rcedit-x64.exe` (que embebe icono/metadata en el `.exe`) viene DENTRO del paquete
+  `winCodeSign`. electron-builder lo re-extrae y falla creando 2 symlinks darwin (.dylib) por falta de
+  privilegio. Por eso `signAndEditExecutable: false` saltaba TODO (firma **y** rcedit) → el `.exe` quedaba
+  con el icono default de Electron.
+- **La solución (v0.5.0):** se **pre-extrae** `winCodeSign-2.6.0` **sin** la carpeta `darwin` (única con
+  symlinks) vía `build/prep-wincodesign.ps1` (`7za x -xr!darwin`). Con la carpeta ya presente (incluye
+  `rcedit-x64.exe` + `windows-10\`), `signAndEditExecutable: true` corre rcedit y embebe el icono sin tocar
+  symlinks. La firma se saltea igual (sin cert).
+- **Icono real:** `build/icon.png` (512, ojo + wordmark) → `build/icon.ico` multi-res (256/128/64/48/32/24/16,
+  PNG-in-ICO) generado por `build/make-ico.ps1` (System.Drawing). `win.icon: build/icon.ico`. **OJO:** no usar
+  `param([string]$Src)` y luego `$Src = [Image]::FromFile(...)` — el tipo `[string]` castea la Image a
+  `"System.Drawing.Bitmap"`. NSIS necesita .ico real; no pasar `installerIcon` png.
+- **Build:** `Remove-Item Env:ELECTRON_RUN_AS_NODE; powershell -File build\prep-wincodesign.ps1; $env:CSC_IDENTITY_AUTO_DISCOVERY='false'; npm run dist`. Verificado: el `.exe` (win-unpacked + portable) lleva el ojo de Consomni.
 
 ### git
 consomni NO tenía .git propio; el repo de `~/OneDrive/Escritorio` (vacío) lo contenía. Se hizo
