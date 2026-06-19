@@ -239,6 +239,7 @@
     if (!root) return;
     root.innerHTML = buildShell();
     document.body.classList.toggle('compacto', state.density === 'compacto');
+    document.body.classList.toggle('sb-collapsed', !!state.collapsed);   // el dock arranca a la derecha del sidebar
     applyFocusRing();
     injectPerms();
   }
@@ -836,21 +837,23 @@
     var seg = t.closest && t.closest('.seg span[data-density]'); if (seg) { setDensity(seg.getAttribute('data-density')); return; }
     var pill = t.closest && t.closest('.fpill[data-mode]'); if (pill) { toggleMode(pill.getAttribute('data-mode')); return; }
     var sortBtn = t.closest && t.closest('.tbtn'); if (sortBtn) { openSortMenu(sortBtn); return; }
-    // sidebar project
-    var sb = t.closest && t.closest('[data-proj]'); if (sb) { setActiveProject(sb.getAttribute('data-proj')); return; }
-    // card-sel checkbox
-    var selBox = t.closest && t.closest('.card-sel'); if (selBox) { var cc = selBox.closest('.card[data-sid]'); if (cc) { e.stopPropagation(); toggleSelect(cc.getAttribute('data-sid')); } return; }
-    // closed row → detail
+    if (t.closest && t.closest('[data-act="home"]')) { if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
+
+    // ── CARDS PRIMERO (van adentro de la columna, que tiene data-proj) ──
+    // closed row → detalle
     var crow = t.closest && t.closest('.closed-row[data-sid]'); if (crow) { openDetail(crow.getAttribute('data-sid')); return; }
-    // card → detail (o select si hay multi-select activo)
+    // card → abre/foco la conversación de esa sesión en el DOCK (abajo, no tapa todo)
     var card = t.closest && t.closest('.card[data-sid]');
     if (card) {
       var sid = card.getAttribute('data-sid');
-      if (Object.keys(state.selected).length) { toggleSelect(sid); return; }
-      // clickear la MISMA card que ya tiene el detalle abierto → cerrar (toggle)
-      if (state.detailId === sid) { closeDetail(); return; }
-      state.focusSid = sid; openDetail(sid); return;
+      state.focusSid = sid;
+      var sObj = sessionById(sid);
+      if (window.ConsomniTerms) window.ConsomniTerms.openSession(sid, sObj ? sObj.name : 'sesión');
+      else openDetail(sid);
+      return;
     }
+    // sidebar / header de columna → filtrar por proyecto (DESPUÉS de las cards)
+    var sb = t.closest && t.closest('[data-proj]'); if (sb) { setActiveProject(sb.getAttribute('data-proj')); return; }
   });
 
   /* ════════ KEYBOARD ════════ */
@@ -859,12 +862,13 @@
     var meta = e.metaKey || e.ctrlKey;
     var T = window.ConsomniTerms;
 
-    // Con el workspace de TERMINALES abierto, todo va a xterm; sólo Esc vuelve al board.
-    if (T && T.isOpen()) {
-      if (e.key === 'Escape') { e.preventDefault(); T.hide(); }
+    // Si el foco está DENTRO del dock (xterm), las teclas van a la terminal; sólo Esc reacciona.
+    var inDock = document.activeElement && document.activeElement.closest && document.activeElement.closest('#terminals');
+    if (inDock) {
+      if (e.key === 'Escape') { e.preventDefault(); if (T && T.isMaximized()) T.toggle(); else if (document.activeElement.blur) document.activeElement.blur(); }
       return;
     }
-    // Abrir/cerrar el workspace de terminales (Shift+T para no chocar con 't' = terminal de la card)
+    // Abrir/cerrar el dock de terminales (Shift+T para no chocar con 't' = terminal de la card)
     if (!meta && (e.key === 'T')) { e.preventDefault(); T && T.toggle(); return; }
 
     // ⌘K abre palette desde cualquier lado
@@ -1006,7 +1010,14 @@
   }, 1000);
 
   /* ── init ── */
-  if (window.ConsomniTerms) window.ConsomniTerms.setNotifier(toast);
+  if (window.ConsomniTerms) {
+    window.ConsomniTerms.setNotifier(toast);
+    // botones del tab de sesión: claude acá / terminal / VSCode / detalle
+    window.ConsomniTerms.setActionHandler(function (act, sid) {
+      if (act === 'detail') { openDetail(sid); return; }
+      dispatchAction(act, sid);
+    });
+  }
   state.collapsed = window.innerWidth < BREAKPOINT;
   if (api) {
     api.getSnapshot().then(setSnapshot).catch(function () { render(); });

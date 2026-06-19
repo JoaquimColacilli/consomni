@@ -187,22 +187,48 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
   un proceso `claude` que ya corre afuera NO le podemos enchufar una PTY interactiva (no tenemos
   su handle). Lo interactivo de verdad son las terminales que Consomni LANZA (workspace embebido).
 
-## Terminales embebidas (workspace) — v0.6.0
-- **Qué:** Consomni pasó de puro observador a **también hospedar terminales reales adentro**. El
-  workspace (botón `>_` del sidebar · Shift+T · "+" del board · `term`/`dispatch` de cualquier card)
-  abre una capa full-screen con un **grid de paneles xterm**, cada uno atado a una **PTY real**
-  (shell o `claude`). `claude` embebido muestra su UI/thinking tal cual.
+## Terminales embebidas (dock tiling) — v0.6.x
+- **Qué (v0.6.1, MALEABLE/tiling):** Consomni pasó de puro observador a **también hospedar terminales
+  reales adentro**. Es un **DOCK abajo, a la DERECHA del sidebar** (no lo tapa nunca salvo zoom; queda
+  arriba del statusbar) que es un **MOSAICO de paneles**: cada panel se **divide a la derecha (columna)
+  o abajo (fila)** y los **divisores se arrastran** para redimensionar; el **borde superior del dock
+  se arrastra** para cambiar su alto. Dos tipos de panel:
+  - **terminal:** PTY real (xterm) — shell o `claude` (muestra su UI/thinking tal cual).
+  - **sesión:** la **conversación read-only** de un claude detectado en disco (turnos user/assistant
+    del transcript), con botones "claude acá / terminal / VSCode / detalle".
+- **Reubicar (drag):** se **arrastra un panel de su barra de título** a un borde de otro (drop-zones
+  izq/der/arriba/abajo, indicador verde) para moverlo en el mosaico (`detachPane`+`insertPaneAt`).
+- **Minimizar:** el chevron colapsa el dock a una **barra fina** (sólo el toolbar, con contador) que
+  queda siempre visible/reabrible (`body.dock-min`); restaurar con el chevron o clickeando la barra.
+  Hay un item **"inicio"** arriba del sidebar (`data-act="home"`) que abre las terminales a pantalla completa.
+- **⚠️ Gotcha de click (resuelto v0.6.1):** la card vive DENTRO de `.col[data-proj]`, así que el handler
+  de click DEBE chequear `.card[data-sid]` ANTES que `[data-proj]` (si no, clickear una card filtraba el
+  proyecto en vez de abrir la conversación). Orden correcto en `app.js`: closed-row → card → data-proj.
+- **Interacción:** **click en una card → abre/foco un panel con la conversación de esa sesión**
+  (no el overlay E2; E2 queda en el botón "detalle"). Nuevos paneles: `>_` del sidebar · Shift+T ·
+  "+" del board · botones "terminal/claude" del toolbar del dock · botones split de cada panel ·
+  `term`/`dispatch` de cualquier card. Zoom (botón maximizar) = pantalla completa; ocultar = las PTYs
+  siguen vivas. **NO hay tabs** — es tiling (como Warp/tmux/VS Code splits).
+- **Límite honesto:** a un claude que YA corre afuera NO se le puede enchufar una PTY interactiva
+  (no hay handle) → su panel muestra la conversación read-only; lo interactivo son las que Consomni LANZA.
 - **Arquitectura:** `main/terminals.ts` (node-pty: `createTerm/writeTerm/resizeTerm/killTerm`,
   eventos `term:data`/`term:exit`; carga PEREZOSA y tolerante a fallos del .node) ↔ IPC
   (`termCreate` invoke; `termWrite`/`termResize` send; `termData`/`termExit` push) ↔ preload
-  (`consomni.term.*`) ↔ `renderer/terminals-ui.js` (`window.ConsomniTerms`: maneja instancias de
-  xterm + FitAddon en `#terminals`, una **capa PERSISTENTE** que el re-render del board NO toca —
-  las PTYs siguen vivas en background al ocultar). Shell: `pwsh`→`powershell`→`cmd`. `claude` se
-  arranca escribiendo `claude\r` al primer `onData` (shell ya con prompt).
-- **Tamaño/resize:** xterm se monta, `fit()` mide cols/rows reales, recién ahí se crea la PTY con
-  ese tamaño; en resize de ventana / cambio de layout se re-`fit()` y se `resize()` la PTY.
+  (`consomni.term.*`) ↔ `renderer/terminals-ui.js` (`window.ConsomniTerms`: árbol de splits en el DOM —
+  `.dk-split.row|col` con `.dk-splitter` entre hijos `flex:1 1 0`; cada `.dk-pane` tiene xterm o
+  conversación — en `#terminals`, **capa PERSISTENTE** que el re-render del board NO toca; el dock
+  enruta `term:data` por el id de la PTY: `terms: Map<ptyId,{term,fit,pane}>`). Splitear envuelve el
+  panel en un split (o inserta hermano si ya hay split en esa dir); cerrar desenvuelve splits de 1 hijo.
+  La conversación viene de `parseSessionDetail().convo` (turnos recientes user/assistant, dedupe por
+  `message.id`, filtra ruido de slash-commands). Shell: `pwsh`→`powershell`→`cmd`; `claude` se arranca
+  escribiendo `claude\r` al primer `onData`.
+- **Layout:** el dock NO encoge `.app` (el sidebar queda full-height); `#terminals.dock{left:var(--sb-w);
+  bottom:var(--sbar-h)}` (sidebar 238px / 56px colapsado vía `body.sb-collapsed`; statusbar 27px);
+  `body.dock-open .board{padding-bottom:var(--dock-h)}`; `.maximized{inset:0}`. z-index 40 (overlays 50).
+- **Tamaño/resize:** xterm se monta, `fit()` mide cols/rows, recién ahí se crea la PTY; en split / drag
+  de divisor / drag del alto del dock / resize de ventana se re-`fit()` (todas las visibles) y `resize()`.
 - **Seguridad:** sigue **cero API de Anthropic** — Consomni sólo hospeda el proceso; `claude` hace
-  lo suyo (igual que si abrieras la terminal vos). Se borra `ELECTRON_RUN_AS_NODE` del env del hijo.
+  lo suyo. Se borra `ELECTRON_RUN_AS_NODE` del env del hijo.
 
 ---
 

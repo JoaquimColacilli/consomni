@@ -321,7 +321,7 @@ export interface FullDetail extends SessionDetail { subagents: SubagentInfo[]; }
 
 export function getDetail(id: string): FullDetail {
   const file = findSessionFile(id);
-  const base = file ? parseSessionDetail(file) : { feed: [], files: [], counts: { edits: 0, bash: 0, reads: 0 } };
+  const base = file ? parseSessionDetail(file) : { feed: [], files: [], counts: { edits: 0, bash: 0, reads: 0 }, convo: [] };
   const subagents = file ? readSubagents(file, id) : [];
   return { ...base, subagents };
 }

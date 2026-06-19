@@ -63,16 +63,20 @@ con hooks, el estado pasa a ser **en vivo** (working / atención / idle / cerrad
 
 ---
 
-## 🖥 Terminales embebidas
+## 🖥 Terminales embebidas (dock maleable)
 
-Consomni no sólo observa: también **lanza y hospeda terminales reales adentro**. Abrí el
-workspace con el botón `>_` del sidebar, `Shift+T`, el `+` del board, o el botón **terminal /
-claude acá** de cualquier sesión. Cada panel es una **PTY real** (node-pty) renderizada con
-xterm.js, en un grid full-screen que podés maximizar. Si lanzás `claude`, ves su salida y su
-proceso de pensamiento en vivo, igual que en una terminal nativa.
+Consomni no sólo observa: también **lanza y hospeda terminales reales adentro**, en un **dock abajo
+a la derecha del sidebar** (no lo tapa) que es un **mosaico maleable**:
+
+- **Click en una sesión** → abre un panel con **la conversación de ese claude** (read-only, en vivo).
+- **`>_` del sidebar / `Shift+T` / `+` del board / "terminal" / "claude"** → abren paneles de terminal
+  (PTY real con xterm.js). Si lanzás `claude`, ves su UI y su pensamiento en vivo.
+- **Dividí** cada panel a la derecha (columna) o abajo (fila), **arrastrá los divisores** para
+  redimensionar, y **arrastrá el borde superior** del dock para cambiar su alto. Botón de **zoom** para
+  pantalla completa. (Como los splits de Warp / tmux / la terminal de VS Code.)
 
 > Nota: a una sesión que **ya está corriendo afuera** (las del board, detectadas de los transcripts)
-> no se le puede "enchufar" una terminal interactiva — esas se ven read-only en el panel de detalle.
+> no se le puede "enchufar" una terminal interactiva — esas se ven read-only (la conversación).
 > Las terminales 100% interactivas son las que **Consomni lanza**. Una sesión `claude` que abras acá
 > también aparece en el board (escribe su transcript).
 

@@ -161,10 +161,10 @@ function deriveState(lastAssistant: Rec | undefined, lastRec: Rec | undefined, a
   // Heurística sin hooks (los hooks la sobreescriben en Fase 3).
   if (ageMs > IDLE_MS) return 'closed';
   if (ageMs < ACTIVE_MS) {
-    // actividad muy reciente: probablemente trabajando
-    if (lastRec && lastRec.type === 'user') return 'working';     // tool_result recién llegó
-    if (lastAssistant && lastAssistant.message?.stop_reason === 'tool_use') return 'working';
-    return 'working';
+    // 'working' SÓLO si claude está realmente en medio de algo:
+    if (lastRec && lastRec.type === 'user') return 'working';                          // tool_result / prompt recién llegó → va a seguir
+    if (lastAssistant && lastAssistant.message?.stop_reason === 'tool_use') return 'working'; // pidió una tool, espera resultado
+    return 'idle';   // el último turno terminó (end_turn / texto) → esperando al usuario, NO trabajando
   }
   return 'idle';
 }
@@ -277,19 +277,57 @@ export function parseSessionFile(
 }
 
 /* ════════ detalle de sesión (para el panel E2) ════════ */
+export interface ConvoTurn { role: 'user' | 'assistant'; text: string; ts: number; }
 export interface SessionDetail {
   feed: ToolCall[];
   files: { name: string; edits: number }[];
   counts: { edits: number; bash: number; reads: number };
+  convo: ConvoTurn[];
+}
+
+/** Extrae texto plano de message.content (string o array de bloques). */
+function textOfContent(content: unknown): string {
+  if (typeof content === 'string') return content;
+  if (!Array.isArray(content)) return '';
+  const parts: string[] = [];
+  for (const b of content) {
+    if (b && b.type === 'text' && typeof b.text === 'string') parts.push(b.text);
+  }
+  return parts.join('\n');
+}
+
+/** Ruido de slash-commands / tool_result / interrupciones que NO es conversación real. */
+function isConvoNoise(t: string): boolean {
+  if (!t) return true;
+  return /^<(command|local-command|system-reminder|user-prompt-submit)/i.test(t) ||
+    t.startsWith('[Request interrupted') || t.startsWith('Caveat:');
 }
 
 export function parseSessionDetail(filePath: string): SessionDetail {
-  const empty: SessionDetail = { feed: [], files: [], counts: { edits: 0, bash: 0, reads: 0 } };
+  const empty: SessionDetail = { feed: [], files: [], counts: { edits: 0, bash: 0, reads: 0 }, convo: [] };
   let chunks: Chunks;
   try { chunks = readChunks(filePath); } catch { return empty; }
   const recs = parseLines(chunks.head === chunks.tail ? chunks.head : chunks.head.concat(chunks.tail));
   const counts = { edits: 0, bash: 0, reads: 0 };
   const fileMap = new Map<string, number>();
+
+  // conversación reciente (turnos user/assistant con texto real)
+  const convo: ConvoTurn[] = [];
+  const seenAsst = new Set<string>();
+  for (const r of recs) {
+    if (r.isMeta) continue;
+    const ts = r.timestamp ? Date.parse(r.timestamp) : 0;
+    if (r.type === 'user') {
+      const t = textOfContent(r.message?.content).trim();
+      if (t && !isConvoNoise(t)) convo.push({ role: 'user', text: t.slice(0, 6000), ts });
+    } else if (r.type === 'assistant') {
+      const id = r.message?.id;
+      if (id) { if (seenAsst.has(id)) continue; seenAsst.add(id); }
+      const t = textOfContent(r.message?.content).trim();
+      if (t) convo.push({ role: 'assistant', text: t.slice(0, 6000), ts });
+    }
+  }
+  const convoTail = convo.slice(-40);
   for (const r of recs) {
     if (r.type !== 'assistant') continue;
     const content = r.message?.content;
@@ -309,5 +347,5 @@ export function parseSessionDetail(filePath: string): SessionDetail {
     .map(([name, edits]) => ({ name, edits }))
     .sort((a, b) => b.edits - a.edits)
     .slice(0, 8);
-  return { feed: collectToolCalls(recs, 24), files, counts };
+  return { feed: collectToolCalls(recs, 24), files, counts, convo: convoTail };
 }
