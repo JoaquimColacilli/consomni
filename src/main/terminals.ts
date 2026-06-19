@@ -31,7 +31,7 @@ interface PtyModule {
 }
 
 type TermKind = 'shell' | 'claude';
-interface Term { id: string; proc: IPty; title: string; cwd: string; kind: TermKind; cols: number; rows: number; pendingClaude: boolean; }
+interface Term { id: string; proc: IPty; title: string; cwd: string; kind: TermKind; cols: number; rows: number; bootCmd: string | null; }
 
 const terms = new Map<string, Term>();
 let seq = 0;
@@ -82,7 +82,7 @@ function resolveShell(): { file: string; args: string[]; label: string } {
 
 export interface CreateResult { ok: boolean; id?: string; title?: string; cwd?: string; kind?: TermKind; error?: string; }
 
-export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number; rows?: number }): CreateResult {
+export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number; rows?: number; resume?: string }): CreateResult {
   const mod = getPty();
   if (!mod) return { ok: false, error: 'node-pty no disponible: ' + (ptyError || 'binario nativo ausente') };
 
@@ -96,6 +96,16 @@ export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number;
   // El host del agente (Claude CLI) exporta esto y rompería subprocesos de Node.
   delete env.ELECTRON_RUN_AS_NODE;
 
+  // ¿qué comando tipear cuando el shell muestre el prompt?
+  // claude normal, o `claude --resume <id>` para CONTINUAR esa conversación (interactiva).
+  let bootCmd: string | null = null;
+  let resumed = false;
+  if (kind === 'claude') {
+    const rid = String(opts.resume || '').replace(/[^A-Za-z0-9_-]/g, '');   // sanitizar (se escribe en el shell)
+    bootCmd = rid ? `claude --resume ${rid}` : 'claude';
+    resumed = !!rid;
+  }
+
   let proc: IPty;
   try {
     proc = mod.spawn(sh.file, sh.args, { name: 'xterm-256color', cols, rows, cwd, env });
@@ -105,13 +115,13 @@ export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number;
 
   const id = 't' + (++seq);
   const base = path.basename(cwd) || sh.label;
-  const title = kind === 'claude' ? 'claude · ' + base : base + ' · ' + sh.label;
-  const t: Term = { id, proc, title, cwd, kind, cols, rows, pendingClaude: kind === 'claude' };
+  const title = kind === 'claude' ? (resumed ? 'claude ↻ ' + base : 'claude · ' + base) : base + ' · ' + sh.label;
+  const t: Term = { id, proc, title, cwd, kind, cols, rows, bootCmd };
   terms.set(id, t);
 
   proc.onData((data) => {
-    // arrancar `claude` recién cuando el shell ya muestra prompt (primer chunk)
-    if (t.pendingClaude) { t.pendingClaude = false; try { proc.write('claude\r'); } catch { /* noop */ } }
+    // tipear el comando de arranque recién cuando el shell ya muestra prompt (primer chunk)
+    if (t.bootCmd) { const cmd = t.bootCmd; t.bootCmd = null; try { proc.write(cmd + '\r'); } catch { /* noop */ } }
     send('term:data', { id, data });
   });
   proc.onExit(({ exitCode }) => { terms.delete(id); send('term:exit', { id, exitCode }); });

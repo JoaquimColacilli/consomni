@@ -69,6 +69,8 @@ Consomni no sólo observa: también **lanza y hospeda terminales reales adentro*
 a la derecha del sidebar** (no lo tapa) que es un **mosaico maleable**:
 
 - **Click en una sesión** → abre un panel con **la conversación de ese claude** (read-only, en vivo).
+  El botón **"responder"** la **reanuda** (`claude --resume`) en una terminal interactiva — ahí podés
+  seguir escribiéndole a esa misma conversación.
 - **`>_` del sidebar / `Shift+T` / `+` del board / "terminal" / "claude"** → abren paneles de terminal
   (PTY real con xterm.js). Si lanzás `claude`, ves su UI y su pensamiento en vivo.
 - **Dividí** cada panel a la derecha (columna) o abajo (fila), **arrastrá los divisores** para

@@ -188,14 +188,16 @@
   }
 
   /* ── panel de TERMINAL ── */
-  function spawn(kind, cwd, dir) {
+  function spawn(kind, cwd, dir, opts) {
     if (!Terminal) { notifier('xterm no cargó', 'err'); return; }
     if (!api || !api.term) { notifier('terminales no disponibles', 'err'); return; }
     ensureDock(); bindIpc(); show();
+    opts = opts || {};
+    var resume = opts.resume || null;
 
     var pane = makePaneShell(kind === 'claude' ? 'claude' : 'shell');
     var body = pane.querySelector('.dk-pane-body');
-    setPaneMeta(pane, kind === 'claude' ? '<span class="dk-tdot"></span>' : svg('term', 11, 2), kind === 'claude' ? 'claude…' : 'shell…');
+    setPaneMeta(pane, kind === 'claude' ? '<span class="dk-tdot"></span>' : svg('term', 11, 2), kind === 'claude' ? (resume ? 'claude ↻…' : 'claude…') : 'shell…');
     placeContent(pane, dir || 'right');
 
     var term = new Terminal({
@@ -213,7 +215,7 @@
 
     requestAnimationFrame(function () {
       try { fit.fit(); } catch (e) {}
-      api.term.create({ cwd: cwd, kind: kind, cols: term.cols || 80, rows: term.rows || 24 }).then(function (res) {
+      api.term.create({ cwd: cwd, kind: kind, cols: term.cols || 80, rows: term.rows || 24, resume: resume }).then(function (res) {
         if (!res || !res.ok) { term.write('\r\n  \x1b[31m' + ((res && res.error) || 'no se pudo abrir') + '\x1b[0m\r\n'); return; }
         pane.dataset.tid = res.id;
         terms.set(res.id, { term: term, fit: fit, pane: pane, ro: ro });
@@ -237,7 +239,8 @@
     body.innerHTML =
       '<div class="dk-shead">' +
         '<span class="dk-sactions">' +
-          '<button class="btn btn--sm btn--green" data-dock-act="dispatch" data-sid="' + esc(sid) + '">' + svg('dispatch', 11, 2) + ' claude acá</button>' +
+          '<button class="btn btn--sm btn--green" data-dock-act="resume" data-sid="' + esc(sid) + '" title="continuar ESTA conversación de forma interactiva (claude --resume)">' + svg('reply', 11, 2) + ' responder</button>' +
+          '<button class="btn btn--sm" data-dock-act="dispatch" data-sid="' + esc(sid) + '" title="nueva sesión claude en esta carpeta">' + svg('dispatch', 11, 2) + ' claude nuevo</button>' +
           '<button class="btn btn--sm" data-dock-act="term" data-sid="' + esc(sid) + '">' + svg('term', 11, 2) + ' terminal</button>' +
           '<button class="btn btn--sm" data-dock-act="ext" data-sid="' + esc(sid) + '">' + svg('ext', 11, 2) + ' VSCode</button>' +
           '<button class="btn btn--sm" data-dock-act="detail" data-sid="' + esc(sid) + '">detalle</button>' +
@@ -261,7 +264,7 @@
       var convo = d.convo || [];
       var atBottom = (convoEl.scrollHeight - convoEl.scrollTop - convoEl.clientHeight) < 40;
       if (!convo.length) {
-        convoEl.innerHTML = '<div class="dk-empty">Esta sesión no tiene mensajes en el transcript todavía (o es solo-hook).<br>No se puede "enchufar" a un claude que ya corre afuera — usá <b>claude acá</b> para una sesión interactiva en esta carpeta.</div>';
+        convoEl.innerHTML = '<div class="dk-empty">Esta sesión no tiene mensajes en el transcript todavía (o es solo-hook).<br>Tocá <b>responder</b> para continuar la conversación de forma interactiva (claude --resume).</div>';
         return;
       }
       convoEl.innerHTML = convo.map(function (turn) {
@@ -314,9 +317,11 @@
       var head = e.target.closest && e.target.closest('.dk-pane-head');
       if (!head || (e.target.closest && e.target.closest('.dk-pbtn'))) return;
       var pane = head.closest('.dk-pane'); if (!pane) return;
+      if (host.classList.contains('minimized')) return;
+      e.preventDefault();   // evita que el drag seleccione texto
       var sx = e.clientX, sy = e.clientY, started = false, drag = null;
       function move(ev) {
-        if (!started) { if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 6) return; started = true; document.body.classList.add('dk-dragging'); pane.classList.add('dragging'); }
+        if (!started) { if (Math.abs(ev.clientX - sx) + Math.abs(ev.clientY - sy) < 6) return; started = true; document.body.classList.add('dk-dragging'); document.body.style.userSelect = 'none'; pane.classList.add('dragging'); }
         var el = document.elementFromPoint(ev.clientX, ev.clientY);
         var tgt = el && el.closest ? el.closest('.dk-pane') : null;
         clearInd(); drag = null;
@@ -329,7 +334,7 @@
       }
       function up() {
         document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
-        document.body.classList.remove('dk-dragging'); pane.classList.remove('dragging'); clearInd();
+        document.body.classList.remove('dk-dragging'); document.body.style.userSelect = ''; pane.classList.remove('dragging'); clearInd();
         if (started && drag && drag.target !== pane) { detachPane(pane); insertPaneAt(drag.target, pane, drag.zone); setFocus(pane); refitAll(); }
       }
       document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);

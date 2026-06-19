@@ -290,15 +290,16 @@
   /* ════════ ACCIONES ════════ */
   // 'term' y 'dispatch' ya NO lanzan un wt externo: abren una terminal EMBEBIDA
   // (xterm + node-pty) a pantalla completa dentro de Consomni.
-  function openEmbeddedTerminal(cwd, kind) {
+  function openEmbeddedTerminal(cwd, kind, resume) {
     var T = window.ConsomniTerms;
     if (!T) { toast('terminales no disponibles', 'err'); return; }
+    var go = function () { T.spawn(kind, cwd || undefined, 'right', { resume: resume || undefined }); };
     if (api && api.term && api.term.available) {
       api.term.available().then(function (ok) {
         if (!ok) { toast('node-pty no se cargó (módulo nativo) — reinstalá deps', 'err'); return; }
-        T.open({ cwd: cwd || undefined, kind: kind });
-      }).catch(function () { T.open({ cwd: cwd || undefined, kind: kind }); });
-    } else { T.open({ cwd: cwd || undefined, kind: kind }); }
+        go();
+      }).catch(go);
+    } else { go(); }
   }
 
   var REAL = { ext: 1, folder: 1, diff: 1, pr: 1, copy: 1, branch: 1, copyId: 1, transcript: 1 };
@@ -310,6 +311,7 @@
     // ── terminales embebidas ──
     if (act === 'term') { openEmbeddedTerminal(s ? s.cwd : null, 'shell'); if (s) closeDetail(); return; }
     if (act === 'dispatch') { openEmbeddedTerminal(s ? s.cwd : null, 'claude'); if (s) closeDetail(); return; }
+    if (act === 'resume') { if (!s) { toast('elegí una sesión', 'warn'); return; } openEmbeddedTerminal(s.cwd, 'claude', s.id); closeDetail(); return; }
     if (REAL[act]) {
       if (!s) { toast('elegí una sesión primero', 'warn'); return; }
       if (!api || !api.action) { toast('acción no disponible', 'err'); return; }
@@ -837,7 +839,8 @@
     var seg = t.closest && t.closest('.seg span[data-density]'); if (seg) { setDensity(seg.getAttribute('data-density')); return; }
     var pill = t.closest && t.closest('.fpill[data-mode]'); if (pill) { toggleMode(pill.getAttribute('data-mode')); return; }
     var sortBtn = t.closest && t.closest('.tbtn'); if (sortBtn) { openSortMenu(sortBtn); return; }
-    if (t.closest && t.closest('[data-act="home"]')) { if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
+    if (t.closest && t.closest('[data-act="sbtoggle"]')) { setSidebarCollapsed(!state.collapsed); return; }
+    if (t.closest && t.closest('[data-act="home"]')) { setSidebarCollapsed(true); if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
 
     // ── CARDS PRIMERO (van adentro de la columna, que tiene data-proj) ──
     // closed row → detalle
@@ -995,11 +998,13 @@
     api.getHooksStatus().then(function (st) { if (st && !st.installed && !dismissed) showOnboarding(); }).catch(function () {});
   }
 
-  /* ── responsive ── */
+  /* ── responsive + colapso manual del sidebar ──
+     userCollapsed: null = automático (por ancho); true/false = forzado por el usuario. */
   function syncResponsive() {
-    var shouldCollapse = window.innerWidth < BREAKPOINT;
-    if (shouldCollapse !== state.collapsed) { state.collapsed = shouldCollapse; render(); }
+    var should = (state.userCollapsed != null) ? state.userCollapsed : (window.innerWidth < BREAKPOINT);
+    if (should !== state.collapsed) { state.collapsed = should; render(); }
   }
+  function setSidebarCollapsed(v) { state.userCollapsed = !!v; if (state.collapsed !== !!v) { state.collapsed = !!v; render(); } }
   window.addEventListener('resize', syncResponsive);
 
   /* ── ticker: refresca "última actualización" sin re-render ── */

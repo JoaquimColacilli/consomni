@@ -250,6 +250,7 @@
         '<div class="ci ci-home" data-act="home" title="inicio · terminales" style="margin:0 auto 6px;">' + svg('grid', 17, 1.8) + '</div>' +
         '<div class="sb-scroll" style="gap:6px;">' + items + '</div>' +
         '<div class="sb-foot" style="flex-direction:column;gap:7px;padding:10px 0;">' +
+          '<button class="sbtn sb-toggle" data-act="sbtoggle" title="expandir sidebar">' + svg('chevR', 15, 2.4) + '</button>' +
           '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
           '<a class="sbtn" data-href="https://github.com/JoaquimColacilli" title="by Joaquim Colacilli · github.com/JoaquimColacilli">' + gh(15) + '</a>' +
           '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
@@ -291,10 +292,11 @@
       '<a class="sb-author" data-href="https://github.com/JoaquimColacilli" title="github.com/JoaquimColacilli">' +
         gh(13) + '<span>by <b>Joaquim Colacilli</b></span></a>' +
       '<div class="sb-foot">' +
+        '<button class="sbtn sb-toggle" data-act="sbtoggle" title="colapsar / expandir sidebar">' + svg('chevR', 15, 2.4) + '</button>' +
         '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
         '<button class="sbtn" data-act="theme">' + svg('moon', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v0.6.1') + '</span></div>' +
+        '<span class="ver">' + esc(o.version || 'v0.6.2') + '</span></div>' +
     '</aside>';
   }
 

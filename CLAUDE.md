@@ -209,8 +209,15 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
   "+" del board · botones "terminal/claude" del toolbar del dock · botones split de cada panel ·
   `term`/`dispatch` de cualquier card. Zoom (botón maximizar) = pantalla completa; ocultar = las PTYs
   siguen vivas. **NO hay tabs** — es tiling (como Warp/tmux/VS Code splits).
+- **Responder (v0.6.2):** el botón **"responder"** del panel de sesión lanza `claude --resume <id>`
+  en una PTY embebida → **reanuda ESA conversación de forma interactiva** y ahí sí podés escribir.
+  (el id se sanitiza `[A-Za-z0-9_-]` porque se tipea en el shell). Es la forma de "responderle" a una
+  sesión: no se le puede inyectar a un proceso que ya corre, pero `--resume` la continúa.
+- **Sidebar nunca tapado (v0.6.2):** ni el dock ni el zoom cubren el sidebar (`#terminals.dock` y
+  `.maximized` arrancan en `left:var(--sb-w)`). "inicio" **comprime** el sidebar (no lo cierra) vía
+  colapso manual (`state.userCollapsed`, toggle `data-act=sbtoggle` con chevron que rota); se expande igual.
 - **Límite honesto:** a un claude que YA corre afuera NO se le puede enchufar una PTY interactiva
-  (no hay handle) → su panel muestra la conversación read-only; lo interactivo son las que Consomni LANZA.
+  (no hay handle); por eso "responder" usa `--resume` (continúa la conversación desde el transcript).
 - **Arquitectura:** `main/terminals.ts` (node-pty: `createTerm/writeTerm/resizeTerm/killTerm`,
   eventos `term:data`/`term:exit`; carga PEREZOSA y tolerante a fallos del .node) ↔ IPC
   (`termCreate` invoke; `termWrite`/`termResize` send; `termData`/`termExit` push) ↔ preload
