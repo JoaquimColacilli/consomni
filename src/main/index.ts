@@ -11,6 +11,7 @@ import { startHooksServer, stopHooksServer, isServerListening } from './hooks-se
 import { install as installHooks, uninstall as uninstallHooks, getStatus as getHooksStatus, isInstalled } from './hooks-install';
 import { loadConfig, saveConfig, setLocalState, type AppConfig } from './config';
 import { checkForUpdate } from './updates';
+import { setTerminalWindow, createTerm, writeTerm, resizeTerm, killTerm, listTerms, killAllTerms, terminalsAvailable } from './terminals';
 import type { Snapshot, LocalSessionState } from './types';
 
 const RENDERER_DIR = path.join(__dirname, '..', '..', 'src', 'renderer');
@@ -95,7 +96,7 @@ function createWindow(): void {
       setTimeout(async () => {
         if (process.env.CONSOMNI_EXEC) {
           try { await mainWindow!.webContents.executeJavaScript(process.env.CONSOMNI_EXEC); } catch { /* noop */ }
-          await new Promise((r) => setTimeout(r, 700));
+          await new Promise((r) => setTimeout(r, Number(process.env.CONSOMNI_EXEC_WAIT) || 700));
         }
         try {
           const img = await mainWindow!.webContents.capturePage();
@@ -153,6 +154,14 @@ if (!gotLock) {
     // chequeo de actualizaciones (manual desde Settings; ver updates.ts)
     ipcMain.handle('consomni:checkUpdate', () => checkForUpdate());
 
+    // ── terminales embebidas (PTYs reales; ver terminals.ts) ──
+    ipcMain.handle('consomni:termAvailable', () => terminalsAvailable());
+    ipcMain.handle('consomni:termCreate', (_e, opts: { cwd?: string; kind?: 'shell' | 'claude'; cols?: number; rows?: number }) => createTerm(opts || {}));
+    ipcMain.on('consomni:termWrite', (_e, arg: { id: string; data: string }) => writeTerm(String(arg?.id), String(arg?.data ?? '')));
+    ipcMain.on('consomni:termResize', (_e, arg: { id: string; cols: number; rows: number }) => resizeTerm(String(arg?.id), Number(arg?.cols), Number(arg?.rows)));
+    ipcMain.handle('consomni:termKill', (_e, id: string) => { killTerm(String(id)); return true; });
+    ipcMain.handle('consomni:termList', () => listTerms());
+
     // settings
     ipcMain.handle('consomni:getConfig', () => loadConfig());
     ipcMain.handle('consomni:saveConfig', (_e, patch: Partial<AppConfig>) => {
@@ -178,6 +187,7 @@ if (!gotLock) {
     });
 
     createWindow();
+    setTerminalWindow(() => mainWindow);
 
     // Capa de datos: escanea + vigila ~/.claude/projects y empuja snapshots.
     startSessions((snap: Snapshot) => {
@@ -207,7 +217,7 @@ if (!gotLock) {
     });
   });
 
-  app.on('before-quit', () => { stopSessions(); stopHooksServer(); });
+  app.on('before-quit', () => { killAllTerms(); stopSessions(); stopHooksServer(); });
 
   app.on('window-all-closed', () => {
     if (process.platform !== 'darwin') app.quit();

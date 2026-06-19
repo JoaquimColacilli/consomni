@@ -7,7 +7,8 @@
 Orquestador de escritorio que monitorea **en tiempo real** todas tus sesiones de
 Claude Code en paralelo, leyendo data **100% local**. Un board kanban por proyecto,
 con estado vivo (working / atención / idle), panel de detalle, command palette y
-acciones reales sobre tus repos.
+acciones reales sobre tus repos. Y además **terminales embebidas**: abrí múltiples
+consolas (`claude` o shell) **dentro** de la app, full-screen y en vivo.
 
 *Electron + TypeScript · Windows · local-first*
 
@@ -42,6 +43,12 @@ npm run build      # solo compila TS (src/main + src/preload → dist/)
 npm run dist       # empaqueta Windows: portable + instalador NSIS → release/
 ```
 
+> **Módulo nativo (terminales):** las terminales embebidas usan `node-pty`. Para no necesitar compilador,
+> se usa el binario **prebuilt** para el ABI de Electron — por eso Electron está pinneado a **29.x**. Si
+> reinstalás deps, bajá el binario de Electron con:
+> `cd node_modules/@homebridge/node-pty-prebuilt-multiarch && node ../../prebuild-install/bin.js --runtime=electron --target=29.4.6 --arch=x64`
+> El packaging usa `npmRebuild: false` (no recompila) y desempaqueta el `.node` del asar.
+
 > **Icono embebido (máquina sin Developer Mode/admin):** `rcedit` (que embebe el icono en el `.exe`)
 > viene dentro del paquete `winCodeSign`, cuya extracción falla por unos symlinks de macOS. Antes del
 > primer `npm run dist`, corré una vez `powershell -File build\prep-wincodesign.ps1` (pre-extrae
@@ -56,11 +63,25 @@ con hooks, el estado pasa a ser **en vivo** (working / atención / idle / cerrad
 
 ---
 
+## 🖥 Terminales embebidas
+
+Consomni no sólo observa: también **lanza y hospeda terminales reales adentro**. Abrí el
+workspace con el botón `>_` del sidebar, `Shift+T`, el `+` del board, o el botón **terminal /
+claude acá** de cualquier sesión. Cada panel es una **PTY real** (node-pty) renderizada con
+xterm.js, en un grid full-screen que podés maximizar. Si lanzás `claude`, ves su salida y su
+proceso de pensamiento en vivo, igual que en una terminal nativa.
+
+> Nota: a una sesión que **ya está corriendo afuera** (las del board, detectadas de los transcripts)
+> no se le puede "enchufar" una terminal interactiva — esas se ven read-only en el panel de detalle.
+> Las terminales 100% interactivas son las que **Consomni lanza**. Una sesión `claude` que abras acá
+> también aparece en el board (escribe su transcript).
+
 ## 🎨 Pantallas
 
 Board kanban (E1) · Panel de detalle (E2) · Command palette ⌘K (E3) · Flujo de atención
 con banner + toast nativo + aprobar/denegar (E4) · Split / grid de feeds en vivo (E5) ·
-Sidebar colapsado (E6) · Settings. Diseño dark, monoespaciado (Geist Mono), estética terminal.
+Sidebar colapsado (E6) · Settings · **workspace de Terminales embebidas**.
+Diseño dark, monoespaciado (Geist Mono), estética terminal.
 
 ---
 
@@ -79,7 +100,7 @@ Sidebar colapsado (E6) · Settings. Diseño dark, monoespaciado (Geist Mono), es
 | `f` | ciclar filtro de modo | | `⌘↵` | dispatch |
 | `s` | ciclar orden | | `g a` | ir a la primera atención |
 | `c` | densidad cómodo/compacto | | `m` | mute notificaciones |
-| `?` | ayuda (este mapa) | | | |
+| `?` | ayuda (este mapa) | | `Shift+T` | workspace de terminales |
 
 ---
 
@@ -122,11 +143,11 @@ pin / favorito / archivar, y **notificación nativa** del SO al pedir atención
 Todas las acciones del SO se lanzan con `execFile`/`spawn` pasando **arrays de argumentos**
 (nunca shell strings) → sin inyección aunque los paths tengan espacios o metacaracteres.
 
-> **¿Cómo disparo una acción (p.ej. abrir la terminal)?** Tres formas: (1) pasá el mouse sobre una
-> card → aparecen los **mini-botones** arriba a la derecha (abrir editor · terminal · copiar · cerrar);
-> (2) clickeá la card para abrir el **panel de detalle** y usá su grilla de acciones; (3) con una card
-> enfocada, atajo `t` (terminal), `o` (editor), etc. La terminal abre Windows Terminal (`wt`) en el
-> `cwd` de la sesión, con fallback a PowerShell.
+> **¿Cómo abro una terminal?** La terminal es **embebida** (dentro de Consomni, no un `wt` externo).
+> Formas: el botón `>_` del sidebar / `Shift+T` (workspace) · el `+` del board (nueva terminal) · el
+> mini-botón terminal al pasar el mouse sobre una card · `t` con una card enfocada · o "terminal acá /
+> claude acá" en el panel de detalle. Cada terminal corre en el `cwd` de la sesión (shell: `pwsh` →
+> `powershell` → `cmd`).
 
 ---
 
@@ -136,9 +157,11 @@ Todas las acciones del SO se lanzan con `execFile`/`spawn` pasando **arrays de a
 design-reference/   fuente de verdad visual (read-only): tokens.css + chrome.js + e1..e7
 hooks/post.js       helper que postea eventos de hooks a 127.0.0.1:<port>
 src/main/           proceso main (TS): index, jsonl (parser), sessions (store+watcher),
+                    terminals (PTYs node-pty), updates (chequeo de versión),
                     hooks-server (express), hooks-install (backup+merge), actions, config
 src/preload/        contextBridge tipado (sin nodeIntegration)
-src/renderer/       tokens.css (verbatim) + chrome.js (builders) + app.js + app.css + assets
+src/renderer/       tokens.css (verbatim) + chrome.js (builders) + app.js + app.css +
+                    terminals-ui.js (workspace xterm) + assets (fonts + xterm vendorizados)
 ~/.consomni/        runtime del usuario: config.json, state.json, backups/, setup.log
 ```
 

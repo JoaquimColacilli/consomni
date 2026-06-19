@@ -46,7 +46,13 @@
 - Empaquetado: **electron-builder** (Windows: `portable` + `nsis`).
 - Sin framework de UI (nada de React/Vue). El renderer reusa el design-reference tal cual.
 - Deps permitidas: `electron`, `electron-builder`, `typescript`, `chokidar` (watcher),
-  `express` (server de hooks). Nada más sin justificarlo acá.
+  `express` (server de hooks), **`@homebridge/node-pty-prebuilt-multiarch`** (PTYs reales para
+  las terminales embebidas — fork PREBUILT de node-pty, sin compilar) y **`@xterm/xterm` +
+  `@xterm/addon-fit`** (render de terminal en el renderer, **vendorizados** a
+  `src/renderer/assets/xterm/` y cargados por `<script>`; en devDependencies). Nada más sin justificarlo acá.
+- **Electron PINNEADO a `29.x`** (no 33): es la versión más nueva con binario PREBUILT de
+  node-pty disponible (ABI v121). Electron 33 = ABI v130, sin prebuild, y la máquina de build
+  no tiene MSVC para compilar. Todas las APIs que usamos existen desde Electron 20+. Ver gotcha abajo.
 
 ---
 
@@ -60,6 +66,8 @@ consomni/
     main/
       index.ts             # bootstrap, BrowserWindow, IPC, wiring
       jsonl.ts             # parser + watcher (chokidar) de ~/.claude/projects (read-only)
+      terminals.ts         # manager de PTYs reales (node-pty): create/write/resize/kill + eventos
+      updates.ts           # chequeo de versión contra el repo del proyecto (opt-out)
       hooks-server.ts      # express local 127.0.0.1:4517 (configurable)
       hooks-install.ts     # backup + merge no-destructivo en settings.json
       sessions.ts          # store: merge A(JSONL)+B(hooks) → Session[], ordering, throttle
@@ -72,7 +80,12 @@ consomni/
       app.css              # SOLO reglas aditivas de responsive usando tokens existentes
       index.html           # shell: topbar+sidebar+board+statusbar+crt + overlays
       app.js               # estado renderer, IPC, re-render, interacciones, atajos
+      terminals-ui.js      # workspace de terminales embebidas (xterm) — capa persistente #terminals
       assets/fonts/        # Geist Mono vendorizada (offline)
+      assets/xterm/        # xterm.js + xterm.css + addon-fit.js vendorizados (offline)
+  build/
+    make-ico.ps1           # genera icon.ico multi-res desde icon.png (System.Drawing)
+    prep-wincodesign.ps1   # pre-extrae winCodeSign sin symlinks darwin (para rcedit sin admin)
   package.json  tsconfig.json  electron-builder.yml  README.md
 ~/.consomni/               # runtime del usuario: config.json, state.json (pin/fav/archivar),
                            # setup.log, backups/settings.json.<ts>.bak
@@ -160,15 +173,36 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
 ---
 
 ## Acciones: reales vs stub honesto
-- **REAL:** abrir VSCode (`code <cwd>`), terminal (`wt -d <cwd>`→fallback powershell), carpeta (`explorer`),
+- **REAL:** **terminal embebida** (`term` → xterm + PTY real en el `cwd`, full-screen) y
+  **dispatch = sesión `claude` embebida** (`dispatch` → shell + `claude` en el `cwd`), ambas
+  via el workspace de Terminales (ver abajo). abrir VSCode (`code <cwd>`), carpeta (`explorer`),
   copiar path/branch/id (clipboard Electron), ver transcript (`.jsonl`), `git -C <cwd> diff`,
-  pin/fav/archivar (estado local `~/.consomni`), abrir PR (`gh pr ...`).
+  pin/fav/archivar (estado local `~/.consomni`), abrir PR (`gh pr ...`), abrir URL externa
+  (`shell.openExternal`, https only — para el link del autor).
 - **PARCIAL:** aprobar/denegar permiso → requiere hook `PreToolUse` que **bloquee y consulte** a
   Consomni (riesgo de freeze/timeout). **Default: observar + toast + saltar a la terminal.**
   Interceptación bloqueante = opt-in en Settings.
-- **STUB honesto (TODO, no inventar):** dispatch / quick-reply / pausar / matar / re-dispatch.
-  Los hooks no inyectan prompts ni matan sesiones. Dispatch real = spawnear `claude` nuevo;
-  matar = `taskkill` al PID (OS-level). Dejar wired como stub claro.
+- **STUB honesto (TODO, no inventar):** quick-reply / pausar / matar / re-dispatch sobre sesiones
+  EXTERNAS (las detectadas por transcript). Los hooks no inyectan prompts ni matan sesiones, y a
+  un proceso `claude` que ya corre afuera NO le podemos enchufar una PTY interactiva (no tenemos
+  su handle). Lo interactivo de verdad son las terminales que Consomni LANZA (workspace embebido).
+
+## Terminales embebidas (workspace) — v0.6.0
+- **Qué:** Consomni pasó de puro observador a **también hospedar terminales reales adentro**. El
+  workspace (botón `>_` del sidebar · Shift+T · "+" del board · `term`/`dispatch` de cualquier card)
+  abre una capa full-screen con un **grid de paneles xterm**, cada uno atado a una **PTY real**
+  (shell o `claude`). `claude` embebido muestra su UI/thinking tal cual.
+- **Arquitectura:** `main/terminals.ts` (node-pty: `createTerm/writeTerm/resizeTerm/killTerm`,
+  eventos `term:data`/`term:exit`; carga PEREZOSA y tolerante a fallos del .node) ↔ IPC
+  (`termCreate` invoke; `termWrite`/`termResize` send; `termData`/`termExit` push) ↔ preload
+  (`consomni.term.*`) ↔ `renderer/terminals-ui.js` (`window.ConsomniTerms`: maneja instancias de
+  xterm + FitAddon en `#terminals`, una **capa PERSISTENTE** que el re-render del board NO toca —
+  las PTYs siguen vivas en background al ocultar). Shell: `pwsh`→`powershell`→`cmd`. `claude` se
+  arranca escribiendo `claude\r` al primer `onData` (shell ya con prompt).
+- **Tamaño/resize:** xterm se monta, `fit()` mide cols/rows reales, recién ahí se crea la PTY con
+  ese tamaño; en resize de ventana / cambio de layout se re-`fit()` y se `resize()` la PTY.
+- **Seguridad:** sigue **cero API de Anthropic** — Consomni sólo hospeda el proceso; `claude` hace
+  lo suyo (igual que si abrieras la terminal vos). Se borra `ELECTRON_RUN_AS_NODE` del env del hijo.
 
 ---
 
@@ -274,6 +308,13 @@ quedan para icono de la app en Fase 6.
       chequeo al iniciar (opt-out) + botón manual en Settings; toast clickeable si hay versión nueva. (5) **Icono
       embebido real** (abajo). (6) Versión real del package → snapshot (`appVersion`) → sidebar (no más hardcode).
       Onboarding ya existía (sólo aparece si los hooks NO están instalados y no fue dismisseado).
+- [x] **v0.6.0 — TERMINALES EMBEBIDAS (pivote pedido por el usuario).** Consomni ahora hospeda PTYs
+      reales adentro (node-pty + xterm), no sólo observa. Ver sección "Terminales embebidas" arriba.
+      Cambios de interacción: `term`/`dispatch` ya no lanzan `wt` externo → abren terminal/claude embebida
+      full-screen; se sacó la `x` confusa de las cards (`qaBtns` → `['ext','term','copy']`); click en la
+      MISMA card abierta ahora la cierra (toggle); "+" del board, botón `>_` del sidebar y Shift+T abren el
+      workspace; detalle E2 suma "terminal acá" / "claude acá". Electron pinneado a 29 (ver Stack). node-pty
+      verificado cargando + spawneando PTY real dentro de Electron (smoke test) y en el .exe empaquetado.
 
 ### Packaging — icono embebido + winCodeSign (máquina sin Developer Mode/admin) — RESUELTO
 - **El problema:** `rcedit-x64.exe` (que embebe icono/metadata en el `.exe`) viene DENTRO del paquete
@@ -289,6 +330,18 @@ quedan para icono de la app en Fase 6.
   `param([string]$Src)` y luego `$Src = [Image]::FromFile(...)` — el tipo `[string]` castea la Image a
   `"System.Drawing.Bitmap"`. NSIS necesita .ico real; no pasar `installerIcon` png.
 - **Build:** `Remove-Item Env:ELECTRON_RUN_AS_NODE; powershell -File build\prep-wincodesign.ps1; $env:CSC_IDENTITY_AUTO_DISCOVERY='false'; npm run dist`. Verificado: el `.exe` (win-unpacked + portable) lleva el ojo de Consomni.
+
+### Packaging — módulo nativo node-pty (sin MSVC) — v0.6.0
+- node-pty es nativo y la máquina de build **no tiene Visual Studio/MSVC** → no se puede compilar.
+  Solución: usar el fork **PREBUILT** `@homebridge/node-pty-prebuilt-multiarch` y bajar el binario del
+  ABI de Electron con `prebuild-install --runtime=electron --target=<ver>`. El prebuild más nuevo del fork
+  es **electron ABI v121 = Electron 29** → por eso Electron está pinneado a `29.x` (33 no tiene prebuild).
+- En `electron-builder.yml`: **`npmRebuild: false`** (NO recompilar desde fuente — usaría node-gyp y fallaría)
+  y **`asarUnpack: node_modules/@homebridge/node-pty-prebuilt-multiarch/**/*`** (el `.node` no carga desde
+  dentro del asar). El primer `npm install` baja el prebuild de Node; tras pinear Electron correr una vez
+  `cd node_modules/@homebridge/node-pty-prebuilt-multiarch && node ../../prebuild-install/bin.js --runtime=electron --target=29.4.6 --arch=x64`.
+- **Setup desde cero:** `npm install` → fetch prebuild de node-pty para electron (comando de arriba) →
+  `npm run dist`. Verificado: terminal embebida abre en el `.exe` empaquetado.
 
 ### git
 consomni NO tenía .git propio; el repo de `~/OneDrive/Escritorio` (vacío) lo contenía. Se hizo

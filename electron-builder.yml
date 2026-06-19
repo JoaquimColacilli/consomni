@@ -12,10 +12,16 @@ files:
   - hooks/**/*
   - package.json
 
+# NO recompilar módulos nativos desde fuente (no hay MSVC en la máquina de build):
+# node-pty se instala como binario PREBUILT para el ABI de Electron (ver README/CLAUDE.md).
+npmRebuild: false
+
 # El helper de hooks debe quedar fuera del asar: lo ejecuta `node` externo
 # (el proceso de Claude Code), que no puede leer dentro de app.asar.
+# node-pty es nativo: su .node tampoco puede cargarse desde dentro del asar.
 asarUnpack:
   - hooks/**/*
+  - node_modules/@homebridge/node-pty-prebuilt-multiarch/**/*
 
 # La app es 100% offline y read-only sobre ~/.claude. No firma de código por ahora.
 win:

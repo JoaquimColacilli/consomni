@@ -12,11 +12,18 @@
 <!-- app.css primero (registra @font-face); tokens.css verbatim después -->
 <link rel="stylesheet" href="app.css">
 <link rel="stylesheet" href="tokens.css">
+<!-- xterm.js vendorizado (offline) para las terminales embebidas -->
+<link rel="stylesheet" href="assets/xterm/xterm.css">
 </head>
 <body>
 <div id="root"></div>
 <div id="overlays"></div>
+<!-- capa persistente de terminales embebidas (NO la limpia el re-render del board) -->
+<div id="terminals" hidden></div>
 <script src="chrome.js"></script>
+<script src="assets/xterm/xterm.js"></script>
+<script src="assets/xterm/addon-fit.js"></script>
+<script src="terminals-ui.js"></script>
 <script src="app.js"></script>
 </body>
 </html>

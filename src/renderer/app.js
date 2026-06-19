@@ -96,7 +96,7 @@
       id: s.id, name: s.name, mode: s.mode, ctx: s.ctxPct,
       lvl: lvlFor(s.ctxPct, s.state), tokens: formatTokens(s.tokensTotal),
       model: s.model, state: s.state, sel: !!state.selected[s.id],
-      qaBtns: s.state === 'error' ? ['ext', 'term', 'redo', 'x'] : ['ext', 'term', 'copy', 'x'],
+      qaBtns: s.state === 'error' ? ['ext', 'term', 'redo'] : ['ext', 'term', 'copy'],
       status: status,
     };
   }
@@ -286,13 +286,29 @@
   }
   function visibleCards() { return Array.prototype.slice.call(document.querySelectorAll('.card[data-sid]')); }
 
-  /* ════════ ACCIONES (las reales se completan en Fase 5) ════════ */
-  var REAL = { ext: 1, term: 1, folder: 1, diff: 1, pr: 1, dispatch: 1, copy: 1, branch: 1, copyId: 1, transcript: 1 };
+  /* ════════ ACCIONES ════════ */
+  // 'term' y 'dispatch' ya NO lanzan un wt externo: abren una terminal EMBEBIDA
+  // (xterm + node-pty) a pantalla completa dentro de Consomni.
+  function openEmbeddedTerminal(cwd, kind) {
+    var T = window.ConsomniTerms;
+    if (!T) { toast('terminales no disponibles', 'err'); return; }
+    if (api && api.term && api.term.available) {
+      api.term.available().then(function (ok) {
+        if (!ok) { toast('node-pty no se cargó (módulo nativo) — reinstalá deps', 'err'); return; }
+        T.open({ cwd: cwd || undefined, kind: kind });
+      }).catch(function () { T.open({ cwd: cwd || undefined, kind: kind }); });
+    } else { T.open({ cwd: cwd || undefined, kind: kind }); }
+  }
+
+  var REAL = { ext: 1, folder: 1, diff: 1, pr: 1, copy: 1, branch: 1, copyId: 1, transcript: 1 };
   function dispatchAction(act, sid) {
     var s = sid ? sessionById(sid) : (state.detailId ? sessionById(state.detailId) : (state.focusSid ? sessionById(state.focusSid) : null));
     if (act === 'x') { if (!sid && s) sid = s.id; if (sid) toggleSelect(sid); return; }
     if (act === 'pin') { if (s) api.setLocalState(s.id, { pinned: !s.pinned }).then(function (sn) { setSnapshot(sn); toast((s.pinned ? 'unpin' : 'pin') + ' · ' + s.name); }); return; }
     if (act === 'archive') { if (s) api.setLocalState(s.id, { archived: !s.archived }).then(function (sn) { setSnapshot(sn); toast('archivada · ' + s.name); }); return; }
+    // ── terminales embebidas ──
+    if (act === 'term') { openEmbeddedTerminal(s ? s.cwd : null, 'shell'); if (s) closeDetail(); return; }
+    if (act === 'dispatch') { openEmbeddedTerminal(s ? s.cwd : null, 'claude'); if (s) closeDetail(); return; }
     if (REAL[act]) {
       if (!s) { toast('elegí una sesión primero', 'warn'); return; }
       if (!api || !api.action) { toast('acción no disponible', 'err'); return; }
@@ -553,7 +569,7 @@
         }).join('') : '<div style="font-size:11px;color:var(--text-4)">sin actividad reciente</div>') + '</div>' +
       '</div>';
 
-    var actions = [['ext', 'VSCode'], ['term', 'terminal'], ['copy', 'copiar path'], ['branch', 'copiar branch'], ['transcript', 'transcript'], ['diff', 'ver diff'], ['pin', s.pinned ? 'unpin' : 'pin'], ['pause', 'pausar'], ['skull', 'matar'], ['redo', 're-dispatch'], ['archive', 'archivar'], ['pr', 'abrir PR']];
+    var actions = [['term', 'terminal acá'], ['dispatch', 'claude acá'], ['ext', 'VSCode'], ['copy', 'copiar path'], ['branch', 'copiar branch'], ['transcript', 'transcript'], ['diff', 'ver diff'], ['pin', s.pinned ? 'unpin' : 'pin'], ['pause', 'pausar'], ['skull', 'matar'], ['redo', 're-dispatch'], ['archive', 'archivar'], ['pr', 'abrir PR']];
     var actionbar =
       '<div class="actionbar"><div class="qreply"><span style="color:var(--green)">' + C.svg('reply', 14, 1.7) + '</span>' +
         '<input placeholder="responder a esta sesión… (r)" data-reply="' + esc(s.id) + '"><kbd class="kbd">⌘↵</kbd></div>' +
@@ -653,8 +669,8 @@
   var HELP = [
     ['⌘K', 'command palette'], ['/', 'buscar'], ['j / k', 'navegar cards'], ['h / l', 'cambiar columna'],
     ['↵', 'expandir detalle'], ['space', 'peek'], ['esc', 'cerrar'], ['o', 'abrir VSCode'],
-    ['t', 'terminal'], ['y / Y', 'copiar path / branch'], ['r', 'responder'], ['a / d', 'aprobar / denegar'],
-    ['p', 'pin'], ['x', 'multi-select'], ['X', 'cerrar sesión'], ['⌘↵', 'dispatch'],
+    ['t', 'terminal embebida'], ['⇧T', 'workspace terminales'], ['y / Y', 'copiar path / branch'], ['r', 'responder'],
+    ['a / d', 'aprobar / denegar'], ['p', 'pin'], ['x', 'multi-select'], ['X', 'cerrar sesión'], ['⌘↵', 'dispatch claude'],
     ['⌘1..9', 'saltar a proyecto'], ['f', 'filtro de modo'], ['s', 'orden'], ['c', 'densidad'],
     ['m', 'mute'], ['g a', 'ir a atención'], ['?', 'esta ayuda']
   ];
@@ -799,6 +815,7 @@
       if (act === 'close-help') { if (t.classList.contains('help-scrim')) setOverlay(''); return; }
       if (act === 'close-settings') { if (t.classList.contains('set-scrim') || actEl.tagName === 'BUTTON') closeSettings(); return; }
       if (act === 'settings') { openSettings(); return; }
+      if (act === 'terminals') { if (window.ConsomniTerms) window.ConsomniTerms.toggle(); return; }
       if (act === 'theme') { toast('tema oscuro (único por ahora)', 'warn'); return; }
       if (act === 'go-attn') { goToAttention(); return; }
       if (act === 'exit-split') { exitSplit(); return; }
@@ -813,7 +830,7 @@
       }
     }
     // topbar controls
-    if (t.closest && t.closest('.board-add')) { openPalette(); return; }
+    if (t.closest && t.closest('.board-add')) { openEmbeddedTerminal(null, 'shell'); return; }
     if (t.closest && t.closest('.cmdk')) { openPalette(); return; }
     if (t.closest && t.closest('.search')) { activateSearch(); return; }
     var seg = t.closest && t.closest('.seg span[data-density]'); if (seg) { setDensity(seg.getAttribute('data-density')); return; }
@@ -827,13 +844,28 @@
     var crow = t.closest && t.closest('.closed-row[data-sid]'); if (crow) { openDetail(crow.getAttribute('data-sid')); return; }
     // card → detail (o select si hay multi-select activo)
     var card = t.closest && t.closest('.card[data-sid]');
-    if (card) { var sid = card.getAttribute('data-sid'); if (Object.keys(state.selected).length) toggleSelect(sid); else { state.focusSid = sid; openDetail(sid); } return; }
+    if (card) {
+      var sid = card.getAttribute('data-sid');
+      if (Object.keys(state.selected).length) { toggleSelect(sid); return; }
+      // clickear la MISMA card que ya tiene el detalle abierto → cerrar (toggle)
+      if (state.detailId === sid) { closeDetail(); return; }
+      state.focusSid = sid; openDetail(sid); return;
+    }
   });
 
   /* ════════ KEYBOARD ════════ */
   var gPending = false;
   document.addEventListener('keydown', function (e) {
     var meta = e.metaKey || e.ctrlKey;
+    var T = window.ConsomniTerms;
+
+    // Con el workspace de TERMINALES abierto, todo va a xterm; sólo Esc vuelve al board.
+    if (T && T.isOpen()) {
+      if (e.key === 'Escape') { e.preventDefault(); T.hide(); }
+      return;
+    }
+    // Abrir/cerrar el workspace de terminales (Shift+T para no chocar con 't' = terminal de la card)
+    if (!meta && (e.key === 'T')) { e.preventDefault(); T && T.toggle(); return; }
 
     // ⌘K abre palette desde cualquier lado
     if (meta && (e.key === 'k' || e.key === 'K')) { e.preventDefault(); state.paletteOpen ? closePalette() : openPalette(); return; }
@@ -974,6 +1006,7 @@
   }, 1000);
 
   /* ── init ── */
+  if (window.ConsomniTerms) window.ConsomniTerms.setNotifier(toast);
   state.collapsed = window.innerWidth < BREAKPOINT;
   if (api) {
     api.getSnapshot().then(setSnapshot).catch(function () { render(); });

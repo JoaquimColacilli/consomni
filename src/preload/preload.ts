@@ -56,6 +56,28 @@ const api = {
     ipcRenderer.on('consomni:update', listener);
     return () => ipcRenderer.removeListener('consomni:update', listener);
   },
+
+  /* ── terminales embebidas (PTYs reales) ── */
+  term: {
+    available: (): Promise<boolean> => ipcRenderer.invoke('consomni:termAvailable'),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    create: (opts: any): Promise<any> => ipcRenderer.invoke('consomni:termCreate', opts),
+    write: (id: string, data: string): void => ipcRenderer.send('consomni:termWrite', { id, data }),
+    resize: (id: string, cols: number, rows: number): void => ipcRenderer.send('consomni:termResize', { id, cols, rows }),
+    kill: (id: string): Promise<boolean> => ipcRenderer.invoke('consomni:termKill', id),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    list: (): Promise<any[]> => ipcRenderer.invoke('consomni:termList'),
+    onData: (cb: (p: { id: string; data: string }) => void): (() => void) => {
+      const l = (_e: unknown, p: { id: string; data: string }): void => cb(p);
+      ipcRenderer.on('term:data', l);
+      return () => ipcRenderer.removeListener('term:data', l);
+    },
+    onExit: (cb: (p: { id: string; exitCode: number }) => void): (() => void) => {
+      const l = (_e: unknown, p: { id: string; exitCode: number }): void => cb(p);
+      ipcRenderer.on('term:exit', l);
+      return () => ipcRenderer.removeListener('term:exit', l);
+    },
+  },
 };
 
 contextBridge.exposeInMainWorld('consomni', api);
