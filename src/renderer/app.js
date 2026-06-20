@@ -345,16 +345,25 @@
   /* ════════ ACCIONES ════════ */
   // 'term' y 'dispatch' ya NO lanzan un wt externo: abren una terminal EMBEBIDA
   // (xterm + node-pty) a pantalla completa dentro de Consomni.
-  function openEmbeddedTerminal(cwd, kind, resume) {
+  function openEmbeddedTerminal(cwd, kind, resume, opts) {
+    opts = opts || {};
     var T = window.ConsomniTerms;
     if (!T) { toast('terminales no disponibles', 'err'); return; }
-    var go = function () { T.spawn(kind, cwd || undefined, 'right', { resume: resume || undefined }); };
+    var go = function () { T.spawn(kind, cwd || undefined, 'right', { resume: resume || undefined, skip: opts.skip, proj: opts.proj, projName: opts.projName }); };
     if (api && api.term && api.term.available) {
       api.term.available().then(function (ok) {
         if (!ok) { toast('node-pty no se cargó (módulo nativo) — reinstalá deps', 'err'); return; }
         go();
       }).catch(go);
     } else { go(); }
+  }
+  // datos de proyecto de una sesión para taguear el panel (id = projKey, igual que la vista; name = lindo)
+  function sProj(s, skip) { var o = s ? { proj: projKey(s), projName: s.project } : {}; if (skip) o.skip = true; return o; }
+  // cwd + nombre representativo de un proyecto (por su projKey) desde el snapshot
+  function projInfo(p) {
+    var list = (state.snapshot && state.snapshot.sessions) || [], name = '', cwd = '';
+    for (var i = 0; i < list.length; i++) { if (projKey(list[i]) === p) { if (!name) name = list[i].project || ''; if (list[i].cwd) { cwd = list[i].cwd; break; } } }
+    return { cwd: cwd, name: name };
   }
 
   var REAL = { ext: 1, folder: 1, diff: 1, pr: 1, copy: 1, branch: 1, copyId: 1, transcript: 1 };
@@ -363,10 +372,11 @@
     if (act === 'x') { if (!sid && s) sid = s.id; if (sid) toggleSelect(sid); return; }
     if (act === 'pin') { if (s) api.setLocalState(s.id, { pinned: !s.pinned }).then(function (sn) { setSnapshot(sn); toast((s.pinned ? 'unpin' : 'pin') + ' · ' + s.name); }); return; }
     if (act === 'archive') { if (s) api.setLocalState(s.id, { archived: !s.archived }).then(function (sn) { setSnapshot(sn); toast('archivada · ' + s.name); }); return; }
-    // ── terminales embebidas ──
-    if (act === 'term') { openEmbeddedTerminal(s ? s.cwd : null, 'shell'); if (s) closeDetail(); return; }
-    if (act === 'dispatch') { openEmbeddedTerminal(s ? s.cwd : null, 'claude'); if (s) closeDetail(); return; }
-    if (act === 'resume') { if (!s) { toast('elegí una sesión', 'warn'); return; } openEmbeddedTerminal(s.cwd, 'claude', s.id); closeDetail(); return; }
+    // ── terminales embebidas (tagueadas con el proyecto de la sesión) ──
+    if (act === 'term') { openEmbeddedTerminal(s ? s.cwd : null, 'shell', null, sProj(s)); if (s) closeDetail(); return; }
+    if (act === 'dispatch') { openEmbeddedTerminal(s ? s.cwd : null, 'claude', null, sProj(s)); if (s) closeDetail(); return; }
+    if (act === 'dispatch-skip') { openEmbeddedTerminal(s ? s.cwd : null, 'claude', null, sProj(s, true)); if (s) closeDetail(); return; }
+    if (act === 'resume') { if (!s) { toast('elegí una sesión', 'warn'); return; } openEmbeddedTerminal(s.cwd, 'claude', s.id, sProj(s)); closeDetail(); return; }
     if (REAL[act]) {
       if (!s) { toast('elegí una sesión primero', 'warn'); return; }
       if (!api || !api.action) { toast('acción no disponible', 'err'); return; }
@@ -461,9 +471,17 @@
 
   /* ════════ FILTROS / ORDEN / DENSIDAD / PROYECTO ════════ */
   function setActiveProject(p) {
-    // si venís de "inicio" (terminales en pantalla completa), salí de ahí para ver el board del proyecto
-    if (window.ConsomniTerms && window.ConsomniTerms.isMaximized()) window.ConsomniTerms.minimize();
-    state.activeProject = p; state.focusSid = null; render();
+    state.activeProject = p; state.focusSid = null;
+    var T = window.ConsomniTerms;
+    if (p === 'all') {
+      // "todos" → se muestra como antes (board). Si veníamos de pantalla completa, salimos.
+      if (T) { if (T.isMaximized()) T.minimize(); T.setView('__home__'); }
+      render(); return;
+    }
+    // proyecto puntual → abrir SUS terminales DE UNA (pantalla completa)
+    var info = projInfo(p);
+    render();
+    if (T) T.openProject(p, info.cwd, info.name);
   }
   function toggleMode(m) { if (state.modeFilter[m]) delete state.modeFilter[m]; else state.modeFilter[m] = true; render(); }
   function cycleMode() {
@@ -900,7 +918,7 @@
     var pill = t.closest && t.closest('.fpill[data-mode]'); if (pill) { toggleMode(pill.getAttribute('data-mode')); return; }
     var sortBtn = t.closest && t.closest('.tbtn'); if (sortBtn) { openSortMenu(sortBtn); return; }
     if (t.closest && t.closest('[data-act="sbtoggle"]')) { setSidebarCollapsed(!state.collapsed); return; }
-    if (t.closest && t.closest('[data-act="home"]')) { if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
+    if (t.closest && t.closest('[data-act="home"]')) { state.activeProject = 'all'; render(); if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
 
     // ── CARDS PRIMERO (van adentro de la columna, que tiene data-proj) ──
     // closed row → detalle
@@ -911,7 +929,7 @@
       var sid = card.getAttribute('data-sid');
       state.focusSid = sid;
       var sObj = sessionById(sid);
-      if (window.ConsomniTerms) window.ConsomniTerms.openSession(sid, sObj ? sObj.name : 'sesión', sObj ? sObj.project : '');
+      if (window.ConsomniTerms) window.ConsomniTerms.openSession(sid, sObj ? sObj.name : 'sesión', sObj ? projKey(sObj) : '', sObj ? sObj.project : '');
       else openDetail(sid);
       return;
     }

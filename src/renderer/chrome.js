@@ -172,7 +172,7 @@
     const searchTxt = o.searchValue ? o.searchValue : 'buscar nombre / proyecto / branch…';
 
     return '<header class="topbar">' +
-      '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span><span class="brand-ver">' + esc(o.version || 'v1.2.1') + '</span></div>' +
+      '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span><span class="brand-ver">' + esc(o.version || 'v1.2.2') + '</span></div>' +
       '<div class="divider-v"></div>' +
       '<div class="counters">' +
         '<span><b>' + total + '</b> sesiones</span><span class="sep">·</span>' +
@@ -303,7 +303,7 @@
         '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
         '<button class="sbtn" data-act="theme">' + svg('moon', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v1.2.1') + '</span></div>' +
+        '<span class="ver">' + esc(o.version || 'v1.2.2') + '</span></div>' +
     '</aside>';
   }
 

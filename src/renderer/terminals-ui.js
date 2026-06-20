@@ -1,103 +1,107 @@
 /* ════════════════════════════════════════════════════════════════
    Consomni — terminals-ui.js
-   DOCK de terminales/conversaciones MALEABLE (tipo IDE / tiling):
-   - Vive abajo a la DERECHA del sidebar (no lo tapa salvo zoom/home).
+   DOCK de terminales/conversaciones MALEABLE (tipo IDE / tiling), CONTEXTUAL:
+   - "inicio" muestra las terminales FIJADAS (★) + las sueltas abiertas ahí.
+   - una VISTA de proyecto muestra las terminales de ESE proyecto.
    - Mosaico de paneles: dividir a derecha/abajo, ARRASTRAR divisores para
-     redimensionar, y ARRASTRAR un panel (de su barra) a un borde de otro para
-     reubicarlo (drop-zones izq/der/arriba/abajo).
+     redimensionar, y ARRASTRAR un panel a un borde de otro para reubicarlo.
    - Borde superior arrastrable (alto del dock). Minimizar a barra. Zoom full.
-   - Cada panel: PTY real (xterm: shell o `claude`) o conversación read-only.
+   - Cada panel: PTY real (xterm: shell / claude / claude ⚡ sin permisos) o
+     conversación read-only.
    Vive en #terminals: capa PERSISTENTE que el re-render del board NO toca.
+   Al cambiar de vista los paneles que no matchean se guardan en un pool oculto
+   (las PTYs siguen vivas) y se re-arman en FILA simple en la vista activa.
 
    API: window.ConsomniTerms = { spawn, open, openSession, show, hide,
-     minimize, restore, toggle, home, isOpen, count, refreshActive,
-     setNotifier, setActionHandler, isMaximized }
+     minimize, restore, toggle, home, setView, openProject, isOpen, count,
+     refreshActive, setNotifier, setActionHandler, setMaxObserver,
+     restoreSession, isMaximized }
    ════════════════════════════════════════════════════════════════ */
 (function (g) {
   'use strict';
   var C = g.Chrome, api = g.consomni, Terminal = g.Terminal, FitNS = g.FitAddon;
 
-  var host = null, rootEl = null, dropInd = null, countEl = null;
+  var host = null, rootEl = null, poolEl = null, dropInd = null, countEl = null;
   var terms = new Map();       // ptyId -> { term, fit, pane, ro }
   var sessions = new Map();    // sid   -> pane
   var paneSeq = 0;
   var focused = null;
   var bound = false, snapBound = false, restoring = false;
+  var view = '__home__';       // vista activa: '__home__' (inicio) o id de proyecto (projKey)
+  var viewCwd = '';            // cwd por defecto para terminales nuevas en la vista de proyecto
+  var viewName = '';           // nombre lindo del proyecto activo (para mostrar; el id es un path)
   var notifier = function () {}, actionHandler = function () {}, maxObserver = function () {};
   function isMaximized() { return !!host && host.classList.contains('maximized'); }
   function notifyMax() { try { maxObserver(isMaximized()); } catch (e) {} }
 
-  /* ── persistencia del layout (localStorage, 100% local) ──
-     Guarda el árbol de splits + cada panel (kind/cwd/sid/resume) para que la app
-     SIEMPRE arranque en "inicio" con las terminales que quedaron. */
-  // se persiste vía el proceso main (~/.consomni/dock.json); localStorage NO es
-  // confiable bajo file:// en Electron (writes fallan silenciosamente).
+  /* ── persistencia (~/.consomni/dock.json vía main; localStorage NO es confiable bajo file://) ──
+     Guardamos la LISTA de paneles que viven en inicio (fijados o sueltos): son los que
+     sobreviven al reinicio. Los no-fijados de un proyecto son efímeros (sólo la sesión). */
   var persistTimer = null;
   function persist() {
     if (restoring) return;
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = setTimeout(function () {
       try {
-        var layout = (rootEl && rootEl.firstElementChild) ? serializeNode(rootEl.firstElementChild) : null;
+        var list = allPanes().filter(inInicio).map(serializePane);
         var rs = document.documentElement.style;
-        if (api && api.term && api.term.saveDock) api.term.saveDock({ v: 1, max: isMaximized(), dh: rs.getPropertyValue('--dock-h') || '', layout: layout });
+        if (api && api.term && api.term.saveDock) api.term.saveDock({ v: 2, max: isMaximized(), dh: rs.getPropertyValue('--dock-h') || '', panes: list });
       } catch (e) { /* noop */ }
     }, 350);
   }
-  function serializeNode(el) {
-    if (el.classList.contains('dk-pane')) {
-      var d = el.dataset, o = { t: 'pane', kind: d.kind || 'shell' };
-      if (d.kind === 'session') { o.sid = d.sid; o.name = d.sname || ''; if (d.proj) o.proj = d.proj; }
-      else { o.cwd = d.cwd || ''; if (d.resume) o.resume = d.resume; }
-      return o;
-    }
-    var kids = elemChildren(el).filter(function (c) { return !c.classList.contains('dk-splitter'); });
-    return {
-      t: 'split', dir: el.classList.contains('col') ? 'col' : 'row',
-      children: kids.map(function (c) { return { size: parseFloat(c.style.flex) || 1, node: serializeNode(c) }; })
-    };
+  function serializePane(el) {
+    var d = el.dataset, o = { kind: d.kind || 'shell' };
+    if (d.kind === 'session') { o.sid = d.sid; o.name = d.sname || ''; }
+    else { o.cwd = d.cwd || ''; if (d.resume) o.resume = d.resume; if (d.skip === '1') o.skip = 1; }
+    if (d.proj) o.proj = d.proj;
+    if (d.projname) o.projname = d.projname;
+    if (d.pinned === '1') o.pinned = 1;
+    return o;
   }
-  function buildNode(node) {
-    if (!node || node.t === 'pane') {
-      var kind = node && node.kind === 'session' ? 'session' : (node && node.kind === 'claude' ? 'claude' : 'shell');
-      var pane = makePaneShell(kind);
-      pane.dataset.kind = kind;
-      if (kind === 'session') { pane.dataset.sid = node.sid || ''; pane.dataset.sname = node.name || ''; if (node.proj) pane.dataset.proj = node.proj; }
-      else { if (node && node.cwd) pane.dataset.cwd = node.cwd; if (node && node.resume) pane.dataset.resume = node.resume; }
-      return pane;
+  function buildPane(o) {
+    var kind = o.kind === 'session' ? 'session' : (o.kind === 'claude' ? 'claude' : 'shell');
+    var pane = makePaneShell(kind);
+    pane.dataset.kind = kind;
+    if (o.proj) pane.dataset.proj = o.proj;
+    if (o.projname) pane.dataset.projname = o.projname;
+    if (o.pinned) pane.dataset.pinned = '1';
+    if (kind === 'session') { pane.dataset.sid = o.sid || ''; pane.dataset.sname = o.name || ''; }
+    else { if (o.cwd) pane.dataset.cwd = o.cwd; if (o.resume) pane.dataset.resume = o.resume; if (o.skip) pane.dataset.skip = '1'; }
+    return pane;
+  }
+  // compat v1: el dock viejo guardaba un árbol {layout}; extraemos sus paneles (como fijados).
+  function flattenLayout(node, out) {
+    if (!node) return out;
+    if (node.t === 'pane' || node.kind) {
+      out.push({ kind: node.kind || 'shell', sid: node.sid, name: node.name, cwd: node.cwd, resume: node.resume, proj: node.proj, pinned: 1 });
+    } else if (node.children) {
+      node.children.forEach(function (c) { flattenLayout(c.node || c, out); });
     }
-    var split = document.createElement('div');
-    split.className = 'dk-split ' + (node.dir === 'col' ? 'col' : 'row');
-    (node.children || []).forEach(function (ch, i) {
-      if (i > 0) split.appendChild(makeSplitter());
-      var el = buildNode(ch.node);
-      el.style.flex = (ch.size || 1) + ' 1 0';
-      split.appendChild(el);
-    });
-    return split;
+    return out;
   }
   function restoreSession() {
     ensureDock();
     if (!api || !api.term || !api.term.getDock) return;
     api.term.getDock().then(function (data) {
-      if (!data || !data.layout) return;
+      if (!data) return;
+      var list = data.panes;
+      if (!list && data.layout) list = flattenLayout(data.layout, []);   // compat v1
+      if (!list || !list.length) return;
       restoring = true;
-      rootEl.innerHTML = ''; terms.clear(); sessions.clear();
-      var rootChild = buildNode(data.layout);
-      rootChild.style.flex = '1 1 0';
-      rootEl.appendChild(rootChild);
-      panesOf().forEach(function (pane) {
-        var d = pane.dataset;
-        if (d.kind === 'session') mountSession(pane, d.sid, d.sname, d.proj);
-        else mountTerminal(pane, d.kind || 'shell', d.cwd || undefined, d.resume || null);
+      poolEl.innerHTML = ''; rootEl.innerHTML = ''; terms.clear(); sessions.clear();
+      list.forEach(function (o) {
+        var pane = buildPane(o);
+        poolEl.appendChild(pane);
+        if (pane.dataset.kind === 'session') mountSession(pane, pane.dataset.sid, pane.dataset.sname, pane.dataset.proj);
+        else mountTerminal(pane, pane.dataset.kind || 'shell', pane.dataset.cwd || undefined, pane.dataset.resume || null, pane.dataset.skip === '1');
       });
       restoring = false;
-      if (!rootEl.querySelector('.dk-pane')) return;   // nada que restaurar → board normal
       var rs = document.documentElement.style;
       if (data.dh) rs.setProperty('--dock-h', data.dh);
-      updateCount(); setFocus(rootEl.querySelector('.dk-pane'));
-      // arrancar SIEMPRE en INICIO (pantalla completa) con las terminales restauradas
       bindIpc(); bindSnap();
+      view = '__home__'; viewCwd = '';
+      showView('__home__');
+      // arrancar SIEMPRE en INICIO (pantalla completa) con las terminales fijadas restauradas
       host.hidden = false; host.classList.remove('minimized'); host.classList.add('maximized');
       document.body.classList.add('dock-open'); document.body.classList.remove('dock-min');
       notifyMax(); refitSoon(); persist();
@@ -120,6 +124,12 @@
   function splitDIcon() { return '<svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="1.8"><rect x="4" y="3" width="16" height="7.5" rx="1.2"/><rect x="4" y="13.5" width="16" height="7.5" rx="1.2"/></svg>'; }
   function elemChildren(el) { return Array.prototype.filter.call(el.children, function (c) { return c.nodeType === 1; }); }
   function panesOf() { return rootEl ? Array.prototype.slice.call(rootEl.querySelectorAll('.dk-pane')) : []; }
+  function allPanes() { return host ? Array.prototype.slice.call(host.querySelectorAll('.dk-pane')) : []; }
+  // etiqueta linda del proyecto del panel (el id `proj` es un path; mostramos el nombre o el último segmento)
+  function projLabel(pane) {
+    var d = pane.dataset; if (d.projname) return d.projname;
+    if (!d.proj) return ''; var p = d.proj.replace(/[\\/]+$/, ''); return p.split(/[\\/]/).pop() || p;
+  }
 
   /* ── DOM base ── */
   function ensureDock() {
@@ -130,10 +140,11 @@
     host.innerHTML =
       '<div class="dk-resize" title="arrastrá para cambiar el ALTO"></div>' +
       '<div class="dk-toolbar">' +
-        '<span class="dk-tb-title">' + (C ? C.eye(20, false) : '') + '<span>TERMINALES</span><span class="dk-count"></span></span>' +
+        '<span class="dk-tb-title">' + (C ? C.eye(20, false) : '') + '<span class="dk-tb-label">TERMINALES</span><span class="dk-count"></span></span>' +
         '<span class="dk-tb-actions">' +
           '<button class="dk-newbtn dk-new-term" title="nueva terminal">' + svg('term', 12, 2) + ' terminal</button>' +
           '<button class="dk-newbtn dk-new-claude" title="nueva sesión claude">' + svg('dispatch', 12, 2) + ' claude</button>' +
+          '<button class="dk-newbtn dk-new-claude-skip" title="claude SIN permisos (--dangerously-skip-permissions)">' + svg('dispatch', 12, 2) + ' claude ⚡</button>' +
           '<span class="dk-div"></span>' +
           '<button class="dk-newbtn dk-exit" title="salir de pantalla completa (volver al board)">' + svg('chevD', 13, 2.4) + ' salir</button>' +
           '<button class="dk-pb dk-max" title="pantalla completa / restaurar">' + maxIcon() + '</button>' +
@@ -141,12 +152,15 @@
         '</span>' +
       '</div>' +
       '<div class="dk-root"></div>' +
+      '<div class="dk-pool" style="display:none"></div>' +
       '<div class="dk-dropind"></div>';
     rootEl = host.querySelector('.dk-root');
+    poolEl = host.querySelector('.dk-pool');
     dropInd = host.querySelector('.dk-dropind');
     countEl = host.querySelector('.dk-count');
     host.querySelector('.dk-new-term').addEventListener('click', function () { spawn('shell'); });
     host.querySelector('.dk-new-claude').addEventListener('click', function () { spawn('claude'); });
+    host.querySelector('.dk-new-claude-skip').addEventListener('click', function () { spawn('claude', null, null, { skip: true }); });
     host.querySelector('.dk-exit').addEventListener('click', function () { host.classList.remove('maximized'); notifyMax(); refitSoon(); persist(); });
     host.querySelector('.dk-max').addEventListener('click', toggleMax);
     host.querySelector('.dk-min').addEventListener('click', toggleMin);
@@ -170,7 +184,7 @@
   function bindSnap() {
     if (snapBound || !api || !api.onSnapshot) return;
     snapBound = true;
-    api.onSnapshot(function () { sessions.forEach(function (pane) { if (host && !host.hidden && !host.classList.contains('minimized')) renderSession(pane); }); });
+    api.onSnapshot(function () { sessions.forEach(function (pane) { if (host && !host.hidden && !host.classList.contains('minimized') && rootEl.contains(pane)) renderSession(pane); }); });
   }
 
   function updateCount() { if (countEl) { var n = panesOf().length; countEl.textContent = n ? ('· ' + n) : ''; } }
@@ -178,6 +192,70 @@
     if (focused === pane) return;
     focused = pane;
     panesOf().forEach(function (p) { p.classList.toggle('focused', p === pane); });
+  }
+  function updatePinUI(pane) {
+    var star = pane.querySelector('.dk-pin'); if (!star) return;
+    pane.classList.toggle('no-proj', !pane.dataset.proj);   // sueltas (sin proyecto) no muestran el ★
+    star.classList.toggle('on', pane.dataset.pinned === '1');
+  }
+
+  /* ── vistas: inicio (fijadas/sueltas) vs proyecto (su proj) ── */
+  function inInicio(p) { return p.dataset.pinned === '1' || !p.dataset.proj; }
+  function matchesView(p, v) { return v === '__home__' ? inInicio(p) : (p.dataset.proj === v); }
+  function placeholderHTML(v) {
+    if (v === '__home__') {
+      return '<div class="dk-placeholder">' + (C ? C.eye(40, false) : '') +
+        '<div class="dk-ph-title">Inicio sin terminales fijadas</div>' +
+        '<div class="dk-ph-text">Fijá una terminal con la ★ (en cualquier proyecto) y va a aparecer acá, lista para vos.<br>O abrí una nueva con <b>terminal</b> / <b>claude</b> de arriba.</div>' +
+        '</div>';
+    }
+    return '<div class="dk-placeholder">' + svg('term', 38, 1.5) +
+      '<div class="dk-ph-title">Sin terminales en este proyecto</div>' +
+      '<div class="dk-ph-text">Abrí una con <b>terminal</b> / <b>claude</b> de arriba — arranca en la carpeta del proyecto. Fijala con ★ para tenerla también en inicio.</div>' +
+      '</div>';
+  }
+  // re-arma rootEl en FILA simple con los paneles que matchean la vista (el resto al pool)
+  function showView(v) {
+    ensureDock();
+    view = v;
+    // 1) todo lo visible al pool
+    panesOf().forEach(function (p) { poolEl.appendChild(p); });
+    rootEl.innerHTML = '';
+    // 2) los que matchean, a una fila
+    var match = allPanes().filter(function (p) { return matchesView(p, v); });
+    if (!match.length) { rootEl.innerHTML = placeholderHTML(v); updateCount(); return; }
+    if (match.length === 1) { match[0].style.flex = '1 1 0'; rootEl.appendChild(match[0]); }
+    else {
+      var split = document.createElement('div'); split.className = 'dk-split row';
+      match.forEach(function (p, i) { if (i) split.appendChild(makeSplitter()); p.style.flex = '1 1 0'; split.appendChild(p); });
+      rootEl.appendChild(split);
+    }
+    if (!focused || !rootEl.contains(focused)) setFocus(match[0]);
+    updateCount(); refitSoon();
+  }
+  function setView(v, cwd, name) {
+    ensureDock();
+    if (v == null) v = '__home__';
+    viewCwd = (v === '__home__') ? '' : (cwd || '');
+    viewName = (v === '__home__') ? '' : (name || '');
+    showView(v);
+  }
+  // abrir un proyecto: muestra SUS terminales a pantalla completa (DE UNA)
+  function openProject(projId, cwd, name) {
+    ensureDock(); bindIpc(); bindSnap();
+    viewCwd = cwd || ''; viewName = name || '';
+    showView(projId);
+    host.hidden = false; host.classList.remove('minimized'); host.classList.add('maximized');
+    document.body.classList.add('dock-open'); document.body.classList.remove('dock-min');
+    notifyMax(); refitSoon();
+  }
+  function pinToggle(pane) {
+    if (!pane.dataset.proj) return;   // sueltas siempre en inicio; no se fijan/desfijan
+    if (pane.dataset.pinned === '1') pane.removeAttribute('data-pinned'); else pane.dataset.pinned = '1';
+    updatePinUI(pane);
+    notifier(pane.dataset.pinned === '1' ? '★ fijada en inicio' : 'quitada de inicio');
+    persist();
+    showView(view);   // reflejar (si la desfijás en inicio, sale de la vista)
   }
 
   /* ── panel (cáscara común) ── */
@@ -191,6 +269,7 @@
         '<span class="dk-pane-ic"></span>' +
         '<span class="dk-pane-title">…</span>' +
         '<span class="dk-pane-btns">' +
+          '<button class="dk-pbtn dk-pin" title="fijar en inicio (★ favorito)">' + svg('star', 12, 1.8) + '</button>' +
           '<button class="dk-pbtn dk-split-r" title="dividir a la derecha">' + splitRIcon() + '</button>' +
           '<button class="dk-pbtn dk-split-d" title="dividir abajo">' + splitDIcon() + '</button>' +
           '<button class="dk-pbtn dk-pane-x" title="cerrar panel">' + svg('x', 12, 2) + '</button>' +
@@ -198,6 +277,7 @@
       '</div>' +
       '<div class="dk-pane-body"></div>';
     pane.addEventListener('mousedown', function () { setFocus(pane); });
+    pane.querySelector('.dk-pin').addEventListener('click', function (e) { e.stopPropagation(); pinToggle(pane); });
     pane.querySelector('.dk-split-r').addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); spawn('shell', null, 'right'); });
     pane.querySelector('.dk-split-d').addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); spawn('shell', null, 'down'); });
     pane.querySelector('.dk-pane-x').addEventListener('click', function (e) { e.stopPropagation(); closePane(pane); });
@@ -214,6 +294,7 @@
 
   function placeContent(pane, dir) {
     ensureDock();
+    var ph = rootEl.querySelector('.dk-placeholder'); if (ph) rootEl.innerHTML = '';   // vista vacía → sacar placeholder
     if (!rootEl.querySelector('.dk-pane')) { rootEl.appendChild(pane); setFocus(pane); updateCount(); return; }
     var target = (focused && rootEl.contains(focused)) ? focused : rootEl.querySelector('.dk-pane');
     insertPaneAt(target, pane, dir === 'down' ? 'bottom' : 'right');
@@ -262,8 +343,9 @@
   function closePane(pane) {
     killPaneContent(pane);
     detachPane(pane);
+    if (poolEl && poolEl.contains(pane)) poolEl.removeChild(pane);
     updateCount();
-    if (!rootEl.querySelector('.dk-pane')) { focused = null; hide(); persist(); return; }
+    if (!rootEl.querySelector('.dk-pane')) { focused = null; showView(view); persist(); return; }   // vacío → placeholder
     setFocus(rootEl.querySelector('.dk-pane'));
     refitAll(); persist();
   }
@@ -274,21 +356,32 @@
     if (!api || !api.term) { notifier('terminales no disponibles', 'err'); return; }
     ensureDock(); bindIpc(); show();
     opts = opts || {};
+    var proj = (opts.proj != null) ? opts.proj : (view === '__home__' ? '' : view);
+    var projName = opts.projName || (proj && proj === view ? viewName : '');
+    var pinned = (opts.pinned != null) ? opts.pinned : (view === '__home__');   // abierta en inicio → suelta/pinneada
+    if (!cwd) cwd = (view !== '__home__' ? viewCwd : '') || undefined;
     var pane = makePaneShell(kind === 'claude' ? 'claude' : 'shell');
+    if (proj) pane.dataset.proj = proj;
+    if (projName) pane.dataset.projname = projName;
+    if (pinned) pane.dataset.pinned = '1';
     placeContent(pane, dir || 'right');
-    mountTerminal(pane, kind, cwd, opts.resume || null);
+    mountTerminal(pane, kind, cwd, opts.resume || null, !!opts.skip);
     persist();
   }
 
   // monta xterm + PTY dentro de un panel YA colocado (lo usa spawn y la restauración)
-  function mountTerminal(pane, kind, cwd, resume) {
+  function mountTerminal(pane, kind, cwd, resume, skip) {
     kind = (kind === 'claude') ? 'claude' : 'shell';
     pane.dataset.kind = kind;
     if (cwd) pane.dataset.cwd = cwd;
     if (resume) pane.dataset.resume = resume; else pane.removeAttribute('data-resume');
+    if (skip) pane.dataset.skip = '1'; else pane.removeAttribute('data-skip');
     pane.classList.remove('dk-pane--session', 'dk-pane--shell', 'dk-pane--claude');
     pane.classList.add('dk-pane--' + kind);
-    setPaneMeta(pane, kind === 'claude' ? '<span class="dk-tdot"></span>' : svg('term', 11, 2), kind === 'claude' ? (resume ? 'claude ↻…' : 'claude…') : 'shell…');
+    var ic = kind === 'claude' ? '<span class="dk-tdot"></span>' : svg('term', 11, 2);
+    var lbl = kind === 'claude' ? (resume ? 'claude ↻…' : (skip ? 'claude ⚡…' : 'claude…')) : 'shell…';
+    setPaneMeta(pane, ic, lbl, projLabel(pane));
+    updatePinUI(pane);
     var body = pane.querySelector('.dk-pane-body');
     body.innerHTML = '';
 
@@ -307,26 +400,32 @@
 
     requestAnimationFrame(function () {
       try { fit.fit(); } catch (e) {}
-      api.term.create({ cwd: cwd, kind: kind, cols: term.cols || 80, rows: term.rows || 24, resume: resume }).then(function (res) {
+      api.term.create({ cwd: cwd, kind: kind, cols: term.cols || 80, rows: term.rows || 24, resume: resume, skip: skip }).then(function (res) {
         if (!res || !res.ok) { term.write('\r\n  \x1b[31m' + ((res && res.error) || 'no se pudo abrir') + '\x1b[0m\r\n'); return; }
         pane.dataset.tid = res.id;
         pane.dataset.cwd = res.cwd || cwd || '';
         terms.set(res.id, { term: term, fit: fit, pane: pane, ro: ro });
-        setPaneMeta(pane, kind === 'claude' ? '<span class="dk-tdot"></span>' : svg('term', 11, 2), res.title || (kind === 'claude' ? 'claude' : 'shell'));
+        setPaneMeta(pane, ic, res.title || (kind === 'claude' ? 'claude' : 'shell'), projLabel(pane));
         term.onData(function (d) { api.term.write(res.id, d); });
         term.onResize(function (sz) { api.term.resize(res.id, sz.cols, sz.rows); });
-        try { fit.fit(); term.focus(); } catch (e) {}
+        try { fit.fit(); if (rootEl.contains(pane)) term.focus(); } catch (e) {}
         persist();
       }).catch(function () { term.write('\r\n  \x1b[31mfalló el IPC\x1b[0m\r\n'); });
     });
   }
 
   /* ── panel de SESIÓN ── */
-  function openSession(sid, name, proj) {
+  function openSession(sid, name, proj, projName) {
     ensureDock(); bindSnap(); show();
     var ex = sessions.get(sid);
-    if (ex && rootEl.contains(ex)) { setFocus(ex); renderSession(ex); return; }
+    if (ex) {
+      if (!rootEl.contains(ex)) { if (proj && !ex.dataset.proj) ex.dataset.proj = proj; if (projName && !ex.dataset.projname) ex.dataset.projname = projName; if (view === '__home__') ex.dataset.pinned = '1'; showView(view); }
+      setFocus(ex); renderSession(ex); return;
+    }
     var pane = makePaneShell('session');
+    if (proj) pane.dataset.proj = proj;
+    if (projName) pane.dataset.projname = projName;
+    if (view === '__home__') pane.dataset.pinned = '1';   // abierta desde inicio → aparece en inicio
     placeContent(pane, 'right');
     mountSession(pane, sid, name, proj);
     persist();
@@ -340,13 +439,15 @@
     pane.dataset.sid = sid;
     pane.dataset.sname = name || 'sesión';
     if (proj) pane.dataset.proj = proj;
-    setPaneMeta(pane, svg('eye', 12, 1.8), name || 'sesión', proj);
+    setPaneMeta(pane, svg('eye', 12, 1.8), name || 'sesión', projLabel(pane));
+    updatePinUI(pane);
     var body = pane.querySelector('.dk-pane-body');
     body.innerHTML =
       '<div class="dk-shead">' +
         '<span class="dk-sactions">' +
           '<button class="btn btn--sm btn--green" data-dock-act="resume" data-sid="' + esc(sid) + '" title="continuar ESTA conversación de forma interactiva (claude --resume)">' + svg('reply', 11, 2) + ' responder</button>' +
           '<button class="btn btn--sm" data-dock-act="dispatch" data-sid="' + esc(sid) + '" title="nueva sesión claude en esta carpeta">' + svg('dispatch', 11, 2) + ' claude nuevo</button>' +
+          '<button class="btn btn--sm" data-dock-act="dispatch-skip" data-sid="' + esc(sid) + '" title="claude sin permisos (--dangerously-skip-permissions)">' + svg('dispatch', 11, 2) + ' claude ⚡</button>' +
           '<button class="btn btn--sm" data-dock-act="term" data-sid="' + esc(sid) + '">' + svg('term', 11, 2) + ' terminal</button>' +
           '<button class="btn btn--sm" data-dock-act="ext" data-sid="' + esc(sid) + '">' + svg('ext', 11, 2) + ' VSCode</button>' +
           '<button class="btn btn--sm" data-dock-act="detail" data-sid="' + esc(sid) + '">detalle</button>' +
@@ -390,12 +491,9 @@
       var split = sp.parentNode, row = split.classList.contains('row');
       var prev = sp.previousElementSibling, next = sp.nextElementSibling;
       if (!prev || !next) return;
-      // Normalizar TODOS los hermanos (paneles/splits, no los divisores) a su tamaño ACTUAL
-      // en px como flex-grow (basis 0). Si no, los que no se tocan mantienen grow:1 y, frente a
-      // un grow grande del par arrastrado, se colapsan a ~0 → "desaparecían todas menos 2".
-      // Así sólo el par adyacente al muro intercambia espacio y el resto conserva su tamaño.
-      // OJO: medir TODO primero y recién después escribir — si se lee getBoundingClientRect y se
-      // setea flex en el mismo loop, cada set reflowea y el siguiente read mide un ancho distorsionado.
+      // Normalizar TODOS los hermanos a su tamaño ACTUAL en px como flex-grow (basis 0). Si no,
+      // los que no se tocan mantienen grow:1 y frente a un grow grande se colapsan a ~0.
+      // OJO: medir TODO primero y recién después escribir (si no, cada set reflowea y el read se distorsiona).
       var sibs = elemChildren(split).filter(function (c) { return !c.classList.contains('dk-splitter'); });
       var sizes = sibs.map(function (c) { var r = c.getBoundingClientRect(); return row ? r.width : r.height; });
       sibs.forEach(function (c, i) { c.style.flex = sizes[i] + ' 1 0'; });
@@ -492,19 +590,20 @@
   function hide() { if (!host) return; host.hidden = true; host.classList.remove('maximized', 'minimized'); document.body.classList.remove('dock-open', 'dock-min'); notifyMax(); }
   function home() {
     ensureDock(); bindIpc();
-    if (!rootEl.querySelector('.dk-pane')) spawn('shell');
+    view = '__home__'; viewCwd = '';
+    showView('__home__');
     host.hidden = false; host.classList.remove('minimized'); host.classList.add('maximized');
     document.body.classList.add('dock-open'); document.body.classList.remove('dock-min');
     notifyMax(); refitSoon();
   }
   function toggle() {
-    if (!isOpen()) { ensureDock(); if (rootEl.querySelector('.dk-pane')) show(); else spawn('shell'); }
+    if (!isOpen()) { ensureDock(); show(); showView(view); }
     else if (host.classList.contains('minimized')) restore();
     else minimize();
   }
   function isOpen() { return !!host && !host.hidden; }
   function count() { return terms.size + sessions.size; }
-  function refreshActive() { sessions.forEach(function (pane) { renderSession(pane); }); }
+  function refreshActive() { sessions.forEach(function (pane) { if (rootEl && rootEl.contains(pane)) renderSession(pane); }); }
   function setNotifier(fn) { if (typeof fn === 'function') notifier = fn; }
   function setActionHandler(fn) { if (typeof fn === 'function') actionHandler = fn; }
   function setMaxObserver(fn) { if (typeof fn === 'function') maxObserver = fn; }
@@ -513,9 +612,10 @@
   window.addEventListener('resize', function () { if (isOpen()) { if (rt) clearTimeout(rt); rt = setTimeout(refitAll, 120); } });
 
   g.ConsomniTerms = {
-    spawn: spawn, open: function (o) { o = o || {}; spawn(o.kind === 'claude' ? 'claude' : 'shell', o.cwd); },
+    spawn: spawn, open: function (o) { o = o || {}; spawn(o.kind === 'claude' ? 'claude' : 'shell', o.cwd, null, { resume: o.resume, skip: o.skip, proj: o.proj, projName: o.projName }); },
     openSession: openSession, show: show, hide: hide, minimize: minimize, restore: restore,
-    toggle: toggle, home: home, isOpen: isOpen, count: count, refreshActive: refreshActive,
+    toggle: toggle, home: home, setView: setView, openProject: openProject,
+    isOpen: isOpen, count: count, refreshActive: refreshActive,
     setNotifier: setNotifier, setActionHandler: setActionHandler, setMaxObserver: setMaxObserver,
     restoreSession: restoreSession, isMaximized: isMaximized
   };

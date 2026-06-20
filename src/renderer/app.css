@@ -208,6 +208,8 @@ body.dock-open .board{ padding-bottom: var(--dock-h); }
 .dk-newbtn{display:inline-flex;align-items:center;gap:5px;height:24px;padding:0 9px;border-radius:7px;font-size:11px;color:var(--text-2);background:var(--surface-input);border:1px solid rgba(255,255,255,.07);transition:.13s;}
 .dk-newbtn:hover{color:var(--text-1);border-color:var(--border-hover);}
 .dk-new-claude{color:var(--green);}
+.dk-new-claude-skip{color:var(--amber);}   /* claude ⚡ sin permisos: ámbar = ojo, es opt-in "peligroso" */
+.dk-tb-actions{display:flex;align-items:center;gap:7px;flex-wrap:wrap;}   /* que los botones no desborden en angosto */
 .dk-div{width:1px;height:18px;background:var(--border);}
 .dk-pb{display:inline-flex;align-items:center;justify-content:center;width:24px;height:24px;border-radius:6px;background:transparent;border:1px solid transparent;color:var(--text-3);transition:.13s;cursor:pointer;}
 .dk-pb:hover{color:var(--text-1);background:var(--surface-input);border-color:var(--border);}
@@ -261,12 +263,23 @@ body.dock-open .board{ padding-bottom: var(--dock-h); }
 .dk-pane-btns{display:flex;gap:3px;flex:none;}
 .dk-pbtn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:5px;background:transparent;border:1px solid transparent;color:var(--text-4);transition:.13s;cursor:pointer;position:relative;z-index:5;}
 .dk-pbtn:hover{color:var(--text-1);background:var(--surface-input);border-color:var(--border);}
+/* ★ fijar en inicio: verde cuando está fijada; oculto en paneles sueltos (sin proyecto, ya viven en inicio) */
+.dk-pin.on{color:var(--green);}
+.dk-pin.on svg{fill:var(--green);}
+.dk-pane.no-proj .dk-pin{display:none;}
 .dk-pane-body{flex:1;min-height:0;min-width:0;position:relative;overflow:hidden;}
 /* xterm en ABSOLUTE: llena el body (flex) sin inflarlo con su contenido (rows*cellHeight).
    Esto hace que el panel respete SIEMPRE el alto del contenedor (como la terminal de VS Code). */
 .dk-pane-body .xterm{position:absolute;top:4px;left:7px;right:3px;bottom:2px;height:auto;}
 .dk-pane-body .xterm-viewport::-webkit-scrollbar{width:9px;}
 .dk-pane-body .xterm-viewport::-webkit-scrollbar-thumb{background:rgba(255,255,255,.12);border-radius:5px;}
+
+/* placeholder de vista vacía (inicio sin fijadas / proyecto sin terminales) */
+.dk-placeholder{flex:1;min-width:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:13px;text-align:center;padding:28px;}
+.dk-placeholder>svg{color:var(--text-4);opacity:.4;}
+.dk-ph-title{font-size:14px;font-weight:600;color:var(--text-2);font-family:'Geist Mono',monospace;letter-spacing:.3px;}
+.dk-ph-text{font-size:12px;line-height:1.7;max-width:440px;color:var(--text-3);}
+.dk-ph-text b{color:var(--green);font-weight:500;}
 
 /* panel de SESIÓN = conversación read-only */
 .dk-pane--session .dk-pane-body{display:flex;flex-direction:column;}

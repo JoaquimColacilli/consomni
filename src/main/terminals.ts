@@ -82,7 +82,7 @@ function resolveShell(): { file: string; args: string[]; label: string } {
 
 export interface CreateResult { ok: boolean; id?: string; title?: string; cwd?: string; kind?: TermKind; error?: string; }
 
-export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number; rows?: number; resume?: string }): CreateResult {
+export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number; rows?: number; resume?: string; skip?: boolean }): CreateResult {
   const mod = getPty();
   if (!mod) return { ok: false, error: 'node-pty no disponible: ' + (ptyError || 'binario nativo ausente') };
 
@@ -102,7 +102,9 @@ export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number;
   let resumed = false;
   if (kind === 'claude') {
     const rid = String(opts.resume || '').replace(/[^A-Za-z0-9_-]/g, '');   // sanitizar (se escribe en el shell)
-    bootCmd = rid ? `claude --resume ${rid}` : 'claude';
+    // --dangerously-skip-permissions: claude no pide permiso para cada acción (opt-in del usuario).
+    const skip = opts.skip ? ' --dangerously-skip-permissions' : '';
+    bootCmd = (rid ? `claude --resume ${rid}` : 'claude') + skip;
     resumed = !!rid;
   }
 
@@ -115,7 +117,9 @@ export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number;
 
   const id = 't' + (++seq);
   const base = path.basename(cwd) || sh.label;
-  const title = kind === 'claude' ? (resumed ? 'claude ↻ ' + base : 'claude · ' + base) : base + ' · ' + sh.label;
+  const title = kind === 'claude'
+    ? (resumed ? 'claude ↻ ' + base : ((opts.skip ? 'claude ⚡ ' : 'claude · ') + base))
+    : base + ' · ' + sh.label;
   const t: Term = { id, proc, title, cwd, kind, cols, rows, bootCmd };
   terms.set(id, t);
 

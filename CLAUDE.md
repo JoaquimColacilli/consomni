@@ -259,6 +259,21 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
 - **⚠️ Bug fijado (v1.1.0):** `isMaximized()` se usaba como función top-level pero sólo existía como
   método inline del API → `notifyMax`/`persist` tiraban ReferenceError (tragado por try/catch) → el
   `maxObserver` (colapso/restore del sidebar) y la persistencia estaban ROTOS. Ahora es función real.
+- **Dock CONTEXTUAL + fijar + claude ⚡ (v1.2.2):** el dock dejó de ser un único árbol siempre-visible;
+  ahora lo que muestra depende de la VISTA. Cada panel se taguea con `proj` (id = `projKey`, igual que la
+  vista; + `projname` lindo para mostrar) y `pinned`. **inicio** muestra los paneles `pinned` + los sueltos
+  (sin `proj`, abiertos ahí — nunca quedan huérfanos); **vista de proyecto** muestra los de ese `proj`.
+  Al cambiar de vista, los que no matchean van a un `.dk-pool` OCULTO (las PTYs siguen vivas) y los que sí
+  se re-arman en **FILA simple** (decisión del usuario: no se recuerda el tiling custom por-vista). Click en
+  un proyecto del sidebar → `setActiveProject` llama `ConsomniTerms.openProject(projKey, cwd, name)` →
+  maximiza el dock con SUS terminales; "todos" → `setView('__home__')` (board como antes). Una terminal
+  nueva abierta en una vista de proyecto arranca en el **cwd del proyecto** (`viewCwd`, derivado de las
+  sesiones del grupo). **★ fijar:** botón en el head del panel → `pinned` → aparece en inicio (oculto en
+  paneles sueltos, que ya viven ahí; se sacan con la ✕). **Persistencia v2:** `dock.json` guarda la LISTA de
+  paneles de inicio (`pinned`/sueltos) — los no-fijados de un proyecto son efímeros; restore reconstruye y
+  arranca en inicio (compat v1: si hay `{layout}` viejo, se aplana a fijados). **claude ⚡:** botón ámbar en
+  el toolbar del dock + acción "claude ⚡" en el panel de sesión → `spawn('claude',…,{skip:true})` →
+  `createTerm` arma `claude --dangerously-skip-permissions` (combina con `--resume` si aplica).
 - **Seguridad:** sigue **cero API de Anthropic** — Consomni sólo hospeda el proceso; `claude` hace
   lo suyo. Se borra `ELECTRON_RUN_AS_NODE` del env del hijo.
 
