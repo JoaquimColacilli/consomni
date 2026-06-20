@@ -5,11 +5,12 @@
    ════════════════════════════════════════════════════════════════ */
 import { app, BrowserWindow, ipcMain, session, Notification, dialog } from 'electron';
 import * as path from 'path';
+import * as fs from 'fs';
 import { start as startSessions, stop as stopSessions, buildSnapshot, rescanNow, setHooksConnected, applyHookEvent, getDetail, findSessionFile, findPlanDocs, setAttnCallback, restartWatcher, type AttnInfo } from './sessions';
 import { runAction, type ActionPayload } from './actions';
 import { startHooksServer, stopHooksServer, isServerListening } from './hooks-server';
 import { install as installHooks, uninstall as uninstallHooks, getStatus as getHooksStatus, isInstalled } from './hooks-install';
-import { loadConfig, saveConfig, setLocalState, loadDock, saveDock, type AppConfig } from './config';
+import { loadConfig, saveConfig, setLocalState, loadDock, saveDock, loadLibrary, saveLibrary, type AppConfig } from './config';
 import { checkForUpdate, initAutoUpdate, triggerAutoCheck, downloadUpdate } from './updates';
 import { setTerminalWindow, createTerm, writeTerm, resizeTerm, killTerm, listTerms, killAllTerms, terminalsAvailable, nlToCommand } from './terminals';
 import type { Snapshot, LocalSessionState } from './types';
@@ -189,6 +190,35 @@ if (!gotLock) {
     ipcMain.handle('consomni:getDock', () => loadDock());
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ipcMain.on('consomni:saveDock', (_e, data: any) => saveDock(data));
+
+    // ── biblioteca de prompts/skills/rules (store dedicado, 100% local) ──
+    ipcMain.handle('consomni:getLibrary', () => loadLibrary());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ipcMain.on('consomni:saveLibrary', (_e, data: any) => saveLibrary(data));
+    // exportar a un .json elegido por el usuario (respaldo / compartir)
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ipcMain.handle('consomni:exportLibrary', async (_e, entries: any) => {
+      const list = Array.isArray(entries) ? entries : [];
+      const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+      const opts = { title: 'Exportar biblioteca', defaultPath: 'consomni-biblioteca.json', filters: [{ name: 'JSON', extensions: ['json'] }] };
+      const res = win ? await dialog.showSaveDialog(win, opts) : await dialog.showSaveDialog(opts);
+      if (res.canceled || !res.filePath) return { ok: false };
+      try { fs.writeFileSync(res.filePath, JSON.stringify({ entries: list }, null, 2), 'utf8'); return { ok: true, path: res.filePath, count: list.length }; }
+      catch (e) { return { ok: false, error: String((e as Error)?.message || e) }; }
+    });
+    // importar desde un .json → devuelve las entries leídas (el renderer mergea)
+    ipcMain.handle('consomni:importLibrary', async () => {
+      const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+      const opts = { title: 'Importar biblioteca', properties: ['openFile' as const], filters: [{ name: 'JSON', extensions: ['json'] }] };
+      const res = win ? await dialog.showOpenDialog(win, opts) : await dialog.showOpenDialog(opts);
+      if (res.canceled || !res.filePaths.length) return { ok: false };
+      try {
+        const raw = JSON.parse(fs.readFileSync(res.filePaths[0], 'utf8'));
+        const entries = Array.isArray(raw) ? raw : (raw && Array.isArray(raw.entries) ? raw.entries : null);
+        if (!entries) return { ok: false, error: 'el archivo no tiene una lista de entries' };
+        return { ok: true, entries };
+      } catch (e) { return { ok: false, error: String((e as Error)?.message || e) }; }
+    });
 
     // settings
     ipcMain.handle('consomni:getConfig', () => loadConfig());

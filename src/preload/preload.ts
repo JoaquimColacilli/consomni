@@ -49,6 +49,18 @@ const api = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   saveConfig: (patch: any): Promise<Snapshot> => ipcRenderer.invoke('consomni:saveConfig', patch),
 
+  /* ── biblioteca de prompts/skills/rules (store dedicado, 100% local) ── */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getLibrary: (): Promise<{ entries: any[]; seeded: boolean }> => ipcRenderer.invoke('consomni:getLibrary'),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  saveLibrary: (data: any): void => ipcRenderer.send('consomni:saveLibrary', data),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  exportLibrary: (entries: any[]): Promise<{ ok: boolean; path?: string; count?: number; error?: string }> =>
+    ipcRenderer.invoke('consomni:exportLibrary', entries),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  importLibrary: (): Promise<{ ok: boolean; entries?: any[]; error?: string }> =>
+    ipcRenderer.invoke('consomni:importLibrary'),
+
   /* ── hooks ── */
   getHooksStatus: (): Promise<Snapshot> => ipcRenderer.invoke('consomni:getHooksStatus'),
   installHooks: (): Promise<Snapshot> => ipcRenderer.invoke('consomni:installHooks'),

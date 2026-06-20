@@ -139,7 +139,7 @@ async function openExternal(url: string): Promise<ActionResult> {
   return { ok: true, message: 'abriendo en el navegador' };
 }
 
-export interface ActionPayload { cwd?: string; branch?: string; id?: string; file?: string; url?: string; }
+export interface ActionPayload { cwd?: string; branch?: string; id?: string; file?: string; url?: string; text?: string; }
 
 export async function runAction(name: string, p: ActionPayload): Promise<ActionResult> {
   const cwd = p.cwd || '';
@@ -153,6 +153,7 @@ export async function runAction(name: string, p: ActionPayload): Promise<ActionR
     case 'copy': return copy(cwd, 'path');
     case 'branch': return copy(p.branch || '', 'branch');
     case 'copyId': return copy(p.id || '', 'session id');
+    case 'copyText': return copy(p.text || '', p.branch || 'texto');
     case 'transcript': return openFile(p.file || '');
     case 'openDoc': return openFile(p.file || '');
     case 'openExternal': return openExternal(p.url || '');

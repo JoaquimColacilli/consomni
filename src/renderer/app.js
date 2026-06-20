@@ -43,6 +43,12 @@
     plansOpen: false,            // vista "Planes" (frentes: planes/specs/tareas detectados)
     frentes: {},                 // estado MANUAL por frente (projKey → {status,note}) — privado, persistido
     planDocs: {},                // cwd → [{path,name,mtime}] (docs plan/spec, cargados on-demand)
+    libraryOpen: false,          // vista "Biblioteca" (prompts/skills/rules reutilizables)
+    library: [],                 // entries de la biblioteca (cargadas de ~/.consomni/library.json)
+    librarySeeded: true,         // ya se sembraron los ejemplos (idempotente; se setea al cargar)
+    libFilter: { kind: '', tag: '', q: '' },   // filtros de la vista biblioteca
+    libEditOpen: false,          // editor (modal) abierto
+    libEditId: null,             // id en edición (null = item nuevo)
     nlHelper: false,             // helper "comando IA" en las terminales (opt-in)
     notifs: [],                  // centro de notificaciones (nuevas versiones, …)
     notifSeen: [],               // ids ya vistos (badge)
@@ -229,8 +235,8 @@
     // "inicio" (vista activa) = dock maximizado mostrando '__home__'. Si es así, el marcador
     // activo va en INICIO, no en "todos" (aunque activeProject siga siendo 'all').
     var _T = window.ConsomniTerms;
-    var homeView = !state.plansOpen && !!(_T && _T.isMaximized && _T.isMaximized() && _T.getView && _T.getView() === '__home__');
-    var ci = [{ icon: 'target', active: !homeView && !state.plansOpen && state.activeProject === 'all', dot: null, proj: 'all' }];
+    var homeView = !state.plansOpen && !state.libraryOpen && !!(_T && _T.isMaximized && _T.isMaximized() && _T.getView && _T.getView() === '__home__');
+    var ci = [{ icon: 'target', active: !homeView && !state.plansOpen && !state.libraryOpen && state.activeProject === 'all', dot: null, proj: 'all' }];
     liveGroups.forEach(function (g) { ci.push({ icon: g.fav ? 'star' : 'repo', active: state.activeProject === g.id, dot: dominantDot(g.counts), proj: g.id }); });
     if (archivedGroups.length) ci.push({ icon: 'archive', active: state.activeProject === '__archived', dot: null, proj: '__archived' });
 
@@ -241,7 +247,7 @@
       refreshSecs: 2, lastUpdate: relTime(snap.generatedAt || Date.now()),
     };
 
-    return { counts: counts, tree: { active: state.activeProject, home: homeView, plans: state.plansOpen, groups: grp, ci: ci }, status: status, cols: cols, liveGroups: liveGroups };
+    return { counts: counts, tree: { active: state.activeProject, home: homeView, plans: state.plansOpen, library: state.libraryOpen, groups: grp, ci: ci }, status: status, cols: cols, liveGroups: liveGroups };
   }
 
   /* ── render ── */
@@ -255,6 +261,7 @@
     var o = view
       ? { counts: view.counts, tree: view.tree, status: view.status, modeFilter: mf, density: state.density, sortLabel: curSort().label, searchValue: (state.searchActive || state.search) ? state.search : '', version: ver }
       : { alert: true };
+    if (state.libraryOpen) return buildLibrary(o);
     if (state.plansOpen) return buildPlans(o);
     var sidebar = state.collapsed ? C.sidebar(Object.assign({}, o, { collapsed: true })) : C.sidebar(o);
     var cols = view ? view.cols : undefined;
@@ -267,20 +274,23 @@
   function render() {
     var root = document.getElementById('root');
     if (!root) return;
-    // preservar el foco/caret de la nota de frente entre re-renders (snapshots vivos)
-    var ae = document.activeElement, noteKey = null, notePos = 0;
+    // preservar el foco/caret de la nota de frente y del buscador de biblioteca entre re-renders (snapshots vivos)
+    var ae = document.activeElement, noteKey = null, notePos = 0, libQ = false, libPos = 0;
     if (ae && ae.classList && ae.classList.contains('frente-note')) { noteKey = ae.getAttribute('data-frente'); try { notePos = ae.selectionStart; } catch (e0) {} }
+    if (ae && ae.classList && ae.classList.contains('lib-search')) { libQ = true; try { libPos = ae.selectionStart; } catch (e0b) {} }
     root.innerHTML = buildShell();
     document.body.classList.toggle('compacto', state.density === 'compacto');
     document.body.classList.toggle('sb-collapsed', !!state.collapsed);   // el dock arranca a la derecha del sidebar
     document.body.classList.toggle('view-archived', state.activeProject === '__archived');   // archivados: columnas en grilla (wrap), no scroll infinito a la derecha
     document.body.classList.toggle('plans-view', !!state.plansOpen);
+    document.body.classList.toggle('library-view', !!state.libraryOpen);
     applyFocusRing();
     injectPerms();
     applyUpdBtn();   // re-aplicar estado del botón "Actualizar" (el topbar se reconstruyó)
     applyNotifBadge();   // badge del bell (el topbar se reconstruyó)
     if (TOUR.active) requestAnimationFrame(positionTour);   // el tutorial sigue pegado a su target
     if (noteKey) { var nn = document.querySelector('.frente-note[data-frente="' + cssEsc(noteKey) + '"]'); if (nn) { try { nn.focus(); nn.setSelectionRange(notePos, notePos); } catch (e1) {} } }
+    if (libQ) { var ls = document.querySelector('.lib-search'); if (ls) { try { ls.focus(); ls.setSelectionRange(libPos, libPos); } catch (e2) {} } }
   }
   function scheduleRender() { if (rafPending) return; rafPending = true; requestAnimationFrame(function () { rafPending = false; render(); }); }
   function setSnapshot(snap) { state.snapshot = snap; scheduleRender(); if (state.detailId) refreshDetail(); }
@@ -479,7 +489,7 @@
      Resalta UN elemento con un recorte EXACTO (box-shadow gigante que opaca el
      resto) y una tarjeta al lado, paso a paso, con "saltar". Responsive: reencuadra
      en resize y en cada re-render. Explica el tablero de Planes (idea de Facundo). */
-  var TOUR = { active: false, steps: [], idx: 0 };
+  var TOUR = { active: false, steps: [], idx: 0, doneKey: 'consomni.tour.plans' };
   var tourEls = { host: null, spot: null, pop: null };
 
   function openPlansForTour() {
@@ -513,15 +523,15 @@
     );
     return steps;
   }
-  function startPlanTour() { startTour(planTourSteps()); }
+  function startPlanTour() { startTour(planTourSteps(), 'consomni.tour.plans'); }
   function maybeStartPlanTour() {
     var done = false; try { done = localStorage.getItem('consomni.tour.plans') === '1'; } catch (e) {}
     if (done || TOUR.active) return;
     startPlanTour();
   }
-  function startTour(steps) {
+  function startTour(steps, doneKey) {
     if (!steps || !steps.length) return;
-    TOUR.steps = steps; TOUR.idx = 0; TOUR.active = true;
+    TOUR.steps = steps; TOUR.idx = 0; TOUR.active = true; TOUR.doneKey = doneKey || 'consomni.tour.plans';
     window.addEventListener('resize', positionTour);
     showTourStep();
   }
@@ -530,7 +540,7 @@
   function endTour(markDone) {
     TOUR.active = false; removeTourDOM();
     window.removeEventListener('resize', positionTour);
-    if (markDone) { try { localStorage.setItem('consomni.tour.plans', '1'); } catch (e) {} }
+    if (markDone) { try { localStorage.setItem(TOUR.doneKey || 'consomni.tour.plans', '1'); } catch (e) {} }
   }
   function removeTourDOM() { var h = document.getElementById('tour'); if (h) h.remove(); tourEls = { host: null, spot: null, pop: null }; }
   function tourTarget(step) { if (!step.target) return null; return document.querySelector(step.target) || (step.alt ? document.querySelector(step.alt) : null); }
@@ -818,7 +828,7 @@
      estado MANUAL + nota privada por frente (local, nunca sale de la máquina).
      "lo que dejaste abierto / en desarrollo / flageaste sin contarle a nadie." */
   function openPlans() {
-    state.plansOpen = true;
+    state.plansOpen = true; state.libraryOpen = false;
     var T = window.ConsomniTerms;
     if (T && T.isMaximized && T.isMaximized()) T.minimize();   // el dock no tapa el tablero
     loadPlanDocs();
@@ -966,9 +976,284 @@
       C.statusbar(o) + C.crt() + '</div>';
   }
 
+  /* ════════ BIBLIOTECA (prompts / skills / rules — 100% local) ════════
+     Guardás y reutilizás los prompts que usás seguido. Vive en
+     ~/.consomni/library.json (store dedicado). Misma mecánica de vista que Planes. */
+  var LIB_KINDS = [
+    { key: 'prompt', label: 'prompt', color: 'var(--green)' },
+    { key: 'skill', label: 'skill', color: 'var(--violet)' },
+    { key: 'rule', label: 'rule', color: 'var(--amber)' }
+  ];
+  function libKindObj(k) { for (var i = 0; i < LIB_KINDS.length; i++) if (LIB_KINDS[i].key === k) return LIB_KINDS[i]; return LIB_KINDS[0]; }
+  function genLibId() { return 'lib_' + Date.now().toString(36) + Math.random().toString(36).slice(2, 7); }
+  function libById(id) { for (var i = 0; i < state.library.length; i++) if (state.library[i].id === id) return state.library[i]; return null; }
+  function normTags(arr) {
+    var seen = {}, out = [];
+    (arr || []).forEach(function (t) { t = String(t || '').trim().toLowerCase(); if (t && !seen[t]) { seen[t] = 1; out.push(t); } });
+    return out.slice(0, 12);
+  }
+  function persistLibrary() { if (api && api.saveLibrary) api.saveLibrary({ entries: state.library, seeded: state.librarySeeded !== false }); }
+
+  function openLibrary() {
+    state.libraryOpen = true; state.plansOpen = false;
+    var T = window.ConsomniTerms;
+    if (T && T.isMaximized && T.isMaximized()) T.minimize();   // el dock no tapa la biblioteca
+    render();
+  }
+  function closeLibrary() { state.libraryOpen = false; render(); }
+
+  /* ── filtros / vista ── */
+  function libAllTags() {
+    var counts = {};
+    state.library.forEach(function (e) { (e.tags || []).forEach(function (t) { counts[t] = (counts[t] || 0) + 1; }); });
+    return Object.keys(counts).sort().map(function (t) { return { tag: t, n: counts[t] }; });
+  }
+  function libMatches(e) {
+    var f = state.libFilter;
+    if (f.kind && e.kind !== f.kind) return false;
+    if (f.tag && (e.tags || []).indexOf(f.tag) < 0) return false;
+    if (f.q) {
+      var hay = (e.title + ' ' + e.content + ' ' + (e.tags || []).join(' ')).toLowerCase();
+      if (hay.indexOf(f.q.toLowerCase()) < 0) return false;
+    }
+    return true;
+  }
+  function libView() { return state.library.filter(libMatches).slice().sort(function (a, b) { return (b.updatedAt || 0) - (a.updatedAt || 0); }); }
+  function libCount(kind) { return state.library.filter(function (e) { return !kind || e.kind === kind; }).length; }
+
+  /* ── render de la vista ── */
+  function libIntro() {
+    return '<div class="lib-intro"><span class="pi-eye">' + C.eye(18, false) + '</span>' +
+      '<span class="pi-tx"><b>BIBLIOTECA</b> · tus <b>prompts</b>, <b>skills</b> y <b>rules</b> reutilizables — <span class="pi-dim">guardalos una vez, copialos o insertalos al instante · 100% local</span></span>' +
+      '<button class="lib-newbtn lib-new" data-act="lib-new" title="crear un nuevo item">' + C.svg('plus', 13, 2.2) + ' nuevo</button>' +
+      '<button class="pi-refresh pi-tour" data-act="lib-tour" title="ver el tutorial">' + C.svg('eye', 13, 1.8) + ' tutorial</button>' +
+      '<button class="pi-refresh" data-act="lib-import" title="importar desde un .json">' + C.svg('download', 13, 2) + '</button>' +
+      '<button class="pi-refresh" data-act="lib-export" title="exportar a un .json">' + C.svg('ext', 12, 2) + '</button></div>';
+  }
+  function libToolbar() {
+    var f = state.libFilter;
+    var kinds = '<button class="lib-chip' + (!f.kind ? ' on' : '') + '" data-act="lib-filter" data-kind="">todos <span class="lc-n">' + libCount('') + '</span></button>' +
+      LIB_KINDS.map(function (k) { return '<button class="lib-chip lib-chip--' + k.key + (f.kind === k.key ? ' on' : '') + '" data-act="lib-filter" data-kind="' + k.key + '">' + k.label + ' <span class="lc-n">' + libCount(k.key) + '</span></button>'; }).join('');
+    var tags = libAllTags();
+    var tagHtml = tags.length ? '<div class="lib-tagbar">' + tags.map(function (t) {
+      return '<button class="lib-tag' + (f.tag === t.tag ? ' on' : '') + '" data-act="lib-tag" data-tag="' + esc(t.tag) + '">#' + esc(t.tag) + '<span class="lc-n">' + t.n + '</span></button>';
+    }).join('') + '</div>' : '';
+    var clearable = f.kind || f.tag || f.q;
+    return '<div class="lib-toolbar">' +
+      '<div class="lib-search-wrap">' + C.svg('search', 15, 2) + '<input class="lib-search" placeholder="buscar por título, contenido o tag…" value="' + esc(f.q || '') + '" spellcheck="false">' +
+        (clearable ? '<button class="lib-clear" data-act="lib-clear" title="limpiar filtros">' + C.svg('x', 13, 2) + '</button>' : '') + '</div>' +
+      '<div class="lib-chips">' + kinds + '</div>' + tagHtml + '</div>';
+  }
+  function libCardHtml(e) {
+    var k = libKindObj(e.kind);
+    var prev = (e.content || '').length > 240 ? e.content.slice(0, 240) + '…' : (e.content || '');
+    var tags = (e.tags || []).length ? '<div class="lib-tags">' + e.tags.map(function (t) { return '<span class="lib-tg" data-act="lib-tag" data-tag="' + esc(t) + '">#' + esc(t) + '</span>'; }).join('') + '</div>' : '';
+    return '<article class="lib-card" data-id="' + esc(e.id) + '">' +
+      '<div class="lib-card-head"><span class="lib-badge lib-badge--' + k.key + '">' + esc(k.label) + '</span>' +
+        '<span class="lib-title">' + esc(e.title || 'sin título') + '</span></div>' +
+      '<div class="lib-prev">' + esc(prev) + '</div>' + tags +
+      '<div class="lib-card-acts">' +
+        '<button class="lib-act lib-act--go lib-copy" data-act="lib-copy" data-id="' + esc(e.id) + '" title="copiar al portapapeles">' + C.svg('copy', 12, 1.8) + ' copiar</button>' +
+        '<button class="lib-act lib-insert" data-act="lib-insert" data-id="' + esc(e.id) + '" title="insertar en la terminal/claude activa (sin ejecutar)">' + C.svg('dispatch', 12, 1.8) + ' insertar</button>' +
+        '<span class="lib-act-sp"></span>' +
+        '<button class="lib-ic" data-act="lib-edit" data-id="' + esc(e.id) + '" title="editar">' + C.svg('edit', 12, 1.8) + '</button>' +
+        '<button class="lib-ic" data-act="lib-dup" data-id="' + esc(e.id) + '" title="duplicar">' + C.svg('copy', 12, 1.8) + '</button>' +
+        '<button class="lib-ic lib-ic--del" data-act="lib-del" data-id="' + esc(e.id) + '" title="eliminar">' + C.svg('trash', 12, 1.8) + '</button>' +
+      '</div></article>';
+  }
+  function renderLibBoard() {
+    if (!state.library.length) {
+      return '<main class="board lib-board lib-board--empty"><div class="lib-empty">' + C.eye(48, false) +
+        '<div class="le-title">Tu biblioteca está vacía</div>' +
+        '<div class="le-text">Guardá los prompts que usás seguido — una <b>revisión de PR</b>, un <b>crear app desde cero</b>, una <b>regla</b> de estilo — y recuperalos al instante: copiar en un click o insertarlos en una terminal/claude.</div>' +
+        '<button class="lib-newbtn lib-new" data-act="lib-new">' + C.svg('plus', 13, 2.2) + ' crear el primero</button>' +
+      '</div></main>';
+    }
+    var items = libView();
+    if (!items.length) {
+      return '<main class="board lib-board"><div class="lib-empty lib-empty--filtered">' + C.svg('search', 30, 1.8) +
+        '<div class="le-title">Sin resultados</div><div class="le-text">Ningún item matchea el filtro. <button class="lib-link" data-act="lib-clear">limpiar filtros</button></div></div></main>';
+    }
+    return '<main class="board lib-board">' + items.map(libCardHtml).join('') + '</main>';
+  }
+  function buildLibrary(o) {
+    var sidebar = state.collapsed ? C.sidebar(Object.assign({}, o, { collapsed: true })) : C.sidebar(o);
+    return '<div class="app">' + C.topbar(o) +
+      '<div class="main-row">' + sidebar + '<div class="lib-wrap">' + libIntro() + libToolbar() + renderLibBoard() + '</div></div>' +
+      C.statusbar(o) + C.crt() + '</div>';
+  }
+
+  /* ── editor (modal en #overlays, reusa el lenguaje de Settings) ── */
+  function openLibEdit(id) {
+    var e = id ? libById(id) : null, editing = !!e, kind = e ? e.kind : 'prompt';
+    state.libEditOpen = true; state.libEditId = e ? e.id : null;
+    var kseg = LIB_KINDS.map(function (k) { return '<button type="button" class="lib-kopt lib-kopt--' + k.key + (k.key === kind ? ' on' : '') + '" data-libkind="' + k.key + '">' + esc(k.label) + '</button>'; }).join('');
+    var html = '<div class="lib-edit-scrim"><div class="lib-edit-card" role="dialog" aria-modal="true">' +
+      '<div class="set-head"><span class="ttl">' + (editing ? 'EDITAR ITEM' : 'NUEVO ITEM') + '</span><button class="iconbtn" style="width:26px;height:26px" data-libedit="cancel">' + C.svg('x', 14, 2) + '</button></div>' +
+      '<div class="lib-edit-body">' +
+        '<div class="le-row"><span class="le-lbl">TIPO</span><div class="lib-kseg">' + kseg + '</div></div>' +
+        '<div class="le-row"><span class="le-lbl">TÍTULO</span><input class="set-inp le-inp" id="libTitle" placeholder="ej: Revisión de PR" value="' + esc(e ? e.title : '') + '" spellcheck="false"></div>' +
+        '<div class="le-row le-row--ta"><span class="le-lbl">CONTENIDO</span><textarea class="lib-ta" id="libContent" placeholder="el prompt / la skill / la regla…" spellcheck="false">' + esc(e ? e.content : '') + '</textarea></div>' +
+        '<div class="le-row"><span class="le-lbl">TAGS</span><input class="set-inp le-inp" id="libTags" placeholder="separados por coma · ej: review, git" value="' + esc(e ? (e.tags || []).join(', ') : '') + '" spellcheck="false"></div>' +
+      '</div>' +
+      '<div class="lib-edit-foot">' +
+        (editing ? '<button class="btn btn--sm btn--red" data-libedit="del">' + C.svg('trash', 12, 1.8) + ' eliminar</button>' : '') +
+        '<span style="flex:1"></span>' +
+        '<button class="btn btn--sm" data-libedit="cancel">cancelar</button>' +
+        '<button class="btn btn--green btn--sm" data-libedit="save">' + C.svg('check', 13, 2.2) + ' guardar</button>' +
+      '</div></div></div>';
+    setOverlay(html);
+    wireLibEdit();
+    setTimeout(function () { var ti = document.getElementById('libTitle'); if (ti) ti.focus(); }, 0);
+  }
+  function wireLibEdit() {
+    var card = document.querySelector('.lib-edit-card'), scrim = document.querySelector('.lib-edit-scrim');
+    if (!card) return;
+    Array.prototype.forEach.call(card.querySelectorAll('.lib-kopt'), function (b) {
+      b.addEventListener('click', function (ev) { ev.stopPropagation();
+        Array.prototype.forEach.call(card.querySelectorAll('.lib-kopt'), function (o) { o.classList.remove('on'); });
+        b.classList.add('on');
+      });
+    });
+    Array.prototype.forEach.call(card.querySelectorAll('[data-libedit]'), function (b) {
+      b.addEventListener('click', function (ev) {
+        ev.stopPropagation();
+        var a = b.getAttribute('data-libedit');
+        if (a === 'cancel') closeLibEdit();
+        else if (a === 'save') saveLibEntryFromForm();
+        else if (a === 'del') { var id = state.libEditId; closeLibEdit(); if (id) requestDeleteLib(id); }
+      });
+    });
+    if (scrim) scrim.addEventListener('click', function (ev) { if (ev.target === scrim) closeLibEdit(); });
+  }
+  function closeLibEdit() { state.libEditOpen = false; state.libEditId = null; setOverlay(''); }
+  function saveLibEntryFromForm() {
+    var card = document.querySelector('.lib-edit-card'); if (!card) return;
+    var kindEl = card.querySelector('.lib-kopt.on');
+    var kind = kindEl ? kindEl.getAttribute('data-libkind') : 'prompt';
+    var title = (card.querySelector('#libTitle').value || '').trim();
+    var content = card.querySelector('#libContent').value || '';
+    var tags = normTags((card.querySelector('#libTags').value || '').split(','));
+    if (!title && !content.trim()) { toast('escribí al menos un título o contenido', 'warn'); return; }
+    if (!title) title = content.trim().slice(0, 40);
+    var now = Date.now();
+    if (state.libEditId) {
+      var e = libById(state.libEditId);
+      if (e) { e.kind = kind; e.title = title; e.content = content; e.tags = tags; e.updatedAt = now; }
+    } else {
+      state.library.unshift({ id: genLibId(), kind: kind, title: title, content: content, tags: tags, createdAt: now, updatedAt: now });
+    }
+    persistLibrary(); closeLibEdit(); render(); toast('guardado en la biblioteca');
+  }
+
+  /* ── acciones de card ── */
+  function dupLibEntry(id) {
+    var e = libById(id); if (!e) return;
+    var now = Date.now();
+    state.library.unshift({ id: genLibId(), kind: e.kind, title: e.title + ' (copia)', content: e.content, tags: (e.tags || []).slice(), createdAt: now, updatedAt: now });
+    persistLibrary(); render(); toast('duplicado');
+  }
+  function requestDeleteLib(id) {
+    var e = libById(id); if (!e) return;
+    pendingClose = function () { deleteLibConfirmed(id); };
+    var html = '<div class="cfm-scrim" data-act="cfm-cancel"><div class="cfm-card" role="dialog" aria-modal="true">' +
+      '<div class="cfm-ttl">' + C.svg('trash', 16, 1.9) + ' ¿Eliminar de la biblioteca?</div>' +
+      '<div class="cfm-body">Vas a borrar <b>' + esc(e.title || 'este item') + '</b>. Es local y no se puede deshacer.</div>' +
+      '<div class="cfm-btns"><button class="btn btn--sm" data-act="cfm-cancel">cancelar</button>' +
+        '<button class="btn btn--sm btn--red" data-act="cfm-ok">' + C.svg('trash', 12, 2) + ' eliminar</button></div></div></div>';
+    setOverlay(html);
+  }
+  function deleteLibConfirmed(id) {
+    state.library = state.library.filter(function (e) { return e.id !== id; });
+    persistLibrary(); render(); toast('eliminado');
+  }
+  function copyLibEntry(id) {
+    var e = libById(id); if (!e) return;
+    if (api && api.action) api.action('copyText', { text: e.content, branch: e.kind }).then(function () { toast('copiado al portapapeles'); }).catch(function () { toast('no se pudo copiar', 'err'); });
+    else toast('copiar no disponible', 'warn');
+  }
+  function insertLibEntry(id) {
+    var e = libById(id); if (!e) return;
+    var T = window.ConsomniTerms;
+    var ok = T && T.insertIntoFocused ? T.insertIntoFocused(e.content) : false;
+    if (ok) toast('insertado en la terminal · revisá y apretá Enter'); else toast('abrí una terminal o sesión para insertarlo', 'warn');
+  }
+
+  /* ── import / export (.json, respaldo / compartir) ── */
+  function doExportLibrary() {
+    if (!api || !api.exportLibrary) { toast('exportar no disponible', 'warn'); return; }
+    api.exportLibrary(state.library).then(function (r) {
+      if (r && r.ok) toast('exportado · ' + (r.count || 0) + ' items'); else if (r && r.error) toast('export: ' + r.error, 'err');
+    }).catch(function () { toast('no se pudo exportar', 'err'); });
+  }
+  function doImportLibrary() {
+    if (!api || !api.importLibrary) { toast('importar no disponible', 'warn'); return; }
+    api.importLibrary().then(function (r) {
+      if (!r || !r.ok) { if (r && r.error) toast('import: ' + r.error, 'err'); return; }
+      var added = 0, now = Date.now();
+      (r.entries || []).forEach(function (raw) {
+        if (!raw || (!raw.title && !raw.content)) return;
+        var kind = (raw.kind === 'skill' || raw.kind === 'rule') ? raw.kind : 'prompt';
+        state.library.unshift({ id: genLibId(), kind: kind, title: String(raw.title || '').slice(0, 200) || 'sin título', content: String(raw.content || ''), tags: normTags(raw.tags || []), createdAt: now, updatedAt: now });
+        added++;
+      });
+      if (added) { persistLibrary(); render(); toast('importados ' + added + ' items'); } else toast('no había items válidos en el archivo', 'warn');
+    }).catch(function () { toast('no se pudo importar', 'err'); });
+  }
+
+  /* ── seeds (1ª ejecución; cubren los 3 tipos) ── */
+  function seedLibrary() {
+    var now = Date.now();
+    function mk(kind, title, tags, content) { return { id: genLibId(), kind: kind, title: title, content: content, tags: normTags(tags), createdAt: now, updatedAt: now, seed: true }; }
+    return [
+      mk('prompt', 'Revisión de PR', ['review', 'git', 'calidad'],
+        'Revisá este pull request como un senior exigente pero constructivo.\n\n1. Resumí en 2 líneas QUÉ hace el cambio.\n2. Bugs y casos borde: enumerá problemas reales con archivo:línea y por qué fallan.\n3. Seguridad: inputs sin validar, secrets, inyección, permisos.\n4. Diseño y simplicidad: ¿se puede reusar algo que ya existe? ¿hay duplicación?\n5. Tests: ¿qué falta cubrir?\n\nSé concreto, priorizá por severidad (alta/media/baja) y proponé el fix, no sólo el problema.'),
+      mk('prompt', 'Crear app desde cero', ['scaffold', 'inicio'],
+        'Quiero crear una nueva app: <describí la idea, el stack y la plataforma>.\n\nAntes de escribir código:\n1. Hacé 3-5 preguntas que de verdad cambien el diseño (no triviales).\n2. Proponé un stack mínimo y justificá cada dependencia.\n3. Dame la estructura de carpetas y los archivos clave.\n4. Un plan por fases, con un "done" verificable por fase.\n\nReglas: local-first si se puede, sin libs innecesarias, y dejá el primer run funcionando antes de sumar features.'),
+      mk('prompt', 'Investigar bug (root cause)', ['debug', 'investigación'],
+        'Tengo este bug: <síntoma + cómo se reproduce>.\n\nNo parchees a ciegas. Seguí este método:\n1. Reproducí y confirmá el síntoma exacto.\n2. Formulá 2-3 hipótesis de causa raíz, ordenadas por probabilidad.\n3. Verificá cada una con evidencia del código/logs (archivo:línea).\n4. Recién ahí proponé el fix mínimo + cómo lo testeo para confirmar que no vuelve.\n\nMostrame el razonamiento, no sólo la conclusión.'),
+      mk('skill', 'QA visual responsive', ['qa', 'ui', 'responsive'],
+        'Hacé QA visual de la pantalla actual a 1320px y 720px de ancho.\n\nChequeá: overflow/clipping, scroll horizontal no deseado, jerarquía y espaciado, contraste, estados (hover / activo / vacío), y que nada se rompa al colapsar el layout. Reportá cada hallazgo con su severidad y la regla CSS responsable, y proponé el fix usando los tokens existentes (cero drift visual).'),
+      mk('rule', 'Convenciones de commit', ['git', 'proceso'],
+        'Reglas de commit para este repo:\n- Mensajes en español, en imperativo y concisos ("agrega…", "corrige…").\n- Un commit = un cambio lógico; no mezclar refactor con feature.\n- NUNCA hacer git commit ni git push sin aprobación explícita del usuario.\n- No incluir secrets ni tokens; revisar el diff antes de commitear.')
+    ];
+  }
+
+  /* ── tutorial de biblioteca (reusa el motor de coachmark) ── */
+  function openLibraryForTour() { if (!state.libraryOpen) openLibrary(); }
+  function libraryTourSteps() {
+    var hasData = state.library.length > 0;
+    var steps = [
+      { center: true, icon: 'book', title: 'Biblioteca · tus prompts', before: openLibraryForTour,
+        body: 'Acá guardás los <b>prompts</b>, <b>skills</b> y <b>rules</b> que usás seguido — una <b>revisión de PR</b>, un <b>crear app desde cero</b>, tus reglas — para reutilizarlos sin reescribirlos. <b>100% local</b>: no sale de tu máquina.' },
+      { target: '.sb-lib', alt: '.ci-lib', place: 'right', icon: 'book', title: 'Entrá a "biblioteca"', before: openLibraryForTour,
+        body: 'Desde acá abrís el panel. Está siempre a mano, al lado de inicio y planes.' }
+    ];
+    if (!hasData) {
+      steps.push({ center: true, icon: 'plus', title: 'Creá el primero', before: openLibraryForTour,
+        body: 'Tocá <b>+ nuevo</b>, elegí el tipo (prompt / skill / rule), pegá tu texto y los tags, y listo. Después lo copiás o insertás en una terminal en un click. Volvé cuando tengas alguno y te muestro el resto.' });
+      return steps;
+    }
+    steps.push(
+      { target: '.lib-toolbar', place: 'bottom', title: 'Filtrá y buscá', before: openLibraryForTour,
+        body: 'Filtrá por <b>tipo</b> (prompt / skill / rule) o por <b>#tag</b>, o buscá por texto. Encontrás lo que querés al toque aunque tengas decenas.' },
+      { target: '.lib-card .lib-card-acts', alt: '.lib-card', place: 'top', title: 'Copiar o insertar', before: openLibraryForTour,
+        body: '<b>Copiar</b> lo manda al portapapeles. <b>Insertar</b> lo escribe en tu terminal/claude activa <i>sin ejecutarlo</i> — revisás y apretás Enter. También editás, duplicás y eliminás.' },
+      { target: '.lib-new', alt: '.lib-intro', place: 'bottom', title: 'Guardá los tuyos', before: openLibraryForTour,
+        body: 'Con <b>+ nuevo</b> agregás los tuyos. Y con <b>importar / exportar</b> respaldás o compartís tu biblioteca como un <code>.json</code>.' }
+    );
+    return steps;
+  }
+  function startLibraryTour() { startTour(libraryTourSteps(), 'consomni.tour.library'); }
+  function maybeStartLibraryTour() {
+    var done = false; try { done = localStorage.getItem('consomni.tour.library') === '1'; } catch (e) {}
+    if (done || TOUR.active) return;
+    startLibraryTour();
+  }
+
   /* ════════ FILTROS / ORDEN / DENSIDAD / PROYECTO ════════ */
   function setActiveProject(p) {
-    state.activeProject = p; state.focusSid = null; state.plansOpen = false;
+    state.activeProject = p; state.focusSid = null; state.plansOpen = false; state.libraryOpen = false;
     var T = window.ConsomniTerms;
     if (p === 'all' || p === '__archived') {
       // "todos" / "archivados" → board (no dock maximizado). Si veníamos de pantalla completa, salimos.
@@ -1191,6 +1476,9 @@
     rows.push({ group: 'ACCIONES', ic: 'bell', tx: state.muted ? 'Desmutear notificaciones' : 'Mutear notificaciones', sub: '', keys: ['m'], act: 'mute' });
     rows.push({ group: 'ACCIONES', ic: 'tasks', tx: 'Abrir Planes (frentes)', sub: 'pendiente vs hecho', keys: [], act: 'plans' });
     rows.push({ group: 'ACCIONES', ic: 'eye', tx: 'Tutorial de Planes', sub: 'tour paso a paso', keys: [], act: 'tour' });
+    rows.push({ group: 'ACCIONES', ic: 'book', tx: 'Abrir Biblioteca', sub: 'prompts / skills / rules', keys: [], act: 'library' });
+    rows.push({ group: 'ACCIONES', ic: 'plus', tx: 'Nuevo item en la biblioteca', sub: 'prompt / skill / rule', keys: [], act: 'libnew' });
+    rows.push({ group: 'ACCIONES', ic: 'eye', tx: 'Tutorial de Biblioteca', sub: 'tour paso a paso', keys: [], act: 'libtour' });
     rows.push({ group: 'ACCIONES', ic: 'gear', tx: 'Abrir settings', sub: '', keys: [], act: 'settings' });
     return rows;
   }
@@ -1241,6 +1529,9 @@
     else if (row.act === 'settings') { closePalette(); openSettings(); }
     else if (row.act === 'plans') { closePalette(); openPlans(); maybeStartPlanTour(); }
     else if (row.act === 'tour') { closePalette(); openPlans(); startPlanTour(); }
+    else if (row.act === 'library') { closePalette(); openLibrary(); maybeStartLibraryTour(); }
+    else if (row.act === 'libnew') { closePalette(); openLibrary(); openLibEdit(null); }
+    else if (row.act === 'libtour') { closePalette(); openLibrary(); startLibraryTour(); }
     else if (row.act && row.act.indexOf('a:') === 0) { closePalette(); dispatchAction(row.act.slice(2), state.focusSid); }
     else closePalette();
   }
@@ -1362,9 +1653,10 @@
   }
 
   /* ── overlay host ── */
-  function setOverlay(html) { var o = document.getElementById('overlays'); if (o) o.innerHTML = html; if (!html) { state.helpOpen = false; state.settingsOpen = false; state.changelogOpen = false; } }
-  function anyOverlayOpen() { return state.paletteOpen || !!state.detailId || state.helpOpen || state.settingsOpen || state.changelogOpen; }
+  function setOverlay(html) { var o = document.getElementById('overlays'); if (o) o.innerHTML = html; if (!html) { state.helpOpen = false; state.settingsOpen = false; state.changelogOpen = false; state.libEditOpen = false; } }
+  function anyOverlayOpen() { return state.paletteOpen || !!state.detailId || state.helpOpen || state.settingsOpen || state.changelogOpen || state.libEditOpen; }
   function closeOverlays() {
+    if (state.libEditOpen) { closeLibEdit(); return; }
     if (state.paletteOpen) { closePalette(); return; }
     if (state.changelogOpen) { closeChangelog(); return; }
     if (state.detailId) { closeDetail(); return; }
@@ -1422,6 +1714,20 @@
       if (act === 'plan-resume') { e.stopPropagation(); var prsid = actEl.getAttribute('data-sid'); state.plansOpen = false; render(); dispatchAction('resume', prsid); return; }
       if (act === 'open-doc') { e.stopPropagation(); openDocFile(actEl.getAttribute('data-doc')); return; }
       if (act === 'frente-status') { e.stopPropagation(); cycleFrenteStatus(actEl.getAttribute('data-frente')); return; }
+      // ── biblioteca (prompts/skills/rules) ──
+      if (act === 'library') { e.stopPropagation(); openLibrary(); maybeStartLibraryTour(); return; }
+      if (act === 'lib-new') { e.stopPropagation(); openLibEdit(null); return; }
+      if (act === 'lib-edit') { e.stopPropagation(); openLibEdit(actEl.getAttribute('data-id')); return; }
+      if (act === 'lib-dup') { e.stopPropagation(); dupLibEntry(actEl.getAttribute('data-id')); return; }
+      if (act === 'lib-del') { e.stopPropagation(); requestDeleteLib(actEl.getAttribute('data-id')); return; }
+      if (act === 'lib-copy') { e.stopPropagation(); copyLibEntry(actEl.getAttribute('data-id')); return; }
+      if (act === 'lib-insert') { e.stopPropagation(); insertLibEntry(actEl.getAttribute('data-id')); return; }
+      if (act === 'lib-filter') { e.stopPropagation(); state.libFilter.kind = actEl.getAttribute('data-kind') || ''; render(); return; }
+      if (act === 'lib-tag') { e.stopPropagation(); var ltg = actEl.getAttribute('data-tag') || ''; state.libFilter.tag = (state.libFilter.tag === ltg) ? '' : ltg; render(); return; }
+      if (act === 'lib-clear') { e.stopPropagation(); state.libFilter = { kind: '', tag: '', q: '' }; render(); return; }
+      if (act === 'lib-tour') { e.stopPropagation(); startLibraryTour(); return; }
+      if (act === 'lib-import') { e.stopPropagation(); doImportLibrary(); return; }
+      if (act === 'lib-export') { e.stopPropagation(); doExportLibrary(); return; }
       // ── notificaciones + changelog ──
       if (act === 'notifs') { e.stopPropagation(); state.notifOpen ? closeNotifPanel() : openNotifPanel(); return; }
       if (act === 'notif-clear') { e.stopPropagation(); state.notifs = []; markAllSeen(); closeNotifPanel(); applyNotifBadge(); return; }
@@ -1454,7 +1760,7 @@
     if (t.closest && t.closest('.sb-add')) { addProjectViaPicker(); return; }
     var rmEl = t.closest && t.closest('[data-unkeep]');
     if (rmEl) { e.stopPropagation(); unkeepProject(rmEl.getAttribute('data-unkeep')); return; }
-    if (t.closest && t.closest('[data-act="home"]')) { state.activeProject = 'all'; state.plansOpen = false; render(); if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
+    if (t.closest && t.closest('[data-act="home"]')) { state.activeProject = 'all'; state.plansOpen = false; state.libraryOpen = false; render(); if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
 
     // ── CARDS PRIMERO (van adentro de la columna, que tiene data-proj) ──
     // closed row → detalle
@@ -1476,7 +1782,10 @@
   /* ── input vivo: nota privada del frente (no re-renderiza → no pierde foco) ── */
   document.addEventListener('input', function (e) {
     var n = e.target && e.target.closest && e.target.closest('.frente-note');
-    if (n) { setFrenteNote(n.getAttribute('data-frente'), n.value); }
+    if (n) { setFrenteNote(n.getAttribute('data-frente'), n.value); return; }
+    // buscador de la biblioteca: filtro vivo (el foco/caret se restaura en render())
+    var ls = e.target && e.target.closest && e.target.closest('.lib-search');
+    if (ls) { state.libFilter.q = ls.value; scheduleRender(); }
   });
 
   /* ════════ KEYBOARD ════════ */
@@ -1691,6 +2000,15 @@
       }
       render();
     }).catch(function () {});
+    // biblioteca (store dedicado): cargar + sembrar ejemplos la 1ª vez
+    if (api.getLibrary) api.getLibrary().then(function (lib) {
+      var entries = (lib && Array.isArray(lib.entries)) ? lib.entries : [];
+      var seeded = !!(lib && lib.seeded);
+      if (!seeded) entries = seedLibrary().concat(entries);
+      state.library = entries; state.librarySeeded = true;
+      if (!seeded) persistLibrary();   // graba los seeds + marca seeded (idempotente)
+      if (state.libraryOpen) render();
+    }).catch(function () {});
     if (api.onJump) api.onJump(function (sid) { state.split = false; state.activeProject = 'all'; state.focusSid = sid; render(); openDetail(sid); });
     if (api.onUpdateEvent) api.onUpdateEvent(onUpdatePhase);
     maybeOnboard();
@@ -1702,6 +2020,7 @@
     state: state, render: render, transform: transform,
     openPalette: openPalette, openDetail: openDetail, openHelp: openHelp, openSettings: openSettings,
     openPlans: openPlans, closePlans: closePlans,
+    openLibrary: openLibrary, closeLibrary: closeLibrary, openLibEdit: openLibEdit, startLibraryTour: startLibraryTour,
     startTutorial: startPlanTour, openNotifs: openNotifPanel, openChangelog: openChangelog,
     setActiveProject: setActiveProject, activateSearch: activateSearch,
     toggleDensity: toggleDensity, showOnboarding: showOnboarding,

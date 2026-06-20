@@ -469,6 +469,19 @@
     if (tid && api && api.term && api.term.write) api.term.write(tid, text);
     var t = terms.get(tid); if (t) { try { t.term.focus(); } catch (e) {} }
   }
+  // insertar texto (un prompt de la biblioteca) en la terminal/claude enfocada (o la 1ª viva),
+  // SIN \r → el usuario revisa y aprieta Enter. Trae el dock a la vista. Devuelve false si no
+  // hay ninguna terminal abierta (el caller avisa "abrí una terminal").
+  function insertIntoFocused(text) {
+    if (text == null) return false;
+    var isTerm = function (p) { return p && (p.dataset.kind === 'shell' || p.dataset.kind === 'claude'); };
+    var pane = (isTerm(focused) && rootEl && rootEl.contains(focused)) ? focused : (panesOf().filter(isTerm)[0] || null);
+    if (!pane) return false;
+    show();                 // el dock pudo quedar minimizado/oculto (vista biblioteca) → mostrarlo
+    setFocus(pane);
+    insertCmd(pane, String(text));
+    return true;
+  }
   // abre "comandos rápidos" en la terminal enfocada (o la 1ª, o spawnea una)
   function openQuickCommands() {
     ensureDock(); show();
@@ -754,6 +767,6 @@
     setNotifier: setNotifier, setActionHandler: setActionHandler, setMaxObserver: setMaxObserver,
     restoreSession: restoreSession, isMaximized: isMaximized, getView: function () { return view; },
     resumeSession: resumeSession, setBoardChecker: setBoardChecker, setCloseConfirmer: setCloseConfirmer,
-    setNlEnabled: setNlEnabled
+    setNlEnabled: setNlEnabled, insertIntoFocused: insertIntoFocused
   };
 })(window);

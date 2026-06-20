@@ -82,6 +82,24 @@ export interface LocalSessionState {
   archived?: boolean;
 }
 
+/* ── Biblioteca de prompts/skills/rules (100% local, ~/.consomni/library.json) ──
+   El usuario guarda y reutiliza los prompts que usa seguido. No sale de la máquina. */
+export type LibKind = 'prompt' | 'skill' | 'rule';
+export interface LibEntry {
+  id: string;          // 'lib_' + base36(ts)+rand — generado en el renderer
+  kind: LibKind;
+  title: string;
+  content: string;
+  tags: string[];      // normalizados: trim + lowercase, sin vacíos
+  createdAt: number;
+  updatedAt: number;
+  seed?: boolean;      // ejemplo sembrado de fábrica (no se re-siembra si lo borrás)
+}
+export interface LibraryFile {
+  entries: LibEntry[];
+  seeded: boolean;     // ya se sembraron los ejemplos iniciales (idempotente)
+}
+
 /** Lo que el main empuja al renderer en cada actualización. */
 export interface Snapshot {
   sessions: Session[];

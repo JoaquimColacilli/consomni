@@ -431,6 +431,48 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
 
 ---
 
+## v1.4.0 — BIBLIOTECA (prompts / skills / rules reutilizables)
+> Panel nuevo para guardar, editar y reutilizar los prompts que usás seguido (ej: "Revisión de PR",
+> "Crear app desde cero"). Bump **1.3.0 → 1.4.0**. Mapea 1:1 sobre el patrón de **Planes** (item del
+> sidebar → vista full → estado persistido) + el motor de **tutorial**. Cero libs nuevas, 100% local.
+
+- **Sidebar:** item **`biblioteca`** (icono `book`, tag "prompts") entre `planes` y los proyectos —
+  expandido `.sb-lib` + colapsado `.ci-lib` (`chrome.js`, `data-act="library"`). Marcado activo por
+  `tree.library`; "todos" se desactiva con `!tree.library` (igual criterio que Planes/inicio). Flag de
+  vista `state.libraryOpen`, branch en `buildShell()` (`buildLibrary(o)`), mutuamente excluyente con
+  plansOpen/home (se limpia en `openPlans`/`setActiveProject`/home). Al entrar **minimiza el dock**.
+- **Modelo de datos** (`types.ts`): `LibEntry {id,kind:'prompt'|'skill'|'rule',title,content,tags[],
+  createdAt,updatedAt,seed?}`. CRUD completo: crear/editar/eliminar (con confirm `.cfm-*`)/duplicar.
+- **Storage DEDICADO `~/.consomni/library.json`** (NO `config.json`): `loadLibrary/saveLibrary` en
+  `config.ts` (clon de `loadDock/saveDock`); IPC `getLibrary`(handle)/`saveLibrary`(on) +
+  `exportLibrary`/`importLibrary` (diálogo nativo, como `pickFolder`). **Por qué dedicado:** evita el
+  `rescanNow()` que dispara `saveConfig` en cada save y no infla config.json. Preload: `getLibrary/
+  saveLibrary/exportLibrary/importLibrary`. **Seeds idempotentes:** la 1ª vez (`!seeded`) se siembran
+  5 ejemplos (cubren los 3 tipos) y se marca `seeded:true` → borrar un seed NO lo resucita.
+- **UI (`app.js`):** `buildLibrary` = topbar + sidebar + `.lib-wrap`{intro + toolbar + board}. **Board**
+  = cards que ENVUELVEN en grilla (`flex:1 1 300px`, responsive, scroll vertical; full-width <720px).
+  **Toolbar:** buscador de texto (filtro VIVO con restore de foco/caret en `render()`, como `.frente-note`)
+  + chips de tipo (todos/prompt/skill/rule con contador) + chips de #tag. **Card:** badge de tipo,
+  título, preview con fade-mask, tags, acciones **copiar** / **insertar** / editar / duplicar / eliminar.
+  **Editor:** modal en `#overlays` (`.lib-edit-*`, reusa lenguaje `.set-*`): segmentado de tipo + título
+  + textarea + tags; guarda en CRUD (no por tecla). `state.libEditOpen` entra en `anyOverlayOpen`/Esc.
+- **Copiar / Insertar:** copiar → `actions.ts` nuevo `case 'copyText'` (clipboard genérico). Insertar →
+  `terminals-ui.js` nuevo `ConsomniTerms.insertIntoFocused(text)` (escribe en la PTY enfocada SIN `\r`,
+  insert-don't-exec; trae el dock a la vista; devuelve false si no hay terminal → toast "abrí una terminal").
+- **Tutorial:** reusa `startTour` con **doneKey parametrizado** (fix: `endTour` escribía siempre
+  `consomni.tour.plans` → ahora `TOUR.doneKey`; plans usa `consomni.tour.plans`, biblioteca
+  `consomni.tour.library`). `libraryTourSteps()` con guard de "vacío" (no apunta a `.lib-card` inexistente).
+  Auto la 1ª vez (`maybeStartLibraryTour`) + replay (botón intro `pi-tour` + palette). Palette: filas
+  "Abrir Biblioteca" / "Nuevo item" / "Tutorial de Biblioteca".
+- **⚠️ Gotcha (fix, feedback del usuario):** el botón "tutorial" de la intro tenía clase `lib-tour` pero el
+  override de ancho apuntaba a `.pi-tour` → quedaba cuadrado 28px y clipeaba "tutorial"→"tutoria". Fix:
+  clase `pi-refresh pi-tour` (igual que Planes) + `.lib-intro{flex-wrap:wrap}` para que los botones bajen
+  de línea en vez de clipear en ventanas angostas. Verificado por screenshot a 1320/720/560px (responsive).
+- **CSS (`app.css`):** aditivo con tokens existentes; `.lib-intro`/`.lib-wrap` REUSAN las reglas de Planes
+  (selectores agrupados `.plans-intro,.lib-intro`). Badges por tipo: prompt=verde, skill=violeta, rule=ámbar.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

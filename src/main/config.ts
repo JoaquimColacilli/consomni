@@ -6,7 +6,7 @@
 import * as os from 'os';
 import * as path from 'path';
 import * as fs from 'fs';
-import type { LocalSessionState } from './types';
+import type { LocalSessionState, LibraryFile } from './types';
 
 export interface AppConfig {
   port: number;                // server de hooks
@@ -41,6 +41,7 @@ export const CONSOMNI_DIR = path.join(HOME, '.consomni');
 export const CONFIG_PATH = path.join(CONSOMNI_DIR, 'config.json');
 export const STATE_PATH = path.join(CONSOMNI_DIR, 'state.json');
 export const DOCK_PATH = path.join(CONSOMNI_DIR, 'dock.json');
+export const LIBRARY_PATH = path.join(CONSOMNI_DIR, 'library.json');
 export const BACKUPS_DIR = path.join(CONSOMNI_DIR, 'backups');
 export const SETUP_LOG = path.join(CONSOMNI_DIR, 'setup.log');
 
@@ -130,6 +131,23 @@ export function loadDock(): any {
 export function saveDock(data: any): void {
   ensureConsomniDir();
   try { fs.writeFileSync(DOCK_PATH, JSON.stringify(data), 'utf8'); } catch { /* noop */ }
+}
+
+/* ── biblioteca de prompts/skills/rules (store dedicado, NO config.json) ──
+   Va aparte para no inflar config.json ni disparar el rescan que hace saveConfig. */
+export function loadLibrary(): LibraryFile {
+  try {
+    if (fs.existsSync(LIBRARY_PATH)) {
+      const raw = JSON.parse(fs.readFileSync(LIBRARY_PATH, 'utf8'));
+      if (raw && Array.isArray(raw.entries)) return { entries: raw.entries, seeded: !!raw.seeded };
+    }
+  } catch { /* noop */ }
+  return { entries: [], seeded: false };
+}
+export function saveLibrary(data: LibraryFile): void {
+  ensureConsomniDir();
+  const safe: LibraryFile = { entries: Array.isArray(data?.entries) ? data.entries : [], seeded: !!data?.seeded };
+  try { fs.writeFileSync(LIBRARY_PATH, JSON.stringify(safe, null, 2), 'utf8'); } catch { /* noop */ }
 }
 
 export function logSetup(line: string): void {
