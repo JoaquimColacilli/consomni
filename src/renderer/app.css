@@ -230,15 +230,25 @@ body.dock-open .board{ padding-bottom: var(--dock-h); }
    derecha agranda la de la izquierda y viceversa. Sólo existe si hay 2+ paneles.
    TODA la pared es arrastrable (no sólo el grip): el ::after agranda la zona de agarre
    a lo largo de todo el muro; los botones del head van por encima (z-index) para no taparlos. */
-.dk-splitter{flex:none;background:var(--border);transition:background .13s;position:relative;z-index:3;}
-.dk-split.row>.dk-splitter{width:7px;cursor:col-resize;}
-.dk-split.col>.dk-splitter{height:7px;cursor:row-resize;}
-/* grip visible centrado (sólo indicador; TODA la pared, de punta a punta, arrastra) */
-.dk-splitter::before{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--text-4);border-radius:3px;opacity:.5;transition:.13s;z-index:1;}
-.dk-split.row>.dk-splitter::before{width:2px;height:24px;}
-.dk-split.col>.dk-splitter::before{height:2px;width:24px;}
-.dk-splitter:hover{background:var(--green);}
-.dk-splitter:hover::before{background:var(--bg);opacity:.9;}
+/* El divisor es una COLUMNA dedicada ancha (10px) y transparente → TODA la pared
+   (de punta a punta y en todo su ancho) es zona de agarre, sin pisar las terminales
+   (no hay líos de stacking: nada más vive en esa columna). La línea visible es fina
+   y va centrada; al hover toda la pared se tiñe de verde para que se note que arrastra. */
+.dk-splitter{flex:none;background:transparent;position:relative;z-index:3;transition:background .13s;}
+/* OJO: el splitter necesita tamaño EXPLÍCITO en el eje cruzado (igual que los paneles):
+   el align-items:stretch del flex NO propaga por el árbol anidado, así que sin esto el
+   divisor queda con alto/ancho 0 y sólo se puede agarrar la línea fina (era el bug del
+   "sólo del centro"). Con height/width:100% es una columna/fila completa, agarrable entera. */
+.dk-split.row>.dk-splitter{width:10px;height:100%;cursor:col-resize;}
+.dk-split.col>.dk-splitter{height:10px;width:100%;cursor:row-resize;}
+/* línea divisoria visible, centrada, de punta a punta */
+.dk-splitter::before{content:"";position:absolute;background:var(--border);transition:background .13s;}
+.dk-split.row>.dk-splitter::before{top:0;bottom:0;left:50%;width:1px;transform:translateX(-50%);}
+.dk-split.col>.dk-splitter::before{left:0;right:0;top:50%;height:1px;transform:translateY(-50%);}
+.dk-splitter:hover{background:rgba(74,222,128,.12);}
+.dk-splitter:hover::before{background:var(--green);}
+.dk-split.row>.dk-splitter:hover::before{width:2px;}
+.dk-split.col>.dk-splitter:hover::before{height:2px;}
 
 .dk-pane{display:flex;flex-direction:column;min-width:0;min-height:0;background:#0a0a0b;overflow:hidden;}
 .dk-pane.focused{box-shadow:inset 0 0 0 1px rgba(74,222,128,.4);}
