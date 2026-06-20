@@ -202,8 +202,8 @@
     if (favItems.length) grp.push({ label: 'favoritos', items: favItems });
     if (actItems.length) grp.push({ label: 'activos', items: actItems });
     if (archivedGroups.length) grp.push({ label: 'archivados', items: [{ isArchived: true, id: '__archived', name: 'archivados', count: archivedGroups.length }] });
-    var ci = [{ icon: 'target', active: state.activeProject === 'all', dot: null }];
-    liveGroups.forEach(function (g) { ci.push({ icon: g.fav ? 'star' : 'repo', active: state.activeProject === g.id, dot: dominantDot(g.counts) }); });
+    var ci = [{ icon: 'target', active: state.activeProject === 'all', dot: null, proj: 'all' }];
+    liveGroups.forEach(function (g) { ci.push({ icon: g.fav ? 'star' : 'repo', active: state.activeProject === g.id, dot: dominantDot(g.counts), proj: g.id }); });
 
     var status = {
       hooksConnected: !!snap.hooksConnected,
@@ -242,6 +242,7 @@
     document.body.classList.toggle('sb-collapsed', !!state.collapsed);   // el dock arranca a la derecha del sidebar
     applyFocusRing();
     injectPerms();
+    applyUpdBtn();   // re-aplicar estado del botón "Actualizar" (el topbar se reconstruyó)
   }
   function scheduleRender() { if (rafPending) return; rafPending = true; requestAnimationFrame(function () { rafPending = false; render(); }); }
   function setSnapshot(snap) { state.snapshot = snap; scheduleRender(); if (state.detailId) refreshDetail(); }
@@ -277,6 +278,36 @@
     t.addEventListener('click', function () { if (url) openExternalUrl(url); t.remove(); });
     w.appendChild(t);
     setTimeout(function () { if (t.parentNode) { t.style.transition = 'opacity .3s'; t.style.opacity = '0'; setTimeout(function () { t.remove(); }, 320); } }, 12000);
+  }
+
+  /* ── auto-update: botón del topbar + flujo (electron-updater) ──
+     El topbar se re-renderiza con throttle → el estado del botón vive en
+     state.upd y se RE-APLICA al DOM tras cada render (applyUpdBtn). */
+  function applyUpdBtn() {
+    var b = document.querySelector('.upbtn[data-act="update"]');
+    if (!b) return;
+    var u = state.upd;
+    b.classList.remove('downloading', 'installing');
+    if (!u || u.mode === 'hidden') { b.hidden = true; return; }
+    b.hidden = false;
+    if (u.mode === 'downloading') { b.classList.add('downloading'); b.style.setProperty('--upb-pct', (u.pct || 0) + '%'); }
+    else if (u.mode === 'installing') { b.classList.add('installing'); }
+    var tx = b.querySelector('.upbtn-tx'); if (tx && u.label != null) tx.textContent = u.label;
+  }
+  // available → (click) → progress* → downloaded → relanza. error → vuelve a "Actualizar".
+  function onUpdatePhase(phase, data) {
+    if (phase === 'available') { state.update = data; state.upd = { mode: 'show', label: 'Actualizar' }; toast('⬆ Consomni v' + ((data && data.latest) || '') + ' disponible', ''); }
+    else if (phase === 'progress') { state.upd = { mode: 'downloading', label: (data && data.percent != null ? data.percent + '%' : 'Descargando…'), pct: data && data.percent }; }
+    else if (phase === 'downloaded') { state.upd = { mode: 'installing', label: 'Reiniciando…' }; toast('actualización lista · reiniciando', ''); }
+    else if (phase === 'error') { state.upd = { mode: 'show', label: 'Actualizar' }; toast('update: ' + ((data && data.error) || 'error'), 'err'); }
+    else if (phase === 'none') { /* sin update: el botón sigue oculto */ }
+    applyUpdBtn();
+  }
+  function startUpdateDownload() {
+    if (!api || !api.updateDownload) { if (state.update && state.update.url) openExternalUrl(state.update.url); return; }
+    state.upd = { mode: 'downloading', label: '0%', pct: 0 };
+    applyUpdBtn();
+    api.updateDownload();
   }
 
   /* ── sesiones helpers ── */
@@ -405,7 +436,11 @@
   function toggleSelect(sid) { if (state.selected[sid]) delete state.selected[sid]; else state.selected[sid] = true; render(); }
 
   /* ════════ FILTROS / ORDEN / DENSIDAD / PROYECTO ════════ */
-  function setActiveProject(p) { state.activeProject = p; state.focusSid = null; render(); }
+  function setActiveProject(p) {
+    // si venís de "inicio" (terminales en pantalla completa), salí de ahí para ver el board del proyecto
+    if (window.ConsomniTerms && window.ConsomniTerms.isMaximized()) window.ConsomniTerms.minimize();
+    state.activeProject = p; state.focusSid = null; render();
+  }
   function toggleMode(m) { if (state.modeFilter[m]) delete state.modeFilter[m]; else state.modeFilter[m] = true; render(); }
   function cycleMode() {
     var order = ['', 'ask', 'plan', 'edit', 'auto'];
@@ -822,6 +857,7 @@
       if (act === 'theme') { toast('tema oscuro (único por ahora)', 'warn'); return; }
       if (act === 'go-attn') { goToAttention(); return; }
       if (act === 'exit-split') { exitSplit(); return; }
+      if (act === 'update') { if (!actEl.classList.contains('downloading') && !actEl.classList.contains('installing')) startUpdateDownload(); return; }
       var ACTS = ['ext', 'term', 'folder', 'copy', 'x', 'redo', 'branch', 'transcript', 'diff', 'pin', 'pause', 'skull', 'archive', 'pr', 'approve', 'deny', 'reply', 'dispatch', 'copyId'];
       if (ACTS.indexOf(act) > -1) {
         var sidA = actEl.getAttribute('data-sid');
@@ -851,7 +887,7 @@
       var sid = card.getAttribute('data-sid');
       state.focusSid = sid;
       var sObj = sessionById(sid);
-      if (window.ConsomniTerms) window.ConsomniTerms.openSession(sid, sObj ? sObj.name : 'sesión');
+      if (window.ConsomniTerms) window.ConsomniTerms.openSession(sid, sObj ? sObj.name : 'sesión', sObj ? sObj.project : '');
       else openDetail(sid);
       return;
     }
@@ -1035,6 +1071,8 @@
         state.collapsed = should; render();
       }
     });
+    // SIEMPRE arrancar en "inicio" con las terminales que quedaron de la sesión anterior
+    try { window.ConsomniTerms.restoreSession(); } catch (e) {}
   }
   state.userCollapsed = null;
   state.collapsed = window.innerWidth < BREAKPOINT;
@@ -1042,9 +1080,7 @@
     api.getSnapshot().then(setSnapshot).catch(function () { render(); });
     api.onSnapshot(setSnapshot);
     if (api.onJump) api.onJump(function (sid) { state.split = false; state.activeProject = 'all'; state.focusSid = sid; render(); openDetail(sid); });
-    if (api.onUpdate) api.onUpdate(function (u) {
-      if (u && u.hasUpdate) { state.update = u; actionToast('⬆ Consomni v' + u.latest + ' disponible · abrir releases', u.url); }
-    });
+    if (api.onUpdateEvent) api.onUpdateEvent(onUpdatePhase);
     maybeOnboard();
   } else {
     render();
@@ -1057,5 +1093,6 @@
     toggleDensity: toggleDensity, showOnboarding: showOnboarding,
     enterSplit: enterSplit, exitSplit: exitSplit, dispatchAction: dispatchAction,
     firstSid: function () { var l = (state.snapshot && state.snapshot.sessions) || []; return l.length ? l[0].id : null; },
+    simulateUpdate: onUpdatePhase,   // QA: __consomni.simulateUpdate('available'|'progress'|'downloaded', {…})
   };
 })();

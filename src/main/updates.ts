@@ -1,14 +1,24 @@
 /* ════════════════════════════════════════════════════════════════
    Consomni — updates.ts
-   Chequeo de versión contra el repo PROPIO del proyecto en GitHub.
-   Única excepción sancionada a la regla "sólo 127.0.0.1": un GET de
-   sólo-lectura a api.github.com/.../releases/latest, SIN datos del
-   usuario, SIN telemetría, opt-out vía Settings (config.checkUpdates).
-   Usa el módulo `https` de Node → NO pasa por el network-guard del
-   renderer (ese guard gobierna pedidos de Chromium, no de Node).
+   Updates contra el repo PÚBLICO del proyecto en GitHub Releases.
+   Única excepción sancionada a la regla "sólo 127.0.0.1": tráfico de
+   sólo-lectura a GitHub (api.github.com / objects de releases), SIN datos
+   del usuario, SIN telemetría, opt-out vía Settings (config.checkUpdates).
+   Va por el módulo `https` de Node / electron-updater (proceso main) →
+   NO pasa por el network-guard del renderer (ese guard gobierna pedidos
+   de Chromium, no de Node).
+
+   Dos caminos:
+   - checkForUpdate()  → GET liviano a releases/latest (botón manual de
+     Settings; anda también en DEV, sin descargar nada).
+   - autoUpdate (electron-updater) → flujo real del botón "Actualizar" del
+     topbar: chequea al iniciar + cada 30 min, descarga on-demand con
+     progreso y aplica con quitAndInstall. SÓLO en app empaquetada
+     (electron-updater es no-op en dev).
    ════════════════════════════════════════════════════════════════ */
 import * as https from 'https';
-import { app } from 'electron';
+import { app, BrowserWindow } from 'electron';
+import { autoUpdater } from 'electron-updater';
 
 const REPO = 'JoaquimColacilli/consomni';
 const RELEASES_URL = 'https://github.com/' + REPO + '/releases';
@@ -83,4 +93,73 @@ export function checkForUpdate(): Promise<UpdateInfo> {
     req.on('error', (e) => finish({ error: String((e as NodeJS.ErrnoException).code || e) }));
     req.on('timeout', () => { req.destroy(); finish({ error: 'timeout' }); });
   });
+}
+
+/* ───────────────────────── auto-update (electron-updater) ───────────────────────── */
+
+let auWired = false;
+let auPoll: ReturnType<typeof setInterval> | null = null;
+let getWindow: () => BrowserWindow | null = () => null;
+// Los chequeos automáticos (arranque/poll) NO deben tirar toast de error (p.ej. 404 si
+// todavía no hay releases, o un blip de red). Sólo mostramos error si el usuario disparó
+// la descarga. Se baja el flag al iniciar una descarga y se sube en cada auto-check.
+let suppressErr = true;
+
+const POLL_MS = 30 * 60 * 1000;   // re-chequeo cada 30 min
+
+function send(channel: string, data?: unknown): void {
+  const win = getWindow();
+  if (win && !win.isDestroyed()) win.webContents.send(channel, data);
+}
+
+/** Arranca el flujo de auto-update: wiring de eventos + chequeo inicial + polling.
+ *  No hace nada en dev (no empaquetado) ni si el usuario lo desactivó (opt-out). */
+export function initAutoUpdate(winGetter: () => BrowserWindow | null, enabled: boolean): void {
+  getWindow = winGetter;
+  if (!app.isPackaged || !enabled) return;
+
+  autoUpdater.autoDownload = false;          // se descarga al click del botón
+  autoUpdater.autoInstallOnAppQuit = true;
+  autoUpdater.allowDowngrade = false;
+
+  if (!auWired) {
+    auWired = true;
+    autoUpdater.on('update-available', (info: { version?: string }) => {
+      send('consomni:update-available', { latest: info && info.version, current: app.getVersion(), url: RELEASES_URL });
+    });
+    autoUpdater.on('update-not-available', () => send('consomni:update-none', {}));
+    autoUpdater.on('download-progress', (p: { percent?: number; transferred?: number; total?: number; bytesPerSecond?: number }) => {
+      send('consomni:update-progress', {
+        percent: Math.max(0, Math.min(100, Math.round(p.percent || 0))),
+        transferred: p.transferred, total: p.total, bps: p.bytesPerSecond,
+      });
+    });
+    autoUpdater.on('update-downloaded', (info: { version?: string }) => {
+      send('consomni:update-downloaded', { latest: info && info.version });
+      // aplicar y relanzar (un toque después para que el renderer muestre "reiniciando…").
+      // (isSilent=false → muestra el progreso del nsis; isForceRunAfter=true → relanza solo)
+      setTimeout(() => { try { autoUpdater.quitAndInstall(false, true); } catch { /* noop */ } }, 1200);
+    });
+    autoUpdater.on('error', (err: Error) => { if (!suppressErr) send('consomni:update-error', { error: String((err && err.message) || err) }); });
+  }
+
+  triggerAutoCheck();
+  if (auPoll) clearInterval(auPoll);
+  auPoll = setInterval(triggerAutoCheck, POLL_MS);
+}
+
+/** Chequeo silencioso (no descarga). Dispara update-available / update-none.
+ *  Los errores NO se propagan al renderer (sin toast molesto en arranque/poll). */
+export function triggerAutoCheck(): void {
+  if (!app.isPackaged) return;
+  suppressErr = true;
+  autoUpdater.checkForUpdates().catch(() => { /* offline / sin red: silencioso */ });
+}
+
+/** Descarga la actualización ya detectada (emite download-progress → update-downloaded).
+ *  Iniciada por el usuario → los errores SÍ se muestran. */
+export function downloadUpdate(): void {
+  if (!app.isPackaged) return;
+  suppressErr = false;
+  autoUpdater.downloadUpdate().catch(() => { /* el evento 'error' ya avisa al renderer */ });
 }

@@ -50,11 +50,31 @@ const api = {
   uninstallHooks: (): Promise<Snapshot> => ipcRenderer.invoke('consomni:uninstallHooks'),
 
   /* ── actualizaciones (chequeo al repo del proyecto, opt-out) ── */
+  // chequeo liviano manual (Settings) — anda también en dev, no descarga nada.
   checkUpdate: (): Promise<Snapshot> => ipcRenderer.invoke('consomni:checkUpdate'),
-  onUpdate: (cb: (info: Snapshot) => void): (() => void) => {
-    const listener = (_e: unknown, info: Snapshot): void => cb(info);
-    ipcRenderer.on('consomni:update', listener);
-    return () => ipcRenderer.removeListener('consomni:update', listener);
+  // ── auto-update real (electron-updater) ──
+  // dispara un re-chequeo / inicia la descarga de la versión detectada.
+  updateCheck: (): void => ipcRenderer.send('consomni:updateCheck'),
+  updateDownload: (): void => ipcRenderer.send('consomni:updateDownload'),
+  // eventos del flujo: available → (click) → progress* → downloaded → (relanza)
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  onUpdateEvent: (cb: (phase: string, data: any) => void): (() => void) => {
+    const map: Record<string, string> = {
+      'consomni:update-available': 'available',
+      'consomni:update-none': 'none',
+      'consomni:update-progress': 'progress',
+      'consomni:update-downloaded': 'downloaded',
+      'consomni:update-error': 'error',
+    };
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const listeners: Array<[string, (e: unknown, d: any) => void]> = [];
+    Object.keys(map).forEach((ch) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const l = (_e: unknown, d: any): void => cb(map[ch], d);
+      ipcRenderer.on(ch, l);
+      listeners.push([ch, l]);
+    });
+    return () => listeners.forEach(([ch, l]) => ipcRenderer.removeListener(ch, l));
   },
 
   /* ── terminales embebidas (PTYs reales) ── */
@@ -77,6 +97,10 @@ const api = {
       ipcRenderer.on('term:exit', l);
       return () => ipcRenderer.removeListener('term:exit', l);
     },
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    getDock: (): Promise<any> => ipcRenderer.invoke('consomni:getDock'),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    saveDock: (data: any): void => ipcRenderer.send('consomni:saveDock', data),
   },
 };
 

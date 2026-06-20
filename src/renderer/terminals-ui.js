@@ -22,9 +22,87 @@
   var sessions = new Map();    // sid   -> pane
   var paneSeq = 0;
   var focused = null;
-  var bound = false, snapBound = false;
+  var bound = false, snapBound = false, restoring = false;
   var notifier = function () {}, actionHandler = function () {}, maxObserver = function () {};
+  function isMaximized() { return !!host && host.classList.contains('maximized'); }
   function notifyMax() { try { maxObserver(isMaximized()); } catch (e) {} }
+
+  /* ── persistencia del layout (localStorage, 100% local) ──
+     Guarda el árbol de splits + cada panel (kind/cwd/sid/resume) para que la app
+     SIEMPRE arranque en "inicio" con las terminales que quedaron. */
+  // se persiste vía el proceso main (~/.consomni/dock.json); localStorage NO es
+  // confiable bajo file:// en Electron (writes fallan silenciosamente).
+  var persistTimer = null;
+  function persist() {
+    if (restoring) return;
+    if (persistTimer) clearTimeout(persistTimer);
+    persistTimer = setTimeout(function () {
+      try {
+        var layout = (rootEl && rootEl.firstElementChild) ? serializeNode(rootEl.firstElementChild) : null;
+        var rs = document.documentElement.style;
+        if (api && api.term && api.term.saveDock) api.term.saveDock({ v: 1, max: isMaximized(), dh: rs.getPropertyValue('--dock-h') || '', layout: layout });
+      } catch (e) { /* noop */ }
+    }, 350);
+  }
+  function serializeNode(el) {
+    if (el.classList.contains('dk-pane')) {
+      var d = el.dataset, o = { t: 'pane', kind: d.kind || 'shell' };
+      if (d.kind === 'session') { o.sid = d.sid; o.name = d.sname || ''; if (d.proj) o.proj = d.proj; }
+      else { o.cwd = d.cwd || ''; if (d.resume) o.resume = d.resume; }
+      return o;
+    }
+    var kids = elemChildren(el).filter(function (c) { return !c.classList.contains('dk-splitter'); });
+    return {
+      t: 'split', dir: el.classList.contains('col') ? 'col' : 'row',
+      children: kids.map(function (c) { return { size: parseFloat(c.style.flex) || 1, node: serializeNode(c) }; })
+    };
+  }
+  function buildNode(node) {
+    if (!node || node.t === 'pane') {
+      var kind = node && node.kind === 'session' ? 'session' : (node && node.kind === 'claude' ? 'claude' : 'shell');
+      var pane = makePaneShell(kind);
+      pane.dataset.kind = kind;
+      if (kind === 'session') { pane.dataset.sid = node.sid || ''; pane.dataset.sname = node.name || ''; if (node.proj) pane.dataset.proj = node.proj; }
+      else { if (node && node.cwd) pane.dataset.cwd = node.cwd; if (node && node.resume) pane.dataset.resume = node.resume; }
+      return pane;
+    }
+    var split = document.createElement('div');
+    split.className = 'dk-split ' + (node.dir === 'col' ? 'col' : 'row');
+    (node.children || []).forEach(function (ch, i) {
+      if (i > 0) split.appendChild(makeSplitter());
+      var el = buildNode(ch.node);
+      el.style.flex = (ch.size || 1) + ' 1 0';
+      split.appendChild(el);
+    });
+    return split;
+  }
+  function restoreSession() {
+    ensureDock();
+    if (!api || !api.term || !api.term.getDock) return;
+    api.term.getDock().then(function (data) {
+      if (!data || !data.layout) return;
+      restoring = true;
+      rootEl.innerHTML = ''; terms.clear(); sessions.clear();
+      var rootChild = buildNode(data.layout);
+      rootChild.style.flex = '1 1 0';
+      rootEl.appendChild(rootChild);
+      panesOf().forEach(function (pane) {
+        var d = pane.dataset;
+        if (d.kind === 'session') mountSession(pane, d.sid, d.sname, d.proj);
+        else mountTerminal(pane, d.kind || 'shell', d.cwd || undefined, d.resume || null);
+      });
+      restoring = false;
+      if (!rootEl.querySelector('.dk-pane')) return;   // nada que restaurar → board normal
+      var rs = document.documentElement.style;
+      if (data.dh) rs.setProperty('--dock-h', data.dh);
+      updateCount(); setFocus(rootEl.querySelector('.dk-pane'));
+      // arrancar SIEMPRE en INICIO (pantalla completa) con las terminales restauradas
+      bindIpc(); bindSnap();
+      host.hidden = false; host.classList.remove('minimized'); host.classList.add('maximized');
+      document.body.classList.add('dock-open'); document.body.classList.remove('dock-min');
+      notifyMax(); refitSoon(); persist();
+    }).catch(function () { /* noop */ });
+  }
 
   var THEME = {
     background: '#0a0a0b', foreground: '#e6e6e6', cursor: '#4ade80', cursorAccent: '#0a0a0b',
@@ -50,7 +128,7 @@
     if (!host) return null;
     host.classList.add('dock');
     host.innerHTML =
-      '<div class="dk-resize" title="arrastrá para cambiar el alto"></div>' +
+      '<div class="dk-resize" title="arrastrá para cambiar el ALTO"></div>' +
       '<div class="dk-toolbar">' +
         '<span class="dk-tb-title">' + (C ? C.eye(20, false) : '') + '<span>TERMINALES</span><span class="dk-count"></span></span>' +
         '<span class="dk-tb-actions">' +
@@ -69,7 +147,7 @@
     countEl = host.querySelector('.dk-count');
     host.querySelector('.dk-new-term').addEventListener('click', function () { spawn('shell'); });
     host.querySelector('.dk-new-claude').addEventListener('click', function () { spawn('claude'); });
-    host.querySelector('.dk-exit').addEventListener('click', function () { host.classList.remove('maximized'); notifyMax(); refitSoon(); });
+    host.querySelector('.dk-exit').addEventListener('click', function () { host.classList.remove('maximized'); notifyMax(); refitSoon(); persist(); });
     host.querySelector('.dk-max').addEventListener('click', toggleMax);
     host.querySelector('.dk-min').addEventListener('click', toggleMin);
     host.querySelector('.dk-tb-title').addEventListener('click', function () { if (host.classList.contains('minimized')) restore(); });
@@ -125,14 +203,14 @@
     pane.querySelector('.dk-pane-x').addEventListener('click', function (e) { e.stopPropagation(); closePane(pane); });
     return pane;
   }
-  function setPaneMeta(pane, icon, title) {
+  function setPaneMeta(pane, icon, title, proj) {
     pane.querySelector('.dk-pane-ic').innerHTML = icon;
-    pane.querySelector('.dk-pane-title').textContent = title;
-    pane.title = title;
+    pane.querySelector('.dk-pane-title').innerHTML = esc(title) + (proj ? ' <span class="dk-pt-proj">· ' + esc(proj) + '</span>' : '');
+    pane.title = title + (proj ? ' · ' + proj : '');
   }
 
   /* ── tiling: insertar / dividir / detach ── */
-  function makeSplitter() { var s = document.createElement('div'); s.className = 'dk-splitter'; return s; }
+  function makeSplitter() { var s = document.createElement('div'); s.className = 'dk-splitter'; s.title = 'arrastrá para redimensionar'; return s; }
 
   function placeContent(pane, dir) {
     ensureDock();
@@ -185,9 +263,9 @@
     killPaneContent(pane);
     detachPane(pane);
     updateCount();
-    if (!rootEl.querySelector('.dk-pane')) { focused = null; hide(); return; }
+    if (!rootEl.querySelector('.dk-pane')) { focused = null; hide(); persist(); return; }
     setFocus(rootEl.querySelector('.dk-pane'));
-    refitAll();
+    refitAll(); persist();
   }
 
   /* ── panel de TERMINAL ── */
@@ -196,12 +274,23 @@
     if (!api || !api.term) { notifier('terminales no disponibles', 'err'); return; }
     ensureDock(); bindIpc(); show();
     opts = opts || {};
-    var resume = opts.resume || null;
-
     var pane = makePaneShell(kind === 'claude' ? 'claude' : 'shell');
-    var body = pane.querySelector('.dk-pane-body');
-    setPaneMeta(pane, kind === 'claude' ? '<span class="dk-tdot"></span>' : svg('term', 11, 2), kind === 'claude' ? (resume ? 'claude ↻…' : 'claude…') : 'shell…');
     placeContent(pane, dir || 'right');
+    mountTerminal(pane, kind, cwd, opts.resume || null);
+    persist();
+  }
+
+  // monta xterm + PTY dentro de un panel YA colocado (lo usa spawn y la restauración)
+  function mountTerminal(pane, kind, cwd, resume) {
+    kind = (kind === 'claude') ? 'claude' : 'shell';
+    pane.dataset.kind = kind;
+    if (cwd) pane.dataset.cwd = cwd;
+    if (resume) pane.dataset.resume = resume; else pane.removeAttribute('data-resume');
+    pane.classList.remove('dk-pane--session', 'dk-pane--shell', 'dk-pane--claude');
+    pane.classList.add('dk-pane--' + kind);
+    setPaneMeta(pane, kind === 'claude' ? '<span class="dk-tdot"></span>' : svg('term', 11, 2), kind === 'claude' ? (resume ? 'claude ↻…' : 'claude…') : 'shell…');
+    var body = pane.querySelector('.dk-pane-body');
+    body.innerHTML = '';
 
     var term = new Terminal({
       fontFamily: "'Geist Mono', ui-monospace, 'Cascadia Mono', monospace",
@@ -212,10 +301,8 @@
     term.loadAddon(fit);
     term.open(body);
 
-    // re-fit automático ante CUALQUIER cambio de tamaño del panel (split, drag, dock-resize…)
     var ro = null;
     if (g.ResizeObserver) { ro = new g.ResizeObserver(function () { try { fit.fit(); } catch (e) {} }); ro.observe(body); }
-    // re-fit cuando termina de cargar la fuente (Geist Mono async → métricas de celda correctas)
     if (g.document && g.document.fonts && g.document.fonts.ready) g.document.fonts.ready.then(function () { try { fit.fit(); } catch (e) {} });
 
     requestAnimationFrame(function () {
@@ -223,23 +310,37 @@
       api.term.create({ cwd: cwd, kind: kind, cols: term.cols || 80, rows: term.rows || 24, resume: resume }).then(function (res) {
         if (!res || !res.ok) { term.write('\r\n  \x1b[31m' + ((res && res.error) || 'no se pudo abrir') + '\x1b[0m\r\n'); return; }
         pane.dataset.tid = res.id;
+        pane.dataset.cwd = res.cwd || cwd || '';
         terms.set(res.id, { term: term, fit: fit, pane: pane, ro: ro });
         setPaneMeta(pane, kind === 'claude' ? '<span class="dk-tdot"></span>' : svg('term', 11, 2), res.title || (kind === 'claude' ? 'claude' : 'shell'));
         term.onData(function (d) { api.term.write(res.id, d); });
         term.onResize(function (sz) { api.term.resize(res.id, sz.cols, sz.rows); });
         try { fit.fit(); term.focus(); } catch (e) {}
+        persist();
       }).catch(function () { term.write('\r\n  \x1b[31mfalló el IPC\x1b[0m\r\n'); });
     });
   }
 
   /* ── panel de SESIÓN ── */
-  function openSession(sid, name) {
+  function openSession(sid, name, proj) {
     ensureDock(); bindSnap(); show();
     var ex = sessions.get(sid);
     if (ex && rootEl.contains(ex)) { setFocus(ex); renderSession(ex); return; }
     var pane = makePaneShell('session');
+    placeContent(pane, 'right');
+    mountSession(pane, sid, name, proj);
+    persist();
+  }
+
+  // monta la conversación read-only dentro de un panel YA colocado
+  function mountSession(pane, sid, name, proj) {
+    pane.classList.remove('dk-pane--shell', 'dk-pane--claude');
+    pane.classList.add('dk-pane--session');
+    pane.dataset.kind = 'session';
     pane.dataset.sid = sid;
-    setPaneMeta(pane, svg('eye', 12, 1.8), name || 'sesión');
+    pane.dataset.sname = name || 'sesión';
+    if (proj) pane.dataset.proj = proj;
+    setPaneMeta(pane, svg('eye', 12, 1.8), name || 'sesión', proj);
     var body = pane.querySelector('.dk-pane-body');
     body.innerHTML =
       '<div class="dk-shead">' +
@@ -257,7 +358,6 @@
       if (b) { e.stopPropagation(); actionHandler(b.getAttribute('data-dock-act'), b.getAttribute('data-sid')); }
     });
     sessions.set(sid, pane);
-    placeContent(pane, 'right');
     renderSession(pane);
   }
 
@@ -290,15 +390,24 @@
       var split = sp.parentNode, row = split.classList.contains('row');
       var prev = sp.previousElementSibling, next = sp.nextElementSibling;
       if (!prev || !next) return;
+      // Normalizar TODOS los hermanos (paneles/splits, no los divisores) a su tamaño ACTUAL
+      // en px como flex-grow (basis 0). Si no, los que no se tocan mantienen grow:1 y, frente a
+      // un grow grande del par arrastrado, se colapsan a ~0 → "desaparecían todas menos 2".
+      // Así sólo el par adyacente al muro intercambia espacio y el resto conserva su tamaño.
+      // OJO: medir TODO primero y recién después escribir — si se lee getBoundingClientRect y se
+      // setea flex en el mismo loop, cada set reflowea y el siguiente read mide un ancho distorsionado.
+      var sibs = elemChildren(split).filter(function (c) { return !c.classList.contains('dk-splitter'); });
+      var sizes = sibs.map(function (c) { var r = c.getBoundingClientRect(); return row ? r.width : r.height; });
+      sibs.forEach(function (c, i) { c.style.flex = sizes[i] + ' 1 0'; });
       var pr = prev.getBoundingClientRect(), nr = next.getBoundingClientRect();
       var start = row ? e.clientX : e.clientY;
       var ps = row ? pr.width : pr.height, ns = row ? nr.width : nr.height, total = ps + ns;
       function move(ev) {
         var d = (row ? ev.clientX : ev.clientY) - start;
         var np = Math.max(70, Math.min(total - 70, ps + d));
-        prev.style.flex = np + ' 1 0'; next.style.flex = (total - np) + ' 1 0';
+        prev.style.flex = np + ' 1 0'; next.style.flex = (total - np) + ' 1 0'; liveFit();
       }
-      function up() { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; }
+      function up() { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; persist(); }
       document.body.style.userSelect = 'none';
       document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
     });
@@ -340,7 +449,7 @@
       function up() {
         document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up);
         document.body.classList.remove('dk-dragging'); document.body.style.userSelect = ''; pane.classList.remove('dragging'); clearInd();
-        if (started && drag && drag.target !== pane) { detachPane(pane); insertPaneAt(drag.target, pane, drag.zone); setFocus(pane); refitAll(); }
+        if (started && drag && drag.target !== pane) { detachPane(pane); insertPaneAt(drag.target, pane, drag.zone); setFocus(pane); refitAll(); persist(); }
       }
       document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
     });
@@ -354,17 +463,19 @@
       var startY = e.clientY, startH = host.getBoundingClientRect().height;
       function move(ev) {
         var h = Math.max(160, Math.min(window.innerHeight * 0.92, startH + (startY - ev.clientY)));
-        document.documentElement.style.setProperty('--dock-h', h + 'px');
+        document.documentElement.style.setProperty('--dock-h', h + 'px'); liveFit();
       }
-      function up() { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; refitAll(); }
+      function up() { document.removeEventListener('mousemove', move); document.removeEventListener('mouseup', up); document.body.style.userSelect = ''; refitAll(); persist(); }
       document.body.style.userSelect = 'none';
       document.addEventListener('mousemove', move); document.addEventListener('mouseup', up);
     });
   }
 
   /* ── fit ── */
-  var fitTimer = null;
+  var fitTimer = null, liveRaf = null;
   function refitSoon() { if (fitTimer) cancelAnimationFrame(fitTimer); fitTimer = requestAnimationFrame(function () { fitTimer = requestAnimationFrame(refitAll); }); }
+  // fit por frame durante un drag (reflow EN VIVO; el ResizeObserver llega tarde)
+  function liveFit() { if (liveRaf) cancelAnimationFrame(liveRaf); liveRaf = requestAnimationFrame(function () { liveRaf = null; refitAll(); }); }
   function refitAll() { terms.forEach(function (t) { try { if (t.pane.offsetParent !== null) t.fit.fit(); } catch (e) {} }); }
 
   /* ── estados: show / minimize / restore / maximize / home / hide ── */
@@ -374,10 +485,10 @@
     document.body.classList.add('dock-open'); document.body.classList.remove('dock-min');
     notifyMax(); refitSoon();
   }
-  function minimize() { ensureDock(); if (!host || host.hidden) return; host.classList.remove('maximized'); host.classList.add('minimized'); document.body.classList.add('dock-min'); notifyMax(); }
-  function restore() { ensureDock(); host.classList.remove('minimized'); host.hidden = false; document.body.classList.add('dock-open'); document.body.classList.remove('dock-min'); notifyMax(); refitSoon(); }
+  function minimize() { ensureDock(); if (!host || host.hidden) return; host.classList.remove('maximized'); host.classList.add('minimized'); document.body.classList.add('dock-min'); notifyMax(); persist(); }
+  function restore() { ensureDock(); host.classList.remove('minimized'); host.hidden = false; document.body.classList.add('dock-open'); document.body.classList.remove('dock-min'); notifyMax(); refitSoon(); persist(); }
   function toggleMin() { if (host.classList.contains('minimized')) restore(); else minimize(); }
-  function toggleMax() { ensureDock(); host.classList.remove('minimized'); document.body.classList.remove('dock-min'); host.classList.toggle('maximized'); notifyMax(); refitSoon(); }
+  function toggleMax() { ensureDock(); host.classList.remove('minimized'); document.body.classList.remove('dock-min'); host.classList.toggle('maximized'); notifyMax(); refitSoon(); persist(); }
   function hide() { if (!host) return; host.hidden = true; host.classList.remove('maximized', 'minimized'); document.body.classList.remove('dock-open', 'dock-min'); notifyMax(); }
   function home() {
     ensureDock(); bindIpc();
@@ -406,6 +517,6 @@
     openSession: openSession, show: show, hide: hide, minimize: minimize, restore: restore,
     toggle: toggle, home: home, isOpen: isOpen, count: count, refreshActive: refreshActive,
     setNotifier: setNotifier, setActionHandler: setActionHandler, setMaxObserver: setMaxObserver,
-    isMaximized: function () { return !!host && host.classList.contains('maximized'); }
+    restoreSession: restoreSession, isMaximized: isMaximized
   };
 })(window);

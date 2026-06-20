@@ -9,8 +9,8 @@ import { start as startSessions, stop as stopSessions, buildSnapshot, rescanNow,
 import { runAction, type ActionPayload } from './actions';
 import { startHooksServer, stopHooksServer, isServerListening } from './hooks-server';
 import { install as installHooks, uninstall as uninstallHooks, getStatus as getHooksStatus, isInstalled } from './hooks-install';
-import { loadConfig, saveConfig, setLocalState, type AppConfig } from './config';
-import { checkForUpdate } from './updates';
+import { loadConfig, saveConfig, setLocalState, loadDock, saveDock, type AppConfig } from './config';
+import { checkForUpdate, initAutoUpdate, triggerAutoCheck, downloadUpdate } from './updates';
 import { setTerminalWindow, createTerm, writeTerm, resizeTerm, killTerm, listTerms, killAllTerms, terminalsAvailable } from './terminals';
 import type { Snapshot, LocalSessionState } from './types';
 
@@ -153,6 +153,9 @@ if (!gotLock) {
 
     // chequeo de actualizaciones (manual desde Settings; ver updates.ts)
     ipcMain.handle('consomni:checkUpdate', () => checkForUpdate());
+    // auto-update (electron-updater): re-chequeo manual + iniciar descarga
+    ipcMain.on('consomni:updateCheck', () => triggerAutoCheck());
+    ipcMain.on('consomni:updateDownload', () => downloadUpdate());
 
     // ── terminales embebidas (PTYs reales; ver terminals.ts) ──
     ipcMain.handle('consomni:termAvailable', () => terminalsAvailable());
@@ -161,6 +164,10 @@ if (!gotLock) {
     ipcMain.on('consomni:termResize', (_e, arg: { id: string; cols: number; rows: number }) => resizeTerm(String(arg?.id), Number(arg?.cols), Number(arg?.rows)));
     ipcMain.handle('consomni:termKill', (_e, id: string) => { killTerm(String(id)); return true; });
     ipcMain.handle('consomni:termList', () => listTerms());
+    // persistencia del layout del dock (para arrancar siempre en "inicio")
+    ipcMain.handle('consomni:getDock', () => loadDock());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ipcMain.on('consomni:saveDock', (_e, data: any) => saveDock(data));
 
     // settings
     ipcMain.handle('consomni:getConfig', () => loadConfig());
@@ -203,14 +210,9 @@ if (!gotLock) {
     await startHooksServer(cfg.port, (event, payload) => applyHookEvent(event, payload));
     refreshHooksConn();
 
-    // Chequeo de updates al iniciar (opt-out). Sólo al repo del proyecto.
-    if (cfg.checkUpdates !== false) {
-      checkForUpdate().then((u) => {
-        if (u.hasUpdate && mainWindow && !mainWindow.isDestroyed()) {
-          mainWindow.webContents.send('consomni:update', u);
-        }
-      }).catch(() => { /* offline / sin red: silencioso */ });
-    }
+    // Auto-update al iniciar + cada 30 min (opt-out). electron-updater contra el
+    // repo público del proyecto; no-op en dev. Dispara el botón "Actualizar" del topbar.
+    initAutoUpdate(() => mainWindow, cfg.checkUpdates !== false);
 
     app.on('activate', () => {
       if (BrowserWindow.getAllWindows().length === 0) createWindow();

@@ -26,9 +26,10 @@ consolas (`claude` o shell) **dentro** de la app, full-screen y en vivo.
 - Toca `~/.claude/settings.json` **solo** para instalar/desinstalar los hooks, y **siempre
   con backup previo** en `~/.consomni/backups/` (merge no-destructivo, restaurable).
 - Sin telemetría, sin analytics. La fuente Geist Mono va vendorizada local (offline 100%).
-- **Única salida de red fuera de 127.0.0.1:** un chequeo de versión de sólo-lectura contra el
-  repo del propio proyecto en GitHub (`releases/latest`), para avisarte si hay update. No manda
-  datos tuyos, no hay telemetría, y es **opt-out** desde Settings (`buscar al iniciar`).
+- **Única salida de red fuera de 127.0.0.1:** las **actualizaciones** contra el repo público del
+  propio proyecto en GitHub Releases — chequeo de versión y, si elegís actualizar, la descarga del
+  instalador (electron-updater). No manda datos tuyos, no hay telemetría, y es **opt-out** desde
+  Settings (`buscar al iniciar`).
 
 ---
 
@@ -41,7 +42,12 @@ npm install        # dependencias
 npm run dev        # compila TS + lanza la app
 npm run build      # solo compila TS (src/main + src/preload → dist/)
 npm run dist       # empaqueta Windows: portable + instalador NSIS → release/
+npm run release    # build + publica a GitHub Releases (requiere GH_TOKEN; ver "Releases")
 ```
+
+> **Instalador:** el NSIS es asistido y muestra un checkbox **"Crear acceso directo en el escritorio"**
+> (marcado por default); el acceso del menú inicio se crea siempre. App **sin firmar** → la primera vez
+> Windows SmartScreen avisa: *Más información → Ejecutar de todas formas*. El auto-update igual funciona.
 
 > **Módulo nativo (terminales):** las terminales embebidas usan `node-pty`. Para no necesitar compilador,
 > se usa el binario **prebuilt** para el ABI de Electron — por eso Electron está pinneado a **29.x**. Si
@@ -81,6 +87,31 @@ a la derecha del sidebar** (no lo tapa) que es un **mosaico maleable**:
 > no se le puede "enchufar" una terminal interactiva — esas se ven read-only (la conversación).
 > Las terminales 100% interactivas son las que **Consomni lanza**. Una sesión `claude` que abras acá
 > también aparece en el board (escribe su transcript).
+
+## 🔄 Actualizaciones
+
+Consomni se actualiza solo. Al iniciar (y cada ~30 min) chequea si hay una versión nueva en GitHub
+Releases. Si la hay, aparece un botón **"Actualizar"** arriba a la derecha del topbar (junto a la
+campana / ⌘K). Al clickearlo descarga el instalador con una **barra de progreso verde** en el propio
+botón y, cuando termina, **se reinicia ya actualizado**. Es **opt-out** desde Settings.
+
+### 📦 Releases (mantenedor)
+
+El canal de updates es el **repo público** `JoaquimColacilli/consomni` (GitHub Releases). Para publicar
+una versión nueva:
+
+```bash
+# 1) subí la versión en package.json (+ el badge en chrome.js / sidebar)
+# 2) seteá un token de escritura SOLO en tu máquina (NUNCA se commitea):
+$env:GH_TOKEN = "<fine-grained PAT con contents:write en JoaquimColacilli/consomni>"
+# 3) publicá:
+npm run release      # build + electron-builder --publish always
+```
+
+Esto sube `latest.yml` + `Consomni-Setup-<ver>.exe` (+ blockmap) al release. Los usuarios con una
+versión anterior verán el botón **"Actualizar"** la próxima vez que abran la app. El token vive sólo
+como variable de entorno local; **no** se guarda en el repo. (Code-signing queda fuera de alcance: la
+app va sin firmar, así que la primera instalación pasa por SmartScreen.)
 
 ## 🎨 Pantallas
 

@@ -1,6 +1,6 @@
 {
   "name": "consomni",
-  "version": "1.0.0",
+  "version": "1.2.0",
   "description": "Consomni — consola + omni · un ojo que lo ve todo. Monitor en tiempo real de sesiones de Claude Code, 100% local.",
   "author": "Joaquim Colacilli",
   "license": "UNLICENSED",
@@ -12,11 +12,13 @@
     "start": "electron .",
     "dev": "tsc -p tsconfig.json && electron .",
     "dist": "npm run build && electron-builder --win",
-    "pack": "npm run build && electron-builder --win --dir"
+    "pack": "npm run build && electron-builder --win --dir",
+    "release": "npm run build && electron-builder --win --publish always"
   },
   "dependencies": {
     "@homebridge/node-pty-prebuilt-multiarch": "^0.13.1",
     "chokidar": "^3.6.0",
+    "electron-updater": "^6.8.9",
     "express": "^4.21.2"
   },
   "devDependencies": {

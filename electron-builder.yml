@@ -45,5 +45,20 @@ nsis:
   allowToChangeInstallationDirectory: true
   artifactName: ${productName}-Setup-${version}.${ext}
   shortcutName: Consomni
+  # El acceso del ESCRITORIO lo maneja build/installer.nsh con un checkbox
+  # (marcado por default) → desactivamos el automático para no duplicarlo.
+  # El del MENÚ INICIO lo sigue creando electron-builder (createStartMenuShortcut).
+  createDesktopShortcut: false
   # NSIS necesita .ico real; dejamos que electron-builder derive el icono del
   # instalador/accesos directos desde win.icon (png→ico automático).
+
+# ── Auto-update (electron-updater) ──────────────────────────────────
+# Canal de updates contra el repo PÚBLICO del proyecto en GitHub Releases.
+# La app lee latest.yml + el nsis SIN token (repo público). Para PUBLICAR,
+# el mantenedor corre `electron-builder --publish always` con GH_TOKEN seteado
+# como variable de entorno LOCAL (write al repo) — NUNCA se commitea el token.
+publish:
+  provider: github
+  owner: JoaquimColacilli
+  repo: consomni
+  releaseType: release

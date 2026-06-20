@@ -28,6 +28,7 @@ export const CLAUDE_SETTINGS = path.join(CLAUDE_DIR, 'settings.json');
 export const CONSOMNI_DIR = path.join(HOME, '.consomni');
 export const CONFIG_PATH = path.join(CONSOMNI_DIR, 'config.json');
 export const STATE_PATH = path.join(CONSOMNI_DIR, 'state.json');
+export const DOCK_PATH = path.join(CONSOMNI_DIR, 'dock.json');
 export const BACKUPS_DIR = path.join(CONSOMNI_DIR, 'backups');
 export const SETUP_LOG = path.join(CONSOMNI_DIR, 'setup.log');
 
@@ -100,6 +101,18 @@ export function setLocalState(sessionId: string, patch: LocalSessionState): void
   stateCache = st;
   ensureConsomniDir();
   try { fs.writeFileSync(STATE_PATH, JSON.stringify(st, null, 2), 'utf8'); } catch { /* noop */ }
+}
+
+/* ── layout del dock de terminales (persistencia para "inicio") ── */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function loadDock(): any {
+  try { if (fs.existsSync(DOCK_PATH)) return JSON.parse(fs.readFileSync(DOCK_PATH, 'utf8')); } catch { /* noop */ }
+  return null;
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function saveDock(data: any): void {
+  ensureConsomniDir();
+  try { fs.writeFileSync(DOCK_PATH, JSON.stringify(data), 'utf8'); } catch { /* noop */ }
 }
 
 export function logSetup(line: string): void {

@@ -58,6 +58,27 @@
 @media (max-width:900px){ .topbar .search span{display:none;} .topbar .search{width:auto;min-width:0;} .topbar .search .kbd{display:none;} }
 @media (max-width:780px){ .topbar .tbtn{display:none;} }
 @media (max-width:680px){ .topbar .mode-pills{display:none;} }
+/* en angosto, el botón Actualizar queda icon-only (sigue visible y clickeable) */
+@media (max-width:900px){ .upbtn .upbtn-tx{display:none;} .upbtn{padding:0 8px;} }
+
+/* ── botón "Actualizar" del topbar (auto-update vía electron-updater) ──
+   Aditivo y con tokens existentes (Hard Rule 1). Oculto salvo que haya update. */
+.upbtn{position:relative;display:inline-flex;align-items:center;gap:6px;height:28px;padding:0 11px;border-radius:8px;flex:none;
+  font-family:'Geist Mono',ui-monospace,monospace;font-size:11.5px;font-weight:500;letter-spacing:.2px;white-space:nowrap;
+  color:var(--green);background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.45);cursor:pointer;overflow:hidden;
+  transition:border-color .15s,background .15s,color .15s;}
+.upbtn[hidden]{display:none;}
+.upbtn:hover{background:rgba(74,222,128,.16);border-color:var(--green);}
+.upbtn-ic,.upbtn-tx{position:relative;z-index:1;display:inline-flex;align-items:center;}
+/* fill de progreso detrás del label (ancho = --upb-pct) */
+.upbtn-bar{position:absolute;left:0;top:0;bottom:0;width:0;background:rgba(74,222,128,.30);transition:width .2s ease;z-index:0;}
+.upbtn.downloading{cursor:default;}
+.upbtn.downloading .upbtn-bar{width:var(--upb-pct,0%);}
+.upbtn.downloading .upbtn-ic{animation:upbPulse 1.1s ease-in-out infinite;}
+/* descargado → aplicando/reiniciando (ámbar) */
+.upbtn.installing{color:var(--amber);border-color:rgba(245,158,11,.5);background:rgba(245,158,11,.10);cursor:default;}
+.upbtn.installing .upbtn-bar{width:100%;background:rgba(245,158,11,.28);}
+@keyframes upbPulse{0%,100%{opacity:.45}50%{opacity:1}}
 
 /* ── 5) densidad compacta (toggle del topbar; aditivo, no toca cómodo) ── */
 body.compacto .card{padding:8px 11px;gap:6px;}
@@ -166,17 +187,19 @@ body.compacto .board{gap:14px;}
    Pantalla nueva (no está en el reference): construida con tokens existentes. */
 :root{ --dock-h: 44vh; --sb-w: 238px; --sbar-h: 27px; }
 body.sb-collapsed{ --sb-w: 56px; }
-/* el dock NO toca el sidebar (arranca a su derecha) ni el statusbar (queda arriba de él) */
-#terminals.dock{position:fixed;left:var(--sb-w);right:0;bottom:var(--sbar-h);top:auto;height:var(--dock-h);z-index:40;display:flex;flex-direction:column;background:var(--bg);border-top:1px solid var(--border-hover);border-left:1px solid var(--border);box-shadow:0 -16px 44px -22px rgba(0,0,0,.85);transition:left .2s;}
+/* el dock NO toca el sidebar (arranca a su derecha) ni el statusbar (queda arriba de él). */
+#terminals.dock{position:fixed;left:var(--sb-w);right:0;bottom:var(--sbar-h);top:auto;height:var(--dock-h);z-index:40;display:flex;flex-direction:column;background:var(--bg);border-top:1px solid var(--border-hover);border-left:1px solid var(--border);box-shadow:0 -16px 44px -22px rgba(0,0,0,.85);}
 #terminals[hidden]{display:none;}
 #terminals.dock.maximized{left:var(--sb-w);right:0;top:0;bottom:0;height:auto;z-index:38;}   /* zoom: cubre el board pero DEJA el sidebar (comprimido) */
 /* el board deja lugar abajo para que su contenido no quede tapado por el dock */
 body.dock-open .board{ padding-bottom: var(--dock-h); }
 
-/* borde superior arrastrable (cambia el alto del dock) */
-.dk-resize{position:absolute;top:-3px;left:0;right:0;height:7px;cursor:ns-resize;z-index:3;}
+/* borde arrastrable: superior = ALTO del dock (ns). El ANCHO entre terminales se ajusta
+   con el divisor del MEDIO (.dk-splitter), no desde los bordes. */
+.dk-resize{position:absolute;top:-3px;left:0;right:0;height:7px;cursor:ns-resize;z-index:4;}
 .dk-resize:hover{background:linear-gradient(var(--green),transparent);opacity:.5;}
-#terminals.dock.maximized .dk-resize{display:none;}
+#terminals.dock.maximized .dk-resize,
+#terminals.dock.minimized .dk-resize{display:none;}
 
 /* toolbar del dock */
 .dk-toolbar{flex:none;display:flex;align-items:center;gap:12px;height:33px;padding:0 10px;background:var(--bg-chrome);border-bottom:1px solid var(--border);}
@@ -203,10 +226,19 @@ body.dock-open .board{ padding-bottom: var(--dock-h); }
 .dk-split.col{flex-direction:column;}
 .dk-split.row>.dk-pane,.dk-split.row>.dk-split{height:100%;}   /* fila → cada hijo llena el alto */
 .dk-split.col>.dk-pane,.dk-split.col>.dk-split{width:100%;}    /* columna → cada hijo llena el ancho */
-.dk-splitter{flex:none;background:var(--border);transition:background .13s;}
-.dk-split.row>.dk-splitter{width:5px;cursor:col-resize;}
-.dk-split.col>.dk-splitter{height:5px;cursor:row-resize;}
+/* divisor del MEDIO: así se ajusta el ANCHO (o alto) ENTRE terminales — arrastrar a la
+   derecha agranda la de la izquierda y viceversa. Sólo existe si hay 2+ paneles.
+   TODA la pared es arrastrable (no sólo el grip): el ::after agranda la zona de agarre
+   a lo largo de todo el muro; los botones del head van por encima (z-index) para no taparlos. */
+.dk-splitter{flex:none;background:var(--border);transition:background .13s;position:relative;z-index:3;}
+.dk-split.row>.dk-splitter{width:7px;cursor:col-resize;}
+.dk-split.col>.dk-splitter{height:7px;cursor:row-resize;}
+/* grip visible centrado (sólo indicador; TODA la pared, de punta a punta, arrastra) */
+.dk-splitter::before{content:"";position:absolute;top:50%;left:50%;transform:translate(-50%,-50%);background:var(--text-4);border-radius:3px;opacity:.5;transition:.13s;z-index:1;}
+.dk-split.row>.dk-splitter::before{width:2px;height:24px;}
+.dk-split.col>.dk-splitter::before{height:2px;width:24px;}
 .dk-splitter:hover{background:var(--green);}
+.dk-splitter:hover::before{background:var(--bg);opacity:.9;}
 
 .dk-pane{display:flex;flex-direction:column;min-width:0;min-height:0;background:#0a0a0b;overflow:hidden;}
 .dk-pane.focused{box-shadow:inset 0 0 0 1px rgba(74,222,128,.4);}
@@ -215,8 +247,9 @@ body.dock-open .board{ padding-bottom: var(--dock-h); }
 .dk-pane-ic{display:inline-flex;flex:none;color:var(--text-3);}
 .dk-tdot{width:7px;height:7px;border-radius:50%;display:inline-block;background:var(--green);box-shadow:0 0 6px rgba(74,222,128,.6);}
 .dk-pane-title{flex:1;min-width:0;font-size:11.5px;color:var(--text-2);white-space:nowrap;overflow:hidden;text-overflow:ellipsis;font-family:'Geist Mono',monospace;}
+.dk-pt-proj{color:var(--text-4);}   /* proyecto asociado, atenuado */
 .dk-pane-btns{display:flex;gap:3px;flex:none;}
-.dk-pbtn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:5px;background:transparent;border:1px solid transparent;color:var(--text-4);transition:.13s;cursor:pointer;}
+.dk-pbtn{display:inline-flex;align-items:center;justify-content:center;width:22px;height:22px;border-radius:5px;background:transparent;border:1px solid transparent;color:var(--text-4);transition:.13s;cursor:pointer;position:relative;z-index:5;}
 .dk-pbtn:hover{color:var(--text-1);background:var(--surface-input);border-color:var(--border);}
 .dk-pane-body{flex:1;min-height:0;min-width:0;position:relative;overflow:hidden;}
 /* xterm en ABSOLUTE: llena el body (flex) sin inflarlo con su contenido (rows*cellHeight).

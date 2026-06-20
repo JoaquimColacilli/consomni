@@ -27,12 +27,16 @@
    (nunca escribir/mover/borrar transcripts). **Backup de `settings.json` antes de tocarlo.**
    Sin telemetría, sin analytics. Única red permitida: `127.0.0.1` (server de hooks). La fuente
    Geist Mono se vendoriza local (offline 100%).
-   - **Única excepción sancionada (chequeo de updates):** un GET de sólo-lectura a
-     `api.github.com/repos/JoaquimColacilli/consomni/releases/latest` para comparar versión
-     (ver `src/main/updates.ts`). NO es API de Anthropic, NO manda datos del usuario, NO hay
-     telemetría, va sólo al repo del propio proyecto y es **opt-out** (`config.checkUpdates`,
-     toggle en Settings). Usa el módulo `https` de Node → no pasa por el network-guard del
-     renderer (ese guard sigue bloqueando TODO lo demás que no sea 127.0.0.1).
+   - **Única excepción sancionada (updates):** tráfico de sólo-lectura a **GitHub** contra el
+     repo PÚBLICO del propio proyecto (`JoaquimColacilli/consomni`), por dos vías: (a) un GET a
+     `api.github.com/.../releases/latest` para el chequeo manual de Settings, y (b)
+     **electron-updater** que baja `latest.yml` + el `.exe` nsis de GitHub Releases para el flujo
+     del botón "Actualizar" del topbar (ver `src/main/updates.ts`). NO es API de Anthropic, NO
+     manda datos del usuario, NO hay telemetría, va sólo al repo del proyecto y es **opt-out**
+     (`config.checkUpdates`, toggle en Settings). Va por Node (`https` / electron-updater, proceso
+     main) → no pasa por el network-guard del renderer (ese guard sigue bloqueando TODO lo demás
+     que no sea 127.0.0.1). El repo es público SÓLO para que el update funcione sin token en el
+     cliente; **nunca** se commitea un token (publicar usa `GH_TOKEN` local del mantenedor).
 
 ### Regla de proceso (también dura)
 - **NUNCA `git commit` ni `git push` sin aprobación explícita del usuario.** Todo lo demás
@@ -245,6 +249,16 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
   maximizar se **comprime** el sidebar de forma NO pegajosa (`setMaxObserver` guarda el estado previo y
   lo restaura al salir). Botón **"salir"** (ámbar, visible sólo en maximized) vuelve al dock. Drag de
   panel: `preventDefault` en mousedown + `user-select:none` para no seleccionar texto al arrastrar.
+- **Persistencia + "inicio" (v1.1.0):** el layout del dock (árbol de splits + cada panel: kind/cwd/sid/
+  resume + alto/ancho) se guarda en **`~/.consomni/dock.json`** vía IPC (`getDock`/`saveDock`; NO
+  localStorage — falla bajo `file://`). Al arrancar, `restoreSession()` reconstruye y abre **siempre en
+  "inicio"** (maximizado) con las terminales que quedaron. El panel de sesión muestra el **proyecto**
+  asociado. Resize de **ANCHO** además del alto: borde izquierdo arrastrable → `--dock-x` (offset desde el
+  sidebar); ambos drags hacen `liveFit()` (re-fit por frame; el ResizeObserver llega tarde → si no, se
+  "corta" la terminal en vivo). Iconos del sidebar colapsado llevan `data-proj` (clickearlos sale de "inicio").
+- **⚠️ Bug fijado (v1.1.0):** `isMaximized()` se usaba como función top-level pero sólo existía como
+  método inline del API → `notifyMax`/`persist` tiraban ReferenceError (tragado por try/catch) → el
+  `maxObserver` (colapso/restore del sidebar) y la persistencia estaban ROTOS. Ahora es función real.
 - **Seguridad:** sigue **cero API de Anthropic** — Consomni sólo hospeda el proceso; `claude` hace
   lo suyo. Se borra `ELECTRON_RUN_AS_NODE` del env del hijo.
 
@@ -386,6 +400,32 @@ quedan para icono de la app en Fase 6.
   `cd node_modules/@homebridge/node-pty-prebuilt-multiarch && node ../../prebuild-install/bin.js --runtime=electron --target=29.4.6 --arch=x64`.
 - **Setup desde cero:** `npm install` → fetch prebuild de node-pty para electron (comando de arriba) →
   `npm run dist`. Verificado: terminal embebida abre en el `.exe` empaquetado.
+
+### Distribución — instalador (checkbox) + auto-update (v1.2.0)
+- **Instalador NSIS con checkbox de acceso directo:** `nsis.oneClick:false` (asistido). El acceso del
+  **escritorio** lo maneja `build/installer.nsh` (lo toma electron-builder solo por estar en `build/`):
+  una página `nsDialogs` con el checkbox **"Crear acceso directo en el escritorio"** (MARCADO por
+  default) vía `customPageAfterChangeDir`; `customInstall` crea `$DESKTOP\Consomni.lnk` sólo si quedó
+  tildado y `customUnInstall` lo borra. Para no duplicarlo, `nsis.createDesktopShortcut:false` en el yml
+  (el del **menú inicio** lo sigue creando electron-builder).
+- **Auto-update (electron-updater):** `autoUpdater.autoDownload=false`, guard `app.isPackaged` (es no-op
+  en dev). `initAutoUpdate()` chequea al iniciar + cada 30 min; eventos → IPC al renderer:
+  `update-available` (muestra el botón **"Actualizar"** del topbar, oculto si no hay update) → click →
+  `updateDownload()` → `download-progress` (anima el botón: fill verde + ícono pulsando, `--upb-pct`) →
+  `update-downloaded` → `quitAndInstall()` (relanza). Botón = `.upbtn` en `chrome.js` (tokens
+  `--green/--amber`, Geist Mono, CSS aditivo en `app.css` → respeta Hard Rule 1; icon-only <900px →
+  responsive). Estado vivo en `state.upd`, re-aplicado tras cada render (`applyUpdBtn`). QA sin updates
+  reales: `__consomni.simulateUpdate('available'|'progress'|'downloaded'|'installing', {…})`.
+- **Canal de updates = repo PÚBLICO `JoaquimColacilli/consomni`** (`publish:` en el yml apunta a él).
+  La decisión (entre repo público de releases / generic provider / hacer el repo público) la tomó el
+  usuario: **hacer el repo público**. Implicancia: el código y el **email de los commits**
+  (`joaquimcolacilli9@gmail.com`) quedan visibles. La app lee `latest.yml` + el nsis **sin token**.
+- **Flujo de release:** (1) `bump` de `version` en `package.json` (+ `brand-ver` en `chrome.js` y `.ver`
+  del sidebar); (2) `GH_TOKEN=<fine-grained, write a consomni>` como **env var LOCAL** (NUNCA se commitea);
+  (3) `npm run release` (= `build` + `electron-builder --win --publish always`) → sube `latest.yml` +
+  `Consomni-Setup-x.y.z.exe` + blockmap a GitHub Releases. Los usuarios con versión anterior ven el botón.
+- **Sin firmar:** primera instalación dispara SmartScreen (avanzar → "Ejecutar de todas formas"); el
+  auto-update igual funciona. Code-signing queda **fuera de alcance** (TODO).
 
 ### git
 consomni NO tenía .git propio; el repo de `~/OneDrive/Escritorio` (vacío) lo contenía. Se hizo

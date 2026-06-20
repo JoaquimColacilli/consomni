@@ -53,7 +53,8 @@
     enter:  '<polyline points="9 10 4 15 9 20"/><path d="M20 4v7a4 4 0 0 1-4 4H4"/>',
     grid:   '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
     dispatch:'<polyline points="4 7 8 11 4 15"/><line x1="10" y1="16" x2="15" y2="16"/><path d="M18.5 3.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"/>',
-    eye:    '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>'
+    eye:    '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    download:'<path d="M12 3v12"/><polyline points="7 11 12 16 17 11"/><path d="M5 20h14"/>'
   };
   function svg(name, sz, sw) {
     sz = sz || 14; sw = sw || 1.7;
@@ -171,7 +172,7 @@
     const searchTxt = o.searchValue ? o.searchValue : 'buscar nombre / proyecto / branch…';
 
     return '<header class="topbar">' +
-      '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span><span class="brand-ver">' + esc(o.version || 'v1.0.0') + '</span></div>' +
+      '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span><span class="brand-ver">' + esc(o.version || 'v1.2.0') + '</span></div>' +
       '<div class="divider-v"></div>' +
       '<div class="counters">' +
         '<span><b>' + total + '</b> sesiones</span><span class="sep">·</span>' +
@@ -186,6 +187,12 @@
         pill('ask', '--ask') + pill('plan', '--blue') + pill('edit', '--violet') + pill('auto', '--red') + '</div>' +
       '<button class="tbtn">orden: <b>' + esc(sortLabel) + '</b>' + svg('chevD', 10, 2.4) + '</button>' +
       '<div class="seg"><span' + (density === 'comodo' ? ' class="on"' : '') + ' data-density="comodo">cómodo</span><span' + (density === 'compacto' ? ' class="on"' : '') + ' data-density="compacto">compacto</span></div>' +
+      // botón de actualización: oculto por default; lo muestra app.js cuando hay update.
+      '<button class="upbtn" data-act="update" title="actualizar Consomni" hidden>' +
+        '<span class="upbtn-bar"></span>' +
+        '<span class="upbtn-ic">' + svg('download', 13, 2) + '</span>' +
+        '<span class="upbtn-tx">Actualizar</span>' +
+      '</button>' +
       '<button class="iconbtn" title="notificaciones">' + svg('bell', 15, 1.7) + '</button>' +
       '<button class="cmdk"><kbd class="kbd">⌘</kbd><kbd class="kbd">K</kbd></button>' +
     '</header>';
@@ -233,13 +240,13 @@
     const tree = o.tree;
 
     if (o.collapsed) {
-      const ci = function (name, active, dot) {
-        return '<div class="ci' + (active ? ' active' : '') + '" title="' + (o._t || '') + '">' + svg(name, 17, 1.7) +
+      const ci = function (name, active, dot, proj) {
+        return '<div class="ci' + (active ? ' active' : '') + '"' + (proj ? ' data-proj="' + esc(proj) + '"' : '') + ' title="' + (o._t || '') + '">' + svg(name, 17, 1.7) +
           (dot ? '<span class="ci-dot" style="background:' + dot + '"></span>' : '') + '</div>';
       };
       let items;
       if (tree && tree.ci) {
-        items = tree.ci.map(function (x) { return ci(x.icon, x.active, x.dot); }).join('');
+        items = tree.ci.map(function (x) { return ci(x.icon, x.active, x.dot, x.proj); }).join('');
       } else {
         items = ci('target', true, null) +
           ci('star', false, 'var(--amber)') + ci('star', false, 'var(--green)') +
@@ -296,7 +303,7 @@
         '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
         '<button class="sbtn" data-act="theme">' + svg('moon', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v1.0.0') + '</span></div>' +
+        '<span class="ver">' + esc(o.version || 'v1.2.0') + '</span></div>' +
     '</aside>';
   }
 
