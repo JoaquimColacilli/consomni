@@ -121,8 +121,11 @@ if (!gotLock) {
   app.quit();
 } else {
   app.on('second-instance', () => {
+    // Una 2da instancia (p.ej. "ejecutar al finalizar" del instalador, o reabrir) NO arranca
+    // otra ventana por el lock; traemos al frente la existente de forma visible (show + focus).
     if (mainWindow) {
       if (mainWindow.isMinimized()) mainWindow.restore();
+      if (!mainWindow.isVisible()) mainWindow.show();
       mainWindow.focus();
     }
   });

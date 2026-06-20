@@ -137,8 +137,10 @@ export function initAutoUpdate(winGetter: () => BrowserWindow | null, enabled: b
     autoUpdater.on('update-downloaded', (info: { version?: string }) => {
       send('consomni:update-downloaded', { latest: info && info.version });
       // aplicar y relanzar (un toque después para que el renderer muestre "reiniciando…").
-      // (isSilent=false → muestra el progreso del nsis; isForceRunAfter=true → relanza solo)
-      setTimeout(() => { try { autoUpdater.quitAndInstall(false, true); } catch { /* noop */ } }, 1200);
+      // isSilent=true  → instala EN SILENCIO, sin abrir el panel del instalador (era el bug:
+      //                  "te pone todo el panel de Windows como si bajaras la app de 0").
+      // isForceRunAfter=true → relanza la app sola al terminar.
+      setTimeout(() => { try { autoUpdater.quitAndInstall(true, true); } catch { /* noop */ } }, 1200);
     });
     autoUpdater.on('error', (err: Error) => { if (!suppressErr) send('consomni:update-error', { error: String((err && err.message) || err) }); });
   }

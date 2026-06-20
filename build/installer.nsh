@@ -54,6 +54,24 @@
       CreateShortcut "$DESKTOP\${PRODUCT_FILENAME}.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
     ${EndIf}
   !macroend
+
+  ; Página final con "Ejecutar Consomni" que SÍ abre la app. El default de electron-builder
+  ; usa StdUtils.ExecShellAsUser (pensado para des-elevar desde un instalador admin); en una
+  ; instalación per-user sin elevar suele NO lanzar nada. Acá la corremos con Exec directo,
+  ; que es confiable para per-user. (customFinishPage reemplaza la página final default.)
+  !macro customFinishPage
+    !define MUI_FINISHPAGE_RUN
+    !define MUI_FINISHPAGE_RUN_FUNCTION ConsomniRunApp
+    !insertmacro MUI_PAGE_FINISH
+  !macroend
+
+  ; OJO: en una Function los ${...} se resuelven al PARSEAR (acá, antes de common.nsh),
+  ; así que NO sirve ${APP_EXECUTABLE_FILENAME} (define tardío). ${PRODUCT_FILENAME} es un
+  ; define de línea de comando → disponible desde el arranque. El exe es <PRODUCT_FILENAME>.exe.
+  Function ConsomniRunApp
+    SetOutPath "$INSTDIR"
+    Exec '"$INSTDIR\${PRODUCT_FILENAME}.exe"'
+  FunctionEnd
 !endif
 
 ; Al desinstalar, sacar el acceso del escritorio si existe (corre en el pass del uninstaller).

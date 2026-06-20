@@ -294,19 +294,43 @@
     else if (u.mode === 'installing') { b.classList.add('installing'); }
     var tx = b.querySelector('.upbtn-tx'); if (tx && u.label != null) tx.textContent = u.label;
   }
-  // available → (click) → progress* → downloaded → relanza. error → vuelve a "Actualizar".
+  // Toast PERSISTENTE y clickeable: garantiza que el update sea accionable AUNQUE el topbar
+  // esté tapado (p.ej. terminales maximizadas en "inicio"). Vive en .toastwrap (z-index 60,
+  // por encima del dock maximizado) y NO se borra solo: refleja el estado y al click (cuando
+  // hay update disponible) arranca la descarga.
+  function applyUpdToast() {
+    var u = state.upd;
+    var w = ensureToastWrap();
+    var t = w.querySelector('.cns-toast.update[data-upd]');
+    if (!u || u.mode === 'hidden') { if (t) t.remove(); return; }
+    if (!t) {
+      t = document.createElement('div');
+      t.className = 'cns-toast update';
+      t.setAttribute('data-upd', '1');
+      t.addEventListener('click', function () { if (state.upd && state.upd.mode === 'show') startUpdateDownload(); });
+      w.appendChild(t);
+    }
+    var ver = (state.update && state.update.latest) ? ('v' + state.update.latest + ' ') : '';
+    var label, icon = 'download', clickable = false;
+    if (u.mode === 'show') { label = '⬆ Consomni ' + ver + '— Actualizar'; clickable = true; }
+    else if (u.mode === 'downloading') { label = 'Descargando actualización… ' + (u.pct != null ? u.pct + '%' : ''); }
+    else { label = 'Actualización lista · reiniciando…'; icon = 'check'; }
+    t.style.cursor = clickable ? 'pointer' : 'default';
+    t.innerHTML = '<span class="tdot"></span><span>' + esc(label) + '</span><span class="tx-go">' + C.svg(icon, 12, 2) + '</span>';
+  }
+  // available → (click en botón o toast) → progress* → downloaded → relanza. error → vuelve a "Actualizar".
   function onUpdatePhase(phase, data) {
-    if (phase === 'available') { state.update = data; state.upd = { mode: 'show', label: 'Actualizar' }; toast('⬆ Consomni v' + ((data && data.latest) || '') + ' disponible', ''); }
+    if (phase === 'available') { state.update = data; state.upd = { mode: 'show', label: 'Actualizar' }; }
     else if (phase === 'progress') { state.upd = { mode: 'downloading', label: (data && data.percent != null ? data.percent + '%' : 'Descargando…'), pct: data && data.percent }; }
-    else if (phase === 'downloaded') { state.upd = { mode: 'installing', label: 'Reiniciando…' }; toast('actualización lista · reiniciando', ''); }
+    else if (phase === 'downloaded') { state.upd = { mode: 'installing', label: 'Reiniciando…' }; }
     else if (phase === 'error') { state.upd = { mode: 'show', label: 'Actualizar' }; toast('update: ' + ((data && data.error) || 'error'), 'err'); }
-    else if (phase === 'none') { /* sin update: el botón sigue oculto */ }
-    applyUpdBtn();
+    else if (phase === 'none') { return; }
+    applyUpdBtn(); applyUpdToast();
   }
   function startUpdateDownload() {
     if (!api || !api.updateDownload) { if (state.update && state.update.url) openExternalUrl(state.update.url); return; }
     state.upd = { mode: 'downloading', label: '0%', pct: 0 };
-    applyUpdBtn();
+    applyUpdBtn(); applyUpdToast();
     api.updateDownload();
   }
 

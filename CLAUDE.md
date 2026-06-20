@@ -426,6 +426,24 @@ quedan para icono de la app en Fase 6.
   `Consomni-Setup-x.y.z.exe` + blockmap a GitHub Releases. Los usuarios con versión anterior ven el botón.
 - **Sin firmar:** primera instalación dispara SmartScreen (avanzar → "Ejecutar de todas formas"); el
   auto-update igual funciona. Code-signing queda **fuera de alcance** (TODO).
+- **v1.2.1 (feedback del usuario):** (1) **update SILENCIOSO** → `autoUpdater.quitAndInstall(true, true)`
+  (antes `false,true` abría el panel completo del nsis "como si bajaras la app de 0"). (2) **"ejecutar al
+  finalizar" que SÍ abre** → `customFinishPage` propio que lanza con `Exec` directo (el default usa
+  `StdUtils.ExecShellAsUser`, pensado para des-elevar desde instalador admin → en per-user no lanzaba) +
+  `second-instance` ahora hace `show()`+`focus()` para el caso "ya hay una instancia". (3) **toast de update
+  persistente y clickeable** (z-index 60, por encima del dock maximizado) → el update es accionable aunque el
+  topbar esté tapado por las terminales en "inicio". (4) **divisor agarrable de TODA la pared** (ver gotcha del
+  splitter abajo). **⚠️ Gotcha NSIS:** en una `Function`, los `${...}` se resuelven al PARSEAR (el include va
+  en el header, ANTES de `common.nsh`), así que NO sirve `${APP_EXECUTABLE_FILENAME}` (define tardío) → usar
+  `${PRODUCT_FILENAME}` (define de línea de comando, disponible desde el arranque). En un `!macro` sí sirve
+  (expande tardío). Los símbolos sólo-instalador van en `!ifndef BUILD_UNINSTALLER` (el include se compila también
+  en el pass del uninstaller).
+- **⚠️ Gotcha del splitter del dock (v1.2.1):** el divisor entre terminales se agarraba "sólo del centro" porque
+  tenía **alto/ancho 0** — el `align-items:stretch` del flex NO propaga por el árbol anidado (los paneles ya
+  llevaban `height:100%` explícito, pero al `.dk-splitter` nunca se lo agregamos). Fix: el divisor es una
+  **columna/fila DEDICADA de 10px** con `height:100%`/`width:100%` explícito → toda la pared (ancho completo y de
+  punta a punta) es zona de agarre, con una línea fina centrada. Además el drag normaliza TODOS los hermanos a su
+  px en DOS pasos (medir y después escribir) para no colapsar paneles al arrastrar con 3+.
 
 ### git
 consomni NO tenía .git propio; el repo de `~/OneDrive/Escritorio` (vacío) lo contenía. Se hizo
