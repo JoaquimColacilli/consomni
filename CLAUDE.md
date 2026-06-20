@@ -274,6 +274,26 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
   arranca en inicio (compat v1: si hay `{layout}` viejo, se aplana a fijados). **claude ⚡:** botón ámbar en
   el toolbar del dock + acción "claude ⚡" en el panel de sesión → `spawn('claude',…,{skip:true})` →
   `createTerm` arma `claude --dangerously-skip-permissions` (combina con `--resume` si aplica).
+- **Fixes del dock contextual (feedback del usuario, v1.2.3):**
+  - **Entrar a un proyecto AUTO-ABRE sus sesiones activas.** Antes la vista de proyecto sólo re-armaba
+    paneles ya tagueados con ese `proj`; si no había, mostraba el placeholder aunque el proyecto tuviera
+    sesiones vivas en disco. Ahora `setActiveProject(p)` pasa `projActiveSessions(p)` (sesiones del snapshot
+    con `state!=='closed'`, mapeadas a `{sid,name,projName}`) a `openProject(projId,cwd,name,sessList)`, que
+    crea un panel de sesión por cada `sid` que NO esté ya abierto (**dedupe por el `Map sessions`**), tagueado
+    al proyecto (NO pinneado → efímero). El placeholder sólo queda si el proyecto no tiene paneles NI sesiones
+    activas. `openProject` setea `view=projId` antes de crear los paneles (así no se pinnean) y persiste.
+  - **El marcador activo del sidebar sigue la vista real** (antes "todos" quedaba marcado aun estando en
+    inicio). Se deriva en vivo `homeView = ConsomniTerms.isMaximized() && getView()==='__home__'` (nuevo
+    accessor `getView` en la API del dock). `transform()` lo pasa como `tree.home`; `chrome.js` marca `.active`
+    en **inicio** (`.sb-home` / `.ci-home`) cuando `tree.home`, y desactiva "todos" (`!tree.home && active==='all'`,
+    también en el ícono colapsado). El `maxObserver` ahora hace `render()` SIEMPRE (no sólo al des-maximizar) para
+    reflejar el cambio de vista. CSS aditivo: `.sb-home.active` reusa el lenguaje de `.sb-item.active` (barra roja
+    `inset 2px 0 0 rgba(239,68,68,.75)` + tokens existentes).
+  - **El dock maximizado ya NO tapa topbar ni statusbar** (antes `top:0;bottom:0` clipeaba la 'C' del wordmark
+    y "hooks" con el sidebar colapsado a 56px). Ahora `#terminals.dock.maximized{top:54px;bottom:var(--sbar-h)}`
+    (54px = alto del topbar, igual que el panel E2) → logo y statusbar enteros visibles, el dock cubre sólo el board.
+  - **`archivados` ahora se ve en el sidebar colapsado:** `transform()` agrega un ítem `ci` con `icon:'archive'`,
+    `proj:'__archived'` (mismo target que el ítem expandido) cuando `archivedGroups.length`.
 - **Seguridad:** sigue **cero API de Anthropic** — Consomni sólo hospeda el proceso; `claude` hace
   lo suyo. Se borra `ELECTRON_RUN_AS_NODE` del env del hijo.
 

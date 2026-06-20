@@ -190,7 +190,7 @@ body.sb-collapsed{ --sb-w: 56px; }
 /* el dock NO toca el sidebar (arranca a su derecha) ni el statusbar (queda arriba de él). */
 #terminals.dock{position:fixed;left:var(--sb-w);right:0;bottom:var(--sbar-h);top:auto;height:var(--dock-h);z-index:40;display:flex;flex-direction:column;background:var(--bg);border-top:1px solid var(--border-hover);border-left:1px solid var(--border);box-shadow:0 -16px 44px -22px rgba(0,0,0,.85);}
 #terminals[hidden]{display:none;}
-#terminals.dock.maximized{left:var(--sb-w);right:0;top:0;bottom:0;height:auto;z-index:38;}   /* zoom: cubre el board pero DEJA el sidebar (comprimido) */
+#terminals.dock.maximized{left:var(--sb-w);right:0;top:54px;bottom:var(--sbar-h);height:auto;z-index:38;}   /* zoom: cubre el board, pero DEJA visibles el sidebar (comprimido), el topbar (logo) y el statusbar (hooks) */
 /* el board deja lugar abajo para que su contenido no quede tapado por el dock */
 body.dock-open .board{ padding-bottom: var(--dock-h); }
 
@@ -314,6 +314,9 @@ body.dk-dragging,body.dk-dragging *{cursor:grabbing !important;user-select:none 
 .sb-home:hover{color:var(--text-1);border-color:var(--border-hover);background:var(--surface-card-active);}
 .sb-home .nm{font-weight:500;font-size:12.5px;}
 .sb-home .sb-home-tag{margin-left:auto;font-size:9.5px;color:var(--text-4);letter-spacing:.4px;}
+/* "inicio" activo (estás en la vista de terminales): mismo lenguaje visual que .sb-item.active (barra roja al borde) */
+.sb-home.active{color:var(--text-1);background:var(--surface-card-active);border-color:var(--border-hover);box-shadow:inset 2px 0 0 rgba(239,68,68,.75);}
+.sb-home.active .nm{color:var(--text-1);font-weight:500;}
 .sidebar.collapsed .ci.ci-home{color:var(--green);}
 /* el chevron del toggle apunta « (colapsar) cuando está expandido, » (expandir) cuando colapsado */
 .sb-toggle svg{transition:transform .18s;}

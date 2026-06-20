@@ -172,7 +172,7 @@
     const searchTxt = o.searchValue ? o.searchValue : 'buscar nombre / proyecto / branch…';
 
     return '<header class="topbar">' +
-      '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span><span class="brand-ver">' + esc(o.version || 'v1.2.2') + '</span></div>' +
+      '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span><span class="brand-ver">' + esc(o.version || 'v1.2.3') + '</span></div>' +
       '<div class="divider-v"></div>' +
       '<div class="counters">' +
         '<span><b>' + total + '</b> sesiones</span><span class="sep">·</span>' +
@@ -254,7 +254,7 @@
       }
       return '<aside class="sidebar collapsed">' +
         '<div class="sb-head" style="justify-content:center;padding:15px 0 11px;"><button class="sb-add" style="padding:5px;">' + svg('plus', 13, 2.4) + '</button></div>' +
-        '<div class="ci ci-home" data-act="home" title="inicio · terminales" style="margin:0 auto 6px;">' + svg('grid', 17, 1.8) + '</div>' +
+        '<div class="ci ci-home' + ((tree && tree.home) ? ' active' : '') + '" data-act="home" title="inicio · terminales" style="margin:0 auto 6px;">' + svg('grid', 17, 1.8) + '</div>' +
         '<div class="sb-scroll" style="gap:6px;">' + items + '</div>' +
         '<div class="sb-foot" style="flex-direction:column;gap:7px;padding:10px 0;">' +
           '<button class="sbtn sb-toggle" data-act="sbtoggle" title="expandir sidebar">' + svg('chevR', 15, 2.4) + '</button>' +
@@ -267,7 +267,7 @@
 
     let body;
     if (tree) {
-      const all = sbItem({ isAll: true, active: !tree.active || tree.active === 'all' });
+      const all = sbItem({ isAll: true, active: !tree.home && (!tree.active || tree.active === 'all') });
       const groups = (tree.groups || []).map(function (gr) {
         const head = '<div class="sb-group">' + esc(gr.label) + '</div>';
         const rows = (gr.items || []).map(function (it) { return sbItem(it, false); }).join('');
@@ -292,7 +292,7 @@
     }
 
     return '<aside class="sidebar">' +
-      '<div class="sb-home" data-act="home" title="tus terminales abiertas (pantalla completa)">' + svg('grid', 14, 1.8) + '<span class="nm">inicio</span><span class="sb-home-tag">terminales</span></div>' +
+      '<div class="sb-home' + ((tree && tree.home) ? ' active' : '') + '" data-act="home" title="tus terminales abiertas (pantalla completa)">' + svg('grid', 14, 1.8) + '<span class="nm">inicio</span><span class="sb-home-tag">terminales</span></div>' +
       '<div class="sb-head"><span class="lbl">proyectos</span>' +
         '<button class="sb-add">' + svg('plus', 11, 2.4) + ' agregar</button></div>' +
       '<div class="sb-scroll">' + body + '</div>' +
@@ -303,7 +303,7 @@
         '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
         '<button class="sbtn" data-act="theme">' + svg('moon', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v1.2.2') + '</span></div>' +
+        '<span class="ver">' + esc(o.version || 'v1.2.3') + '</span></div>' +
     '</aside>';
   }
 

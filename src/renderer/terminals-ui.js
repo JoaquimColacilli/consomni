@@ -240,14 +240,28 @@
     viewName = (v === '__home__') ? '' : (name || '');
     showView(v);
   }
-  // abrir un proyecto: muestra SUS terminales a pantalla completa (DE UNA)
-  function openProject(projId, cwd, name) {
+  // abrir un proyecto: muestra SUS terminales a pantalla completa (DE UNA) +
+  // auto-abre un panel de sesión por cada sesión ACTIVA del proyecto que NO esté ya abierta (dedupe por sid).
+  function openProject(projId, cwd, name, sessList) {
     ensureDock(); bindIpc(); bindSnap();
     viewCwd = cwd || ''; viewName = name || '';
+    view = projId;   // vista activa ANTES de crear paneles → no se pinnean, quedan scoped al proyecto
+    (sessList || []).forEach(function (it) {
+      if (!it || !it.sid) return;
+      var ex = sessions.get(it.sid);
+      if (ex) {   // ya abierta → re-taguear al proyecto, sin duplicar
+        if (!ex.dataset.proj) ex.dataset.proj = projId;
+        if (it.projName && !ex.dataset.projname) ex.dataset.projname = it.projName;
+        return;
+      }
+      var pane = buildPane({ kind: 'session', sid: it.sid, name: it.name, proj: projId, projname: it.projName });
+      poolEl.appendChild(pane);
+      mountSession(pane, it.sid, it.name, projId);
+    });
     showView(projId);
     host.hidden = false; host.classList.remove('minimized'); host.classList.add('maximized');
     document.body.classList.add('dock-open'); document.body.classList.remove('dock-min');
-    notifyMax(); refitSoon();
+    notifyMax(); refitSoon(); persist();
   }
   function pinToggle(pane) {
     if (!pane.dataset.proj) return;   // sueltas siempre en inicio; no se fijan/desfijan
@@ -617,6 +631,6 @@
     toggle: toggle, home: home, setView: setView, openProject: openProject,
     isOpen: isOpen, count: count, refreshActive: refreshActive,
     setNotifier: setNotifier, setActionHandler: setActionHandler, setMaxObserver: setMaxObserver,
-    restoreSession: restoreSession, isMaximized: isMaximized
+    restoreSession: restoreSession, isMaximized: isMaximized, getView: function () { return view; }
   };
 })(window);

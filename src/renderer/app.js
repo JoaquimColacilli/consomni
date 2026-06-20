@@ -202,8 +202,13 @@
     if (favItems.length) grp.push({ label: 'favoritos', items: favItems });
     if (actItems.length) grp.push({ label: 'activos', items: actItems });
     if (archivedGroups.length) grp.push({ label: 'archivados', items: [{ isArchived: true, id: '__archived', name: 'archivados', count: archivedGroups.length }] });
-    var ci = [{ icon: 'target', active: state.activeProject === 'all', dot: null, proj: 'all' }];
+    // "inicio" (vista activa) = dock maximizado mostrando '__home__'. Si es así, el marcador
+    // activo va en INICIO, no en "todos" (aunque activeProject siga siendo 'all').
+    var _T = window.ConsomniTerms;
+    var homeView = !!(_T && _T.isMaximized && _T.isMaximized() && _T.getView && _T.getView() === '__home__');
+    var ci = [{ icon: 'target', active: !homeView && state.activeProject === 'all', dot: null, proj: 'all' }];
     liveGroups.forEach(function (g) { ci.push({ icon: g.fav ? 'star' : 'repo', active: state.activeProject === g.id, dot: dominantDot(g.counts), proj: g.id }); });
+    if (archivedGroups.length) ci.push({ icon: 'archive', active: state.activeProject === '__archived', dot: null, proj: '__archived' });
 
     var status = {
       hooksConnected: !!snap.hooksConnected,
@@ -212,7 +217,7 @@
       refreshSecs: 2, lastUpdate: relTime(snap.generatedAt || Date.now()),
     };
 
-    return { counts: counts, tree: { active: state.activeProject, groups: grp, ci: ci }, status: status, cols: cols, liveGroups: liveGroups };
+    return { counts: counts, tree: { active: state.activeProject, home: homeView, groups: grp, ci: ci }, status: status, cols: cols, liveGroups: liveGroups };
   }
 
   /* ── render ── */
@@ -365,6 +370,12 @@
     for (var i = 0; i < list.length; i++) { if (projKey(list[i]) === p) { if (!name) name = list[i].project || ''; if (list[i].cwd) { cwd = list[i].cwd; break; } } }
     return { cwd: cwd, name: name };
   }
+  // sesiones ACTIVAS (no cerradas) de un proyecto → para auto-abrirlas como paneles al entrar a su vista
+  function projActiveSessions(p) {
+    var list = (state.snapshot && state.snapshot.sessions) || [];
+    return list.filter(function (s) { return projKey(s) === p && s.state !== 'closed'; })
+               .map(function (s) { return { sid: s.id, name: s.name, projName: s.project }; });
+  }
 
   var REAL = { ext: 1, folder: 1, diff: 1, pr: 1, copy: 1, branch: 1, copyId: 1, transcript: 1 };
   function dispatchAction(act, sid) {
@@ -478,10 +489,10 @@
       if (T) { if (T.isMaximized()) T.minimize(); T.setView('__home__'); }
       render(); return;
     }
-    // proyecto puntual → abrir SUS terminales DE UNA (pantalla completa)
+    // proyecto puntual → abrir SUS terminales DE UNA (pantalla completa) + auto-abrir sus sesiones activas
     var info = projInfo(p);
     render();
-    if (T) T.openProject(p, info.cwd, info.name);
+    if (T) T.openProject(p, info.cwd, info.name, projActiveSessions(p));
   }
   function toggleMode(m) { if (state.modeFilter[m]) delete state.modeFilter[m]; else state.modeFilter[m] = true; render(); }
   function cycleMode() {
@@ -1110,8 +1121,9 @@
       } else if (preMaxCollapse !== undefined) {
         state.userCollapsed = preMaxCollapse; preMaxCollapse = undefined;
         var should = (state.userCollapsed != null) ? state.userCollapsed : (window.innerWidth < BREAKPOINT);
-        state.collapsed = should; render();
+        state.collapsed = should;
       }
+      render();   // el sidebar refleja inicio vs todos/proyecto según el estado vivo del dock
     });
     // SIEMPRE arrancar en "inicio" con las terminales que quedaron de la sesión anterior
     try { window.ConsomniTerms.restoreSession(); } catch (e) {}
