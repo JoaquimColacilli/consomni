@@ -245,6 +245,7 @@
     root.innerHTML = buildShell();
     document.body.classList.toggle('compacto', state.density === 'compacto');
     document.body.classList.toggle('sb-collapsed', !!state.collapsed);   // el dock arranca a la derecha del sidebar
+    document.body.classList.toggle('view-archived', state.activeProject === '__archived');   // archivados: columnas en grilla (wrap), no scroll infinito a la derecha
     applyFocusRing();
     injectPerms();
     applyUpdBtn();   // re-aplicar estado del botón "Actualizar" (el topbar se reconstruyó)
@@ -916,6 +917,11 @@
   document.addEventListener('click', function (e) {
     var t = e.target;
     closeSortMenu();
+
+    // el dock (#terminals) maneja sus propios clicks (toolbar, panes, acciones). El board NO debe
+    // procesarlos: si lo hace, un click adentro de una terminal matchea el [data-proj] del panel y
+    // dispara setActiveProject → openProject → abre OTRA terminal y le roba el foco al xterm.
+    if (t.closest && t.closest('#terminals')) return;
 
     // links externos (autor / github / releases) → navegador del SO
     var href = t.closest && t.closest('[data-href]');

@@ -193,6 +193,8 @@ body.sb-collapsed{ --sb-w: 56px; }
 #terminals.dock.maximized{left:var(--sb-w);right:0;top:54px;bottom:var(--sbar-h);height:auto;z-index:38;}   /* zoom: cubre el board, pero DEJA visibles el sidebar (comprimido), el topbar (logo) y el statusbar (hooks) */
 /* el board deja lugar abajo para que su contenido no quede tapado por el dock */
 body.dock-open .board{ padding-bottom: var(--dock-h); }
+/* archivados: muchas columnas casi vacías → grilla que ENVUELVE (responsive); sin scroll horizontal perdido */
+body.view-archived .board{ flex-wrap: wrap; align-content: flex-start; overflow-x: hidden; overflow-y: auto; }
 
 /* borde arrastrable: superior = ALTO del dock (ns). El ANCHO entre terminales se ajusta
    con el divisor del MEDIO (.dk-splitter), no desde los bordes. */

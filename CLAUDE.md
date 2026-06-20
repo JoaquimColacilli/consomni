@@ -314,6 +314,19 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
     `boardChecker(projId)` (registrado desde app.js = `projHasCards`): en una vista de proyecto SIN paneles, si
     el proyecto tiene cards → `minimize()` el dock → el board (filtrado a `activeProject`) muestra las cards; si
     no tiene cards (carpeta nueva) → placeholder-guía. `closePane` enruta por `showView`, que decide.
+- **Fixes v1.2.5 (feedback del usuario):**
+  - **Click en una terminal del dock ya NO abre OTRA terminal ni le roba el foco al xterm.** El handler de
+    click del board (document) procesaba clicks de adentro del dock: un click en una terminal matcheaba el
+    `[data-proj]` del `.dk-pane` → `setActiveProject` → `openProject` → reabría un panel y re-renderizaba
+    (robando el foco). Fix: guard al inicio del handler → `if (t.closest('#terminals')) return;` (el dock ya
+    maneja sus propios clicks vía listeners con `stopPropagation`; sus botones usan `data-dock-act`, no `data-act`).
+    Recordatorio: aprobar/denegar de Consomni sigue siendo STUB (no intercepta permisos); se responde en la
+    TUI de claude, o se abre con **claude ⚡** (`--dangerously-skip-permissions`) para no preguntar.
+  - **"archivados" responsive (no se pierde a la derecha).** Eran N columnas casi vacías (una por proyecto
+    archivado) desbordando en scroll horizontal. Ahora `transform()` togglea `body.view-archived` cuando
+    `activeProject==='__archived'` y `body.view-archived .board{flex-wrap:wrap;align-content:flex-start;
+    overflow-x:hidden;overflow-y:auto}` → las columnas (316px) ENVUELVEN en grilla y entran todas. Aditivo,
+    sólo afecta la vista de archivados (el board de "todos"/proyecto sigue con scroll horizontal por diseño).
 - **Seguridad:** sigue **cero API de Anthropic** — Consomni sólo hospeda el proceso; `claude` hace
   lo suyo. Se borra `ELECTRON_RUN_AS_NODE` del env del hijo.
 
