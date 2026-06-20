@@ -137,7 +137,7 @@
       const rows = c.closed.map(function (r) {
         return '<div class="closed-row"' + (r.id ? ' data-sid="' + esc(r.id) + '"' : '') + '><span class="d"></span><span class="nm">' + esc(r.name) + '</span><span class="tk">' + esc(r.tokens) + '</span></div>';
       }).join('');
-      closed = '<details><summary class="closed-toggle">' + svg('chevD', 11, 2.4) +
+      closed = '<details' + (c.openClosed ? ' open' : '') + '><summary class="closed-toggle">' + svg('chevD', 11, 2.4) +
         ' cerradas <span class="n">(' + c.closedCount + ')</span></summary>' +
         '<div class="closed-list">' + rows + '</div></details>';
     }
@@ -229,8 +229,10 @@
       lead = svg('repo', 14, 1.7);
     }
     const nmStyle = it.dim ? ' style="color:#a8a8ae"' : '';
+    // proyecto "fijado" sin sesiones activas → 'x' (en hover) para quitarlo del sidebar
+    const rmX = it.finished ? '<button class="sb-x" data-unkeep="' + esc(it.id || it.name) + '" title="quitar del sidebar">' + svg('x', 11, 2.2) + '</button>' : '';
     let html = '<div class="sb-item' + (it.active ? ' active' : '') + '"' + dp + '>' + lead +
-      '<span class="nm"' + nmStyle + '>' + esc(it.name) + '</span>' + minis(it.minis) + '</div>';
+      '<span class="nm"' + nmStyle + '>' + esc(it.name) + '</span>' + minis(it.minis) + rmX + '</div>';
     if (it.sub && it.sub.length) html += it.sub.map(function (s) { return sbItem(s, true); }).join('');
     return html;
   }

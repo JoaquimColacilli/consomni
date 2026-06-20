@@ -38,6 +38,8 @@
     paletteSel: 0,
     paletteRows: [],
     detailId: null,
+    keptProjects: [],            // proyectos fijados al sidebar (projKey) — persistido en config
+    confirmCloseTerminal: true,  // avisar antes de cerrar una terminal viva
   };
 
   /* ── helpers ── */
@@ -163,8 +165,9 @@
     });
     counts.tokens = formatTokens(totalTokens);
 
-    var liveGroups = groups.filter(function (g) { return g.active > 0 || g.fav; });
-    var archivedGroups = groups.filter(function (g) { return g.active === 0 && !g.fav; });
+    // un proyecto "kept" (fijado) sigue en el sidebar aunque no tenga sesiones activas (no cae a archivados)
+    var liveGroups = groups.filter(function (g) { return g.active > 0 || g.fav || isKept(g.id); });
+    var archivedGroups = groups.filter(function (g) { return g.active === 0 && !g.fav && !isKept(g.id); });
 
     var boardGroups = (state.activeProject === '__archived') ? archivedGroups
       : (state.activeProject !== 'all') ? groups.filter(function (g) { return g.id === state.activeProject; })
@@ -184,6 +187,8 @@
         meta: colMeta(g.counts), cards: openS.map(toCard),
         closedCount: closedS.length,
         closed: closedS.map(function (s) { return { id: s.id, name: s.name, tokens: formatTokens(s.tokensTotal) }; }),
+        // en la vista de UN proyecto, mostramos sus sesiones finalizadas abiertas (abajo, opacas); en "todos" quedan colapsadas
+        openClosed: (state.activeProject !== 'all' && state.activeProject !== '__archived'),
         _empty: openS.length === 0 && closedS.length === 0,
       };
     });
@@ -194,6 +199,7 @@
         id: g.id, name: g.name, icon: g.fav ? 'star' : 'repo', fav: g.fav,
         dim: g.counts.working + g.counts.attn + g.counts.error === 0,
         minis: sbMinis(g.counts), active: state.activeProject === g.id,
+        finished: g.active === 0,   // sin sesiones activas (vive por estar "kept") → mostrar 'x' para sacarlo
       };
     }
     var favItems = liveGroups.filter(function (g) { return g.fav; }).map(projItem);
@@ -399,11 +405,50 @@
     api.pickFolder().then(function (path) {
       if (!path) return;
       var projId = normPath(path), name = baseName(path);
+      keepProject(projId);
       state.activeProject = projId; state.focusSid = null;
       render();
       var T = window.ConsomniTerms;
       if (T) T.openProject(projId, path, name, projSessions(projId));
     }).catch(function () { toast('no se pudo abrir el selector', 'err'); });
+  }
+  // ── proyectos "kept" (fijados al sidebar; persistidos en config.keptProjects) ──
+  // un proyecto donde trabajaste (lo abriste) queda fijo en el sidebar aunque se cierren sus terminales/sesiones.
+  function isKept(id) { return state.keptProjects.indexOf(id) > -1; }
+  function keepProject(id) {
+    if (!id || id === 'all' || id === '__archived' || isKept(id)) return;
+    state.keptProjects.push(id);
+    if (api && api.saveConfig) api.saveConfig({ keptProjects: state.keptProjects });
+  }
+  function unkeepProject(id) {
+    var i = state.keptProjects.indexOf(id);
+    if (i < 0) return;
+    state.keptProjects.splice(i, 1);
+    if (api && api.saveConfig) api.saveConfig({ keptProjects: state.keptProjects });
+    if (state.activeProject === id) state.activeProject = 'all';
+    render();
+  }
+
+  // ── confirmación al cerrar una terminal VIVA (corta el proceso de claude/shell) ──
+  // El dock la invoca vía setCloseConfirmer; si el usuario tildó "no volver a mostrar", cierra directo.
+  var pendingClose = null;
+  function confirmCloseTerminal(info, onConfirm) {
+    info = info || {};
+    if (!state.confirmCloseTerminal) { onConfirm(); return; }
+    pendingClose = onConfirm;
+    var isClaude = info.kind === 'claude';
+    var warn = isClaude
+      ? 'Estás cerrando una <b>sesión de Claude activa</b>. Se va a <b>cortar el proceso</b> y perdés el contexto en vivo. El transcript en disco queda — podés reanudarla después con <b>responder</b> (<code>claude --resume</code>).'
+      : 'Estás cerrando una <b>terminal activa</b>. Se va a <b>cortar el proceso</b> que tenga corriendo adentro.';
+    var html = '<div class="cfm-scrim" data-act="cfm-cancel"><div class="cfm-card" role="dialog" aria-modal="true">' +
+      '<div class="cfm-ttl">' + C.svg('warn', 16, 1.9) + ' ¿Cerrar ' + (isClaude ? 'esta sesión' : 'esta terminal') + '?</div>' +
+      '<div class="cfm-body">' + warn + '</div>' +
+      '<label class="cfm-dont"><input type="checkbox" id="cccDont"> No volver a mostrar este aviso</label>' +
+      '<div class="cfm-btns">' +
+        '<button class="btn btn--sm" data-act="cfm-cancel">cancelar</button>' +
+        '<button class="btn btn--sm btn--red" data-act="cfm-ok">' + C.svg('x', 12, 2) + ' cerrar</button>' +
+      '</div></div></div>';
+    setOverlay(html);
   }
 
   var REAL = { ext: 1, folder: 1, diff: 1, pr: 1, copy: 1, branch: 1, copyId: 1, transcript: 1 };
@@ -519,6 +564,7 @@
       render(); return;
     }
     // proyecto puntual → abrir SUS terminales DE UNA (pantalla completa) + auto-abrir sus sesiones
+    keepProject(p);   // trabajaste en él → queda fijo en el sidebar aunque después cierres todo
     var info = projInfo(p);
     render();
     if (T) T.openProject(p, info.cwd, info.name, projSessions(p));
@@ -939,6 +985,8 @@
       if (act === 'close-palette') { if (t.classList.contains('cmd-scrim')) closePalette(); return; }
       if (act === 'close-help') { if (t.classList.contains('help-scrim')) setOverlay(''); return; }
       if (act === 'close-settings') { if (t.classList.contains('set-scrim') || actEl.tagName === 'BUTTON') closeSettings(); return; }
+      if (act === 'cfm-cancel') { if (t.classList.contains('cfm-scrim') || actEl.tagName === 'BUTTON') { pendingClose = null; setOverlay(''); } return; }
+      if (act === 'cfm-ok') { var ccd = document.getElementById('cccDont'); if (ccd && ccd.checked) { state.confirmCloseTerminal = false; if (api && api.saveConfig) api.saveConfig({ confirmCloseTerminal: false }); } var fn = pendingClose; pendingClose = null; setOverlay(''); if (fn) fn(); return; }
       if (act === 'settings') { openSettings(); return; }
       if (act === 'terminals') { if (window.ConsomniTerms) window.ConsomniTerms.toggle(); return; }
       if (act === 'theme') { toast('tema oscuro (único por ahora)', 'warn'); return; }
@@ -964,6 +1012,8 @@
     var sortBtn = t.closest && t.closest('.tbtn'); if (sortBtn) { openSortMenu(sortBtn); return; }
     if (t.closest && t.closest('[data-act="sbtoggle"]')) { setSidebarCollapsed(!state.collapsed); return; }
     if (t.closest && t.closest('.sb-add')) { addProjectViaPicker(); return; }
+    var rmEl = t.closest && t.closest('[data-unkeep]');
+    if (rmEl) { e.stopPropagation(); unkeepProject(rmEl.getAttribute('data-unkeep')); return; }
     if (t.closest && t.closest('[data-act="home"]')) { state.activeProject = 'all'; render(); if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
 
     // ── CARDS PRIMERO (van adentro de la columna, que tiene data-proj) ──
@@ -1162,6 +1212,8 @@
     });
     // el dock consulta esto: proyecto sin terminales pero CON cards → muestra el board, no el placeholder
     if (window.ConsomniTerms.setBoardChecker) window.ConsomniTerms.setBoardChecker(function (projId) { return projHasCards(projId); });
+    // el dock pregunta antes de cerrar una terminal viva (corta el proceso) → modal con "no volver a mostrar"
+    if (window.ConsomniTerms.setCloseConfirmer) window.ConsomniTerms.setCloseConfirmer(confirmCloseTerminal);
     // SIEMPRE arrancar en "inicio" con las terminales que quedaron de la sesión anterior
     try { window.ConsomniTerms.restoreSession(); } catch (e) {}
   }
@@ -1170,6 +1222,14 @@
   if (api) {
     api.getSnapshot().then(setSnapshot).catch(function () { render(); });
     api.onSnapshot(setSnapshot);
+    // prefs persistidas: proyectos fijados al sidebar + aviso al cerrar terminal
+    if (api.getConfig) api.getConfig().then(function (cfg) {
+      if (cfg) {
+        state.keptProjects = Array.isArray(cfg.keptProjects) ? cfg.keptProjects.slice() : [];
+        state.confirmCloseTerminal = cfg.confirmCloseTerminal !== false;
+      }
+      render();
+    }).catch(function () {});
     if (api.onJump) api.onJump(function (sid) { state.split = false; state.activeProject = 'all'; state.focusSid = sid; render(); openDetail(sid); });
     if (api.onUpdateEvent) api.onUpdateEvent(onUpdatePhase);
     maybeOnboard();

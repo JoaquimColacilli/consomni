@@ -327,6 +327,19 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
     `activeProject==='__archived'` y `body.view-archived .board{flex-wrap:wrap;align-content:flex-start;
     overflow-x:hidden;overflow-y:auto}` → las columnas (316px) ENVUELVEN en grilla y entran todas. Aditivo,
     sólo afecta la vista de archivados (el board de "todos"/proyecto sigue con scroll horizontal por diseño).
+  - **Proyectos "fijados" (kept) — no desaparecen del sidebar al cerrar sus terminales.** Antes un proyecto sin
+    sesiones activas caía a `archivados`. Ahora, al ENTRAR a un proyecto (sidebar o "+ agregar") se agrega a
+    `config.keptProjects` (persistido); `liveGroups` pasa a `g.active>0 || g.fav || isKept(g.id)` → sigue en
+    "activos" aunque cierres todo. Dentro del proyecto, sus **sesiones finalizadas** se muestran abajo, opacas y
+    AUTO-EXPANDIDAS (`col.openClosed` cuando es vista de UN proyecto; en "todos" quedan colapsadas). **'x'** en
+    hover sobre el item (proyecto con 0 activas → `it.finished`) lo saca del sidebar (`data-unkeep` →
+    `unkeepProject` → vuelve a caer en archivados). `state.keptProjects` se carga de config al iniciar.
+  - **Aviso al cerrar una terminal VIVA (corta el proceso).** `closePane` separa el gate del cierre real
+    (`doClosePane`): si el panel es terminal `shell`/`claude` con PTY (`data-tid`) y `config.confirmCloseTerminal`,
+    el dock llama `closeConfirmer` (registrado por app.js vía `setCloseConfirmer`) → modal on-brand `.cfm-*`
+    (en `#overlays`, z-index 60) con texto adaptado (claude: "se corta el proceso, perdés el contexto en vivo; el
+    transcript queda → reanudás con responder / `--resume`") + checkbox **"no volver a mostrar"** (apaga
+    `confirmCloseTerminal` en config). Los paneles de SESIÓN read-only se cierran directo (no hay proceso que perder).
 - **Seguridad:** sigue **cero API de Anthropic** — Consomni sólo hospeda el proceso; `claude` hace
   lo suyo. Se borra `ELECTRON_RUN_AS_NODE` del env del hijo.
 

@@ -19,6 +19,8 @@ export interface AppConfig {
   watchedDirs: string[];       // dirs vigilados (incluye claudeProjectsDir)
   approveBlocking: boolean;    // interceptación bloqueante de permisos (opt-in)
   checkUpdates: boolean;       // chequeo de updates al iniciar (sólo al repo del proyecto, opt-out)
+  keptProjects: string[];      // proyectos "fijados" al sidebar (projKey) → no caen a archivados aunque no tengan sesiones activas
+  confirmCloseTerminal: boolean; // avisar antes de cerrar una terminal viva (corta el proceso); "no volver a mostrar" lo apaga
 }
 
 export const HOME = os.homedir();
@@ -43,6 +45,8 @@ const DEFAULTS: AppConfig = {
   watchedDirs: [CLAUDE_PROJECTS_DIR],
   approveBlocking: false,
   checkUpdates: true,
+  keptProjects: [],
+  confirmCloseTerminal: true,
 };
 
 function ensureDir(p: string): void {

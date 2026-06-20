@@ -30,7 +30,7 @@
   var view = '__home__';       // vista activa: '__home__' (inicio) o id de proyecto (projKey)
   var viewCwd = '';            // cwd por defecto para terminales nuevas en la vista de proyecto
   var viewName = '';           // nombre lindo del proyecto activo (para mostrar; el id es un path)
-  var notifier = function () {}, actionHandler = function () {}, maxObserver = function () {}, boardChecker = null;
+  var notifier = function () {}, actionHandler = function () {}, maxObserver = function () {}, boardChecker = null, closeConfirmer = null;
   function isMaximized() { return !!host && host.classList.contains('maximized'); }
   function notifyMax() { try { maxObserver(isMaximized()); } catch (e) {} }
 
@@ -359,14 +359,25 @@
   }
 
   function closePane(pane) {
+    // terminal VIVA (shell/claude con PTY) → confirmar (cerrar corta el proceso). Panel de sesión read-only → directo.
+    var kind = pane.dataset.kind || 'shell';
+    var liveTerm = (kind === 'shell' || kind === 'claude') && !!pane.dataset.tid;
+    if (liveTerm && closeConfirmer) {
+      closeConfirmer({ kind: kind, name: pane.dataset.cwd || '' }, function () { doClosePane(pane); });
+      return;
+    }
+    doClosePane(pane);
+  }
+  function doClosePane(pane) {
     killPaneContent(pane);
     detachPane(pane);
     if (poolEl && poolEl.contains(pane)) poolEl.removeChild(pane);
     updateCount();
-    if (!rootEl.querySelector('.dk-pane')) { focused = null; showView(view); persist(); return; }   // vacío → placeholder
+    if (!rootEl.querySelector('.dk-pane')) { focused = null; showView(view); persist(); return; }   // vacío → board/placeholder
     setFocus(rootEl.querySelector('.dk-pane'));
     refitAll(); persist();
   }
+  function setCloseConfirmer(fn) { if (typeof fn === 'function') closeConfirmer = fn; }
 
   /* ── panel de TERMINAL ── */
   function spawn(kind, cwd, dir, opts) {
@@ -657,6 +668,6 @@
     isOpen: isOpen, count: count, refreshActive: refreshActive,
     setNotifier: setNotifier, setActionHandler: setActionHandler, setMaxObserver: setMaxObserver,
     restoreSession: restoreSession, isMaximized: isMaximized, getView: function () { return view; },
-    resumeSession: resumeSession, setBoardChecker: setBoardChecker
+    resumeSession: resumeSession, setBoardChecker: setBoardChecker, setCloseConfirmer: setCloseConfirmer
   };
 })(window);
