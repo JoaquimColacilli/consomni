@@ -40,7 +40,25 @@
     detailId: null,
     keptProjects: [],            // proyectos fijados al sidebar (projKey) — persistido en config
     confirmCloseTerminal: true,  // avisar antes de cerrar una terminal viva
+    plansOpen: false,            // vista "Planes" (frentes: planes/specs/tareas detectados)
+    frentes: {},                 // estado MANUAL por frente (projKey → {status,note}) — privado, persistido
+    planDocs: {},                // cwd → [{path,name,mtime}] (docs plan/spec, cargados on-demand)
+    nlHelper: false,             // helper "comando IA" en las terminales (opt-in)
+    notifs: [],                  // centro de notificaciones (nuevas versiones, …)
+    notifSeen: [],               // ids ya vistos (badge)
+    notifOpen: false,
+    changelogOpen: false,
   };
+
+  /* ── estados manuales del frente (privados, on-brand con tokens) ── */
+  var FRENTE_STATUS = [
+    { key: '', label: 'sin estado', color: 'var(--text-4)' },
+    { key: 'backlog', label: 'backlog', color: 'var(--text-3)' },
+    { key: 'dev', label: 'en desarrollo', color: 'var(--green)' },
+    { key: 'idea', label: 'idea', color: 'var(--violet)' },
+    { key: 'pausado', label: 'pausado', color: 'var(--amber)' },
+    { key: 'listo', label: 'listo', color: 'var(--blue-2)' }
+  ];
 
   /* ── helpers ── */
   function formatTokens(n) {
@@ -211,8 +229,8 @@
     // "inicio" (vista activa) = dock maximizado mostrando '__home__'. Si es así, el marcador
     // activo va en INICIO, no en "todos" (aunque activeProject siga siendo 'all').
     var _T = window.ConsomniTerms;
-    var homeView = !!(_T && _T.isMaximized && _T.isMaximized() && _T.getView && _T.getView() === '__home__');
-    var ci = [{ icon: 'target', active: !homeView && state.activeProject === 'all', dot: null, proj: 'all' }];
+    var homeView = !state.plansOpen && !!(_T && _T.isMaximized && _T.isMaximized() && _T.getView && _T.getView() === '__home__');
+    var ci = [{ icon: 'target', active: !homeView && !state.plansOpen && state.activeProject === 'all', dot: null, proj: 'all' }];
     liveGroups.forEach(function (g) { ci.push({ icon: g.fav ? 'star' : 'repo', active: state.activeProject === g.id, dot: dominantDot(g.counts), proj: g.id }); });
     if (archivedGroups.length) ci.push({ icon: 'archive', active: state.activeProject === '__archived', dot: null, proj: '__archived' });
 
@@ -223,7 +241,7 @@
       refreshSecs: 2, lastUpdate: relTime(snap.generatedAt || Date.now()),
     };
 
-    return { counts: counts, tree: { active: state.activeProject, home: homeView, groups: grp, ci: ci }, status: status, cols: cols, liveGroups: liveGroups };
+    return { counts: counts, tree: { active: state.activeProject, home: homeView, plans: state.plansOpen, groups: grp, ci: ci }, status: status, cols: cols, liveGroups: liveGroups };
   }
 
   /* ── render ── */
@@ -237,6 +255,7 @@
     var o = view
       ? { counts: view.counts, tree: view.tree, status: view.status, modeFilter: mf, density: state.density, sortLabel: curSort().label, searchValue: (state.searchActive || state.search) ? state.search : '', version: ver }
       : { alert: true };
+    if (state.plansOpen) return buildPlans(o);
     var sidebar = state.collapsed ? C.sidebar(Object.assign({}, o, { collapsed: true })) : C.sidebar(o);
     var cols = view ? view.cols : undefined;
     var banner = (view && view.counts.attn > 0) ? attnBanner(view.counts.attn) : '';
@@ -248,13 +267,20 @@
   function render() {
     var root = document.getElementById('root');
     if (!root) return;
+    // preservar el foco/caret de la nota de frente entre re-renders (snapshots vivos)
+    var ae = document.activeElement, noteKey = null, notePos = 0;
+    if (ae && ae.classList && ae.classList.contains('frente-note')) { noteKey = ae.getAttribute('data-frente'); try { notePos = ae.selectionStart; } catch (e0) {} }
     root.innerHTML = buildShell();
     document.body.classList.toggle('compacto', state.density === 'compacto');
     document.body.classList.toggle('sb-collapsed', !!state.collapsed);   // el dock arranca a la derecha del sidebar
     document.body.classList.toggle('view-archived', state.activeProject === '__archived');   // archivados: columnas en grilla (wrap), no scroll infinito a la derecha
+    document.body.classList.toggle('plans-view', !!state.plansOpen);
     applyFocusRing();
     injectPerms();
     applyUpdBtn();   // re-aplicar estado del botón "Actualizar" (el topbar se reconstruyó)
+    applyNotifBadge();   // badge del bell (el topbar se reconstruyó)
+    if (TOUR.active) requestAnimationFrame(positionTour);   // el tutorial sigue pegado a su target
+    if (noteKey) { var nn = document.querySelector('.frente-note[data-frente="' + cssEsc(noteKey) + '"]'); if (nn) { try { nn.focus(); nn.setSelectionRange(notePos, notePos); } catch (e1) {} } }
   }
   function scheduleRender() { if (rafPending) return; rafPending = true; requestAnimationFrame(function () { rafPending = false; render(); }); }
   function setSnapshot(snap) { state.snapshot = snap; scheduleRender(); if (state.detailId) refreshDetail(); }
@@ -332,7 +358,7 @@
   }
   // available → (click en botón o toast) → progress* → downloaded → relanza. error → vuelve a "Actualizar".
   function onUpdatePhase(phase, data) {
-    if (phase === 'available') { state.update = data; state.upd = { mode: 'show', label: 'Actualizar' }; }
+    if (phase === 'available') { state.update = data; state.upd = { mode: 'show', label: 'Actualizar' }; addUpdateNotif(data); }
     else if (phase === 'progress') { state.upd = { mode: 'downloading', label: (data && data.percent != null ? data.percent + '%' : 'Descargando…'), pct: data && data.percent }; }
     else if (phase === 'downloaded') { state.upd = { mode: 'installing', label: 'Reiniciando…' }; }
     else if (phase === 'error') { state.upd = { mode: 'show', label: 'Actualizar' }; toast('update: ' + ((data && data.error) || 'error'), 'err'); }
@@ -344,6 +370,238 @@
     state.upd = { mode: 'downloading', label: '0%', pct: 0 };
     applyUpdBtn(); applyUpdToast();
     api.updateDownload();
+  }
+
+  /* ════════ NOTIFICACIONES (centro + changelog de la versión) ════════
+     Módulo simple: avisa nuevas versiones; al click → modal con el changelog
+     (release notes del repo, render markdown SEGURO). Extensible a futuro. */
+  function loadNotifSeen() { try { return JSON.parse(localStorage.getItem('consomni.notif.seen') || '[]'); } catch (e) { return []; } }
+  function saveNotifSeen(arr) { try { localStorage.setItem('consomni.notif.seen', JSON.stringify(arr.slice(-50))); } catch (e) {} }
+  function addNotif(n) {
+    if (!n || !n.id) return;
+    for (var i = 0; i < state.notifs.length; i++) if (state.notifs[i].id === n.id) { state.notifs[i] = Object.assign(state.notifs[i], n); applyNotifBadge(); return; }
+    n.ts = n.ts || Date.now();
+    state.notifs.unshift(n);
+    if (state.notifs.length > 40) state.notifs.length = 40;
+    applyNotifBadge();
+  }
+  function addUpdateNotif(data) {
+    if (!data || !data.latest) return;
+    addNotif({ id: 'update-' + data.latest, kind: 'update', title: 'Nueva versión ' + (data.name ? data.name : 'v' + data.latest), body: 'Tocá para ver las novedades de esta versión.', data: data });
+  }
+  function unseenCount() { var seen = state.notifSeen || []; return state.notifs.filter(function (n) { return seen.indexOf(n.id) < 0; }).length; }
+  function applyNotifBadge() {
+    var b = document.querySelector('.notif-badge'); if (!b) return;
+    var c = unseenCount();
+    if (c > 0) { b.hidden = false; b.textContent = c > 9 ? '9+' : String(c); } else { b.hidden = true; }
+  }
+  function markAllSeen() {
+    var seen = (state.notifSeen || []).slice();
+    state.notifs.forEach(function (n) { if (seen.indexOf(n.id) < 0) seen.push(n.id); });
+    state.notifSeen = seen; saveNotifSeen(seen); applyNotifBadge();
+  }
+  function closeNotifPanel() { state.notifOpen = false; var p = document.getElementById('notifPanel'); if (p) p.remove(); }
+  function notifById(id) { for (var i = 0; i < state.notifs.length; i++) if (state.notifs[i].id === id) return state.notifs[i]; return null; }
+  function openNotifPanel() {
+    closeNotifPanel(); closeSortMenu();
+    state.notifOpen = true;
+    var anchor = document.querySelector('.notif-bell');
+    var r = anchor ? anchor.getBoundingClientRect() : { bottom: 52 };
+    var p = document.createElement('div');
+    p.id = 'notifPanel'; p.className = 'notif-panel';
+    p.style.top = (r.bottom + 7) + 'px';
+    var seen = state.notifSeen || [];
+    var rows = state.notifs.length ? state.notifs.map(function (n) {
+      var unseen = seen.indexOf(n.id) < 0;
+      var ic = n.kind === 'update' ? 'download' : 'bell';
+      return '<div class="ntf-row' + (unseen ? ' unseen' : '') + (n.kind === 'update' ? ' clickable' : '') + '" data-notif="' + esc(n.id) + '">' +
+        '<span class="ntf-ic">' + C.svg(ic, 15, 1.8) + '</span>' +
+        '<span class="ntf-bd"><span class="ntf-ttl">' + esc(n.title) + '</span><span class="ntf-tx">' + esc(n.body || '') + '</span><span class="ntf-ts">' + relTime(n.ts) + '</span></span>' +
+        (n.kind === 'update' ? '<span class="ntf-go">' + C.svg('chevR', 13, 2.2) + '</span>' : '') +
+      '</div>';
+    }).join('') : '<div class="ntf-empty">' + C.svg('check', 16, 2) + ' estás al día · sin novedades</div>';
+    p.innerHTML = '<div class="ntf-head"><span class="ntf-h-ttl">NOTIFICACIONES</span>' +
+      (state.notifs.length ? '<button class="ntf-clear" data-act="notif-clear">limpiar</button>' : '') + '</div>' +
+      '<div class="ntf-list">' + rows + '</div>';
+    document.body.appendChild(p);
+    markAllSeen();
+  }
+
+  function openChangelog(data) {
+    if (!data) return;
+    state.changelogOpen = true;
+    var ver = data.latest ? ('v' + data.latest) : '';
+    var notes = data.notes ? renderNotes(data.notes) : '<p class="cl-p cl-empty">Sin notas de versión publicadas todavía. Mirá el detalle en GitHub.</p>';
+    var canDownload = !!(api && api.updateDownload) && state.upd && (state.upd.mode === 'show' || state.upd.mode === 'downloading');
+    var html = '<div class="cl-scrim" data-act="close-changelog"><div class="cl-card" role="dialog" aria-modal="true">' +
+      '<div class="cl-head"><span class="cl-eye">' + C.eye(22, false) + '</span>' +
+        '<div class="cl-hh"><span class="cl-ttl">Novedades ' + esc(ver) + '</span>' +
+          '<span class="cl-sub">' + esc(data.name ? data.name : 'Consomni') + '</span></div>' +
+        '<button class="iconbtn" style="width:28px;height:28px" data-act="close-changelog">' + C.svg('x', 14, 2) + '</button></div>' +
+      '<div class="cl-body">' + notes + '</div>' +
+      '<div class="cl-foot">' +
+        '<a class="btn btn--ghost btn--sm" data-href="' + esc(data.url || 'https://github.com/JoaquimColacilli/consomni/releases') + '">' + C.svg('ext', 12, 2) + ' ver en GitHub</a>' +
+        '<span style="flex:1"></span>' +
+        (canDownload ? '<button class="btn btn--green btn--sm" data-act="changelog-update">' + C.svg('download', 13, 2) + ' Actualizar ahora</button>' : '<button class="btn btn--sm" data-act="close-changelog">listo</button>') +
+      '</div></div></div>';
+    setOverlay(html);
+  }
+  function closeChangelog() { state.changelogOpen = false; setOverlay(''); }
+  // mini-render markdown SEGURO (escapa TODO primero, después aplica un puñado de reglas)
+  function renderNotes(md) {
+    var lines = String(md).replace(/\r/g, '').split('\n');
+    var out = [], inList = false, inCode = false;
+    function closeList() { if (inList) { out.push('</ul>'); inList = false; } }
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i], t = ln.trim();
+      if (/^```/.test(t)) { if (inCode) { out.push('</pre>'); inCode = false; } else { closeList(); out.push('<pre class="cl-pre">'); inCode = true; } continue; }
+      if (inCode) { out.push(esc(ln)); continue; }
+      if (!t) { closeList(); continue; }
+      var h = t.match(/^(#{1,4})\s+(.*)$/);
+      if (h) { closeList(); out.push('<h4 class="cl-h">' + inlineMd(h[2]) + '</h4>'); continue; }
+      var li = t.match(/^[-*]\s+(.*)$/);
+      if (li) { if (!inList) { out.push('<ul class="cl-ul">'); inList = true; } out.push('<li>' + inlineMd(li[1]) + '</li>'); continue; }
+      closeList();
+      out.push('<p class="cl-p">' + inlineMd(t) + '</p>');
+    }
+    if (inCode) out.push('</pre>'); closeList();
+    return out.join('');
+  }
+  function inlineMd(s) {
+    var e = esc(s);
+    e = e.replace(/`([^`]+)`/g, '<code>$1</code>');
+    e = e.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    e = e.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<span class="cl-link" data-href="$2">$1</span>');
+    return e;
+  }
+
+  /* ════════ TUTORIAL (coachmark spotlight) ════════
+     Resalta UN elemento con un recorte EXACTO (box-shadow gigante que opaca el
+     resto) y una tarjeta al lado, paso a paso, con "saltar". Responsive: reencuadra
+     en resize y en cada re-render. Explica el tablero de Planes (idea de Facundo). */
+  var TOUR = { active: false, steps: [], idx: 0 };
+  var tourEls = { host: null, spot: null, pop: null };
+
+  function openPlansForTour() {
+    if (!state.plansOpen) { state.plansOpen = true; var T = window.ConsomniTerms; if (T && T.isMaximized && T.isMaximized()) T.minimize(); loadPlanDocs(); render(); }
+  }
+  function planTourSteps() {
+    var hasData = planView().length > 0;
+    var steps = [
+      { center: true, icon: 'tasks', title: 'Planes · tus frentes', before: openPlansForTour,
+        body: 'Esto detecta los <b>planes de implementación</b>, <b>specs</b> y <b>tareas</b> de tus sesiones de Claude Code — qué quedó <b>pendiente</b> y qué ya se <b>hizo</b>. Ideal para dejar un plan armado y seguir al otro día sin perder el hilo.' },
+      { target: '.sb-plans', alt: '.ci-plans', place: 'right', icon: 'tasks', title: 'Entrá a “planes”', before: openPlansForTour,
+        body: 'Desde acá abrís el tablero de <b>frentes</b>. Cada frente es un proyecto con sus planes y tareas, agrupados solos.' }
+    ];
+    if (!hasData) {
+      // sin planes detectados todavía → no apuntamos a elementos inexistentes
+      steps.push({ center: true, icon: 'eye', title: 'Todavía no hay frentes', before: openPlansForTour,
+        body: 'Cuando una sesión de Claude presente un <b>plan</b> (plan mode) o arme una lista de <b>tareas</b> (TodoWrite), su progreso aparece acá agrupado por proyecto — con su checklist, su estado y una nota privada. Volvé cuando tengas alguno y te muestro el resto.' });
+      return steps;
+    }
+    steps.push(
+      { target: '.plan-col .frente-prog', place: 'bottom', title: 'Pendiente vs hecho', before: openPlansForTour,
+        body: 'La barra resume el progreso del frente: <b>X/Y hechas</b>, en curso y pendientes — sumando todas las tareas que Claude fue marcando (TodoWrite).' },
+      { target: '.plan-col .plan-todos', alt: '.plan-col .plan-roll', place: 'bottom', title: 'Las tareas, una por una', before: openPlansForTour, open: '.plan-col .plan-todos',
+        body: 'Cada sesión muestra su checklist: <span style="color:var(--green)">✓ hecho</span> · <span style="color:var(--amber)">◐ en curso</span> · ○ pendiente. Es lo que Claude planificó y fue ejecutando.' },
+      { target: '.plan-col .frente-pill', place: 'bottom', title: 'Estado del frente (privado)', before: openPlansForTour,
+        body: 'Marcá en qué anda: <b>backlog · en desarrollo · idea · pausado · listo</b>. Click para ciclar. Es <b>tuyo y local</b> — no sale de tu máquina.' },
+      { target: '.plan-col .frente-note', place: 'top', title: 'Tu nota / idea privada', before: openPlansForTour,
+        body: 'Anotá lo que estás flageando para mejorar o implementar y <b>no querés contarle a nadie</b>. 100% local · sin telemetría · sin red.' },
+      { target: '.plan-col .plan-card-acts', alt: '.plan-col .plan-card', place: 'bottom', title: 'Retomá donde dejaste', before: openPlansForTour,
+        body: '<b>Continuar</b> reanuda esa sesión (<code>claude --resume</code>) · <b>detalle</b> la abre completa. Y los <b>plan.md</b> / <b>spec.md</b> de tu repo aparecen a un click.' }
+    );
+    return steps;
+  }
+  function startPlanTour() { startTour(planTourSteps()); }
+  function maybeStartPlanTour() {
+    var done = false; try { done = localStorage.getItem('consomni.tour.plans') === '1'; } catch (e) {}
+    if (done || TOUR.active) return;
+    startPlanTour();
+  }
+  function startTour(steps) {
+    if (!steps || !steps.length) return;
+    TOUR.steps = steps; TOUR.idx = 0; TOUR.active = true;
+    window.addEventListener('resize', positionTour);
+    showTourStep();
+  }
+  function tourNext() { if (!TOUR.active) return; if (TOUR.idx >= TOUR.steps.length - 1) { endTour(true); return; } TOUR.idx++; showTourStep(); }
+  function tourPrev() { if (!TOUR.active || TOUR.idx === 0) return; TOUR.idx--; showTourStep(); }
+  function endTour(markDone) {
+    TOUR.active = false; removeTourDOM();
+    window.removeEventListener('resize', positionTour);
+    if (markDone) { try { localStorage.setItem('consomni.tour.plans', '1'); } catch (e) {} }
+  }
+  function removeTourDOM() { var h = document.getElementById('tour'); if (h) h.remove(); tourEls = { host: null, spot: null, pop: null }; }
+  function tourTarget(step) { if (!step.target) return null; return document.querySelector(step.target) || (step.alt ? document.querySelector(step.alt) : null); }
+  function showTourStep() {
+    var step = TOUR.steps[TOUR.idx]; if (!step) { endTour(true); return; }
+    if (step.before) { try { step.before(); } catch (e) {} }
+    if (step.open) { var det = document.querySelector(step.open); if (det && det.tagName === 'DETAILS') det.open = true; }
+    requestAnimationFrame(function () { requestAnimationFrame(function () { paintTourStep(step); }); });
+  }
+  function paintTourStep(step) {
+    removeTourDOM();
+    var host = document.createElement('div'); host.id = 'tour'; host.className = 'tour';
+    var block = document.createElement('div'); block.className = 'tour-block'; host.appendChild(block);
+    var target = step.center ? null : tourTarget(step);
+    // traer el target a la vista ANTES de recortarlo (si está abajo del fold no se vería)
+    if (target) { try { target.scrollIntoView({ block: 'center', inline: 'nearest', behavior: 'auto' }); } catch (e0) {} }
+    if (target) { var spot = document.createElement('div'); spot.className = 'tour-spot'; host.appendChild(spot); tourEls.spot = spot; }
+    else { host.classList.add('tour-centered'); tourEls.spot = null; }
+    var pop = buildTourPop(step); host.appendChild(pop); tourEls.pop = pop;
+    tourEls.host = host; document.body.appendChild(host);
+    positionTour();
+    setTimeout(positionTour, 360);   // reencuadre si reflowa (docs async / fuentes)
+  }
+  function buildTourPop(step) {
+    var n = TOUR.steps.length, i = TOUR.idx, dots = '';
+    for (var k = 0; k < n; k++) dots += '<span class="tour-dot' + (k === i ? ' on' : (k < i ? ' done' : '')) + '"></span>';
+    var prev = i > 0 ? '<button class="tour-btn tour-ghost" data-tour="prev">anterior</button>' : '';
+    var nextLabel = i >= n - 1 ? 'listo' : 'siguiente';
+    var pop = document.createElement('div'); pop.className = 'tour-pop';
+    pop.innerHTML =
+      '<div class="tour-pop-head">' + (step.icon ? '<span class="tour-ic">' + C.svg(step.icon, 15, 1.8) + '</span>' : '') +
+        '<span class="tour-ttl">' + esc(step.title || '') + '</span><span class="tour-step">' + (i + 1) + '/' + n + '</span></div>' +
+      '<div class="tour-body">' + (step.body || '') + '</div>' +
+      '<div class="tour-foot"><div class="tour-dots">' + dots + '</div>' +
+        '<div class="tour-actrow"><button class="tour-btn tour-skip" data-tour="skip">saltar</button>' + prev +
+          '<button class="tour-btn tour-next" data-tour="next">' + nextLabel + ' ' + C.svg('chevR', 12, 2.4) + '</button></div></div>' +
+      '<span class="tour-arrow"></span>';
+    return pop;
+  }
+  function positionTour() {
+    if (!TOUR.active || !tourEls.host) return;
+    var step = TOUR.steps[TOUR.idx]; if (!step) return;
+    var pop = tourEls.pop, vw = window.innerWidth, vh = window.innerHeight;
+    var target = step.center ? null : tourTarget(step);
+    var arrow = pop.querySelector('.tour-arrow');
+    if (!target || !tourEls.spot) { tourEls.host.classList.add('tour-centered'); pop.style.left = ''; pop.style.top = ''; if (arrow) arrow.style.display = 'none'; return; }
+    tourEls.host.classList.remove('tour-centered');
+    var pad = step.pad != null ? step.pad : 8, gap = 14;
+    var r = target.getBoundingClientRect(), spot = tourEls.spot;
+    spot.style.left = (r.left - pad) + 'px'; spot.style.top = (r.top - pad) + 'px';
+    spot.style.width = (r.width + pad * 2) + 'px'; spot.style.height = (r.height + pad * 2) + 'px';
+    var pw = pop.offsetWidth || 320, ph = pop.offsetHeight || 170;
+    var place = step.place || 'bottom';
+    var fb = r.bottom + pad + gap + ph <= vh - 8, fa = r.top - pad - gap - ph >= 8;
+    var frt = r.right + pad + gap + pw <= vw - 8, fl = r.left - pad - gap - pw >= 8;
+    if (place === 'bottom' && !fb) place = fa ? 'top' : (frt ? 'right' : 'left');
+    else if (place === 'top' && !fa) place = fb ? 'bottom' : (frt ? 'right' : 'left');
+    else if (place === 'right' && !frt) place = fb ? 'bottom' : (fa ? 'top' : 'left');
+    else if (place === 'left' && !fl) place = fb ? 'bottom' : (fa ? 'top' : 'right');
+    var cx = r.left + r.width / 2, cy = r.top + r.height / 2, left, top;
+    if (place === 'bottom') { top = r.bottom + pad + gap; left = cx - pw / 2; }
+    else if (place === 'top') { top = r.top - pad - gap - ph; left = cx - pw / 2; }
+    else if (place === 'right') { left = r.right + pad + gap; top = cy - ph / 2; }
+    else { left = r.left - pad - gap - pw; top = cy - ph / 2; }
+    left = Math.max(8, Math.min(vw - pw - 8, left)); top = Math.max(8, Math.min(vh - ph - 8, top));
+    pop.style.left = left + 'px'; pop.style.top = top + 'px';
+    if (arrow) {
+      arrow.style.display = 'block'; arrow.className = 'tour-arrow tour-arrow--' + place;
+      if (place === 'bottom' || place === 'top') { arrow.style.left = Math.max(16, Math.min(pw - 16, cx - left)) + 'px'; arrow.style.top = ''; }
+      else { arrow.style.top = Math.max(16, Math.min(ph - 16, cy - top)) + 'px'; arrow.style.left = ''; }
+    }
   }
 
   /* ── sesiones helpers ── */
@@ -554,9 +812,163 @@
   function exitSplit() { state.split = false; render(); }
   function toggleSelect(sid) { if (state.selected[sid]) delete state.selected[sid]; else state.selected[sid] = true; render(); }
 
+  /* ════════ TABLERO DE PLANES / SPECS (frentes) ════════
+     Detecta planes (ExitPlanMode) + tareas (TodoWrite/Task) por proyecto desde
+     los transcripts que YA leemos, + los docs plan.md/spec.md del repo. Suma
+     estado MANUAL + nota privada por frente (local, nunca sale de la máquina).
+     "lo que dejaste abierto / en desarrollo / flageaste sin contarle a nadie." */
+  function openPlans() {
+    state.plansOpen = true;
+    var T = window.ConsomniTerms;
+    if (T && T.isMaximized && T.isMaximized()) T.minimize();   // el dock no tapa el tablero
+    loadPlanDocs();
+    render();
+  }
+  function closePlans() { state.plansOpen = false; render(); }
+
+  function frenteStatusObj(k) { for (var i = 0; i < FRENTE_STATUS.length; i++) if (FRENTE_STATUS[i].key === (k || '')) return FRENTE_STATUS[i]; return FRENTE_STATUS[0]; }
+  var frenteSaveTimer = null;
+  function saveFrentes() { if (!api || !api.saveConfig) return; if (frenteSaveTimer) clearTimeout(frenteSaveTimer); frenteSaveTimer = setTimeout(function () { api.saveConfig({ frentes: state.frentes }); }, 400); }
+  function cycleFrenteStatus(key) {
+    if (!key) return;
+    var cur = (state.frentes[key] && state.frentes[key].status) || '';
+    var keys = FRENTE_STATUS.map(function (s) { return s.key; });
+    var nx = keys[(keys.indexOf(cur) + 1) % keys.length];
+    state.frentes[key] = Object.assign({}, state.frentes[key], { status: nx, updated: Date.now() });
+    saveFrentes(); render();
+  }
+  function setFrenteNote(key, val) { if (!key) return; state.frentes[key] = Object.assign({}, state.frentes[key], { note: val, updated: Date.now() }); saveFrentes(); }
+
+  function hasPlanData(s) { return !!(s.plan && (s.plan.hasPlan || (s.plan.todos && s.plan.todos.length))); }
+  function planView() {
+    var sessions = (state.snapshot && state.snapshot.sessions) || [];
+    var map = {};
+    sessions.forEach(function (s) {
+      if (!hasPlanData(s)) return;
+      var k = projKey(s);
+      if (!map[k]) map[k] = { id: k, name: s.project || k, fav: false, cwd: s.cwd || '', sessions: [], pending: 0, inProgress: 0, completed: 0 };
+      var g = map[k];
+      g.sessions.push(s);
+      if (s.fav) g.fav = true;
+      if (!g.cwd && s.cwd) g.cwd = s.cwd;
+      g.pending += s.plan.pending || 0; g.inProgress += s.plan.inProgress || 0; g.completed += s.plan.completed || 0;
+    });
+    var arr = Object.keys(map).map(function (k) { return map[k]; });
+    arr.forEach(function (g) {
+      g.total = g.pending + g.inProgress + g.completed;
+      g.lastActivity = g.sessions.reduce(function (m, s) { return Math.max(m, s.lastActivity || 0); }, 0);
+      g.sessions.sort(function (a, b) {
+        var ai = (a.plan.inProgress || 0) > 0 ? 0 : 1, bi = (b.plan.inProgress || 0) > 0 ? 0 : 1;
+        if (ai !== bi) return ai - bi;
+        return (b.lastActivity || 0) - (a.lastActivity || 0);
+      });
+    });
+    arr.sort(function (a, b) {
+      if ((b.inProgress > 0) !== (a.inProgress > 0)) return (b.inProgress > 0 ? 1 : 0) - (a.inProgress > 0 ? 1 : 0);
+      if (b.pending !== a.pending) return b.pending - a.pending;
+      return b.lastActivity - a.lastActivity;
+    });
+    return arr;
+  }
+
+  function loadPlanDocs() {
+    if (!api || !api.getPlanDocs) return;
+    var groups = planView(), cwds = [];
+    groups.forEach(function (g) { if (g.cwd && cwds.indexOf(g.cwd) < 0) cwds.push(g.cwd); });
+    if (!cwds.length) { state.planDocs = {}; return; }
+    api.getPlanDocs(cwds).then(function (m) { state.planDocs = m || {}; if (state.plansOpen) render(); }).catch(function () {});
+  }
+  function openDocFile(p) {
+    if (!p || !api || !api.action) return;
+    api.action('openDoc', { file: p }).then(function (r) { toast(r && r.ok ? (r.message || 'doc abierto') : ((r && r.error) || 'no se pudo abrir'), r && r.ok ? '' : 'err'); }).catch(function () { toast('no se pudo abrir', 'err'); });
+  }
+
+  var TODO_ORDER = { in_progress: 0, pending: 1, completed: 2 };
+  function todoLine(t) {
+    var st = t.status || 'pending', ic, cls;
+    if (st === 'completed') { ic = C.svg('check', 12, 2.6); cls = 'done'; }
+    else if (st === 'in_progress') { ic = '<span class="tw-spin"></span>'; cls = 'prog'; }
+    else { ic = '<span class="tw-o"></span>'; cls = 'pend'; }
+    var txt = (st === 'in_progress' && t.activeForm) ? t.activeForm : t.content;
+    return '<div class="tw-item tw-' + cls + '"><span class="tw-ic">' + ic + '</span><span class="tw-tx">' + esc(txt) + '</span></div>';
+  }
+  function rollHtml(p) {
+    var total = (p.pending || 0) + (p.inProgress || 0) + (p.completed || 0);
+    var pct = total ? Math.round((p.completed / total) * 100) : 0;
+    return '<span class="rl rl-done" title="hechas">' + C.svg('check', 11, 2.6) + (p.completed || 0) + '</span>' +
+      ((p.inProgress || 0) ? '<span class="rl rl-prog" title="en curso"><span class="tw-spin"></span>' + p.inProgress + '</span>' : '') +
+      '<span class="rl rl-pend" title="pendientes"><span class="tw-o"></span>' + (p.pending || 0) + '</span>' +
+      '<span class="rl-bar"><span class="rl-fill" style="width:' + pct + '%"></span></span>';
+  }
+  function planCardHtml(s) {
+    var p = s.plan;
+    var todos = (p.todos || []).slice().sort(function (a, b) {
+      var ao = TODO_ORDER[a.status] != null ? TODO_ORDER[a.status] : 1, bo = TODO_ORDER[b.status] != null ? TODO_ORDER[b.status] : 1;
+      return ao - bo;
+    });
+    var dotMap = { working: 'green', attn: 'amber', idle: 'idle', standby: 'standby', error: 'error', closed: 'idle' };
+    var dk = dotMap[s.state] || 'idle';
+    var planChip = p.hasPlan ? '<span class="pl-chip">' + C.svg('check', 10, 2.6) + ' plan' + (p.planAt ? ' · ' + relTime(p.planAt) : '') + '</span>' : '';
+    return '<div class="plan-card" data-sid="' + esc(s.id) + '">' +
+      '<div class="plan-card-head"><span class="dot dot--' + dk + '"></span>' +
+        '<span class="pc-nm">' + esc(s.name) + '</span><span class="badge badge--' + s.mode + '">' + esc(s.mode) + '</span></div>' +
+      '<div class="plan-card-sub"><span style="color:' + stColor(s.state) + '">' + esc(s.state) + '</span>' +
+        '<span class="sep">·</span><span>' + relTime(s.lastActivity) + '</span>' + planChip + '</div>' +
+      '<div class="plan-roll">' + rollHtml(p) + '</div>' +
+      (todos.length ? '<details class="plan-todos"' + (p.inProgress ? ' open' : '') + '><summary>' + C.svg('chevR', 10, 2.4) + ' ' + todos.length + (todos.length === 1 ? ' tarea' : ' tareas') + '</summary><div class="tw-list">' + todos.map(todoLine).join('') + '</div></details>' : '') +
+      '<div class="plan-card-acts">' +
+        '<button class="pc-act" data-act="plan-resume" data-sid="' + esc(s.id) + '" title="continuar esta sesión (claude --resume)">' + C.svg('reply', 11, 1.8) + ' continuar</button>' +
+        '<button class="pc-act" data-act="plan-detail" data-sid="' + esc(s.id) + '">detalle</button>' +
+      '</div>' +
+    '</div>';
+  }
+  function planColHtml(g) {
+    var fr = state.frentes[g.id] || {};
+    var st = frenteStatusObj(fr.status);
+    var pct = g.total ? Math.round((g.completed / g.total) * 100) : 0;
+    var docs = (state.planDocs && state.planDocs[g.cwd]) || [];
+    var head = '<div class="col-head">' +
+      '<div class="col-title"><span style="color:' + (g.fav ? 'var(--amber)' : '#7a7a82') + '">' + C.svg(g.fav ? 'star' : 'repo', g.fav ? 13 : 14, 1.7) + '</span>' +
+        '<span class="nm">' + esc(g.name) + '</span><span class="ct">' + g.sessions.length + '</span></div>' +
+      '<button class="frente-pill" data-act="frente-status" data-frente="' + esc(g.id) + '" title="cambiar estado del frente (privado, click para ciclar)" style="color:' + st.color + '"><span class="d" style="background:' + st.color + '"></span>' + esc(st.label) + '</button>' +
+    '</div>';
+    var prog = '<div class="frente-prog"><span class="fp-bar"><span class="fp-fill" style="width:' + pct + '%"></span></span>' +
+      '<span class="fp-tx"><b>' + g.completed + '</b>/' + g.total + ' hechas' + (g.inProgress ? ' · ' + g.inProgress + ' en curso' : '') + (g.pending ? ' · ' + g.pending + ' pend' : '') + '</span></div>';
+    var cards = g.sessions.map(planCardHtml).join('');
+    var docsHtml = docs.length ? '<div class="plan-docs"><div class="pd-lbl">DOCS · PLAN / SPEC</div>' + docs.map(function (dc) {
+      return '<button class="pd-row" data-act="open-doc" data-doc="' + esc(dc.path) + '" title="' + esc(dc.path) + '">' + C.svg('file', 12, 1.7) + '<span class="pd-nm">' + esc(dc.name) + '</span><span class="pd-go">' + C.svg('ext', 11, 2) + '</span></button>';
+    }).join('') + '</div>' : '';
+    var note = '<div class="frente-note-wrap"><div class="pd-lbl">NOTA PRIVADA / IDEA</div>' +
+      '<textarea class="frente-note" data-frente="' + esc(g.id) + '" rows="2" placeholder="lo que estás flageando para implementar/mejorar… (sólo local, nunca sale de tu máquina)">' + esc(fr.note || '') + '</textarea></div>';
+    return '<section class="col plan-col" data-frente="' + esc(g.id) + '">' + head + prog +
+      '<div class="col-cards">' + cards + docsHtml + note + '</div></section>';
+  }
+  function plansIntro() {
+    return '<div class="plans-intro"><span class="pi-eye">' + C.eye(18, false) + '</span>' +
+      '<span class="pi-tx"><b>FRENTES</b> · planes, specs y tareas que dejaste abiertos — <span class="pi-dim">detectados de tus sesiones (plan mode · TodoWrite) + docs del repo · 100% local</span></span>' +
+      '<button class="pi-refresh pi-tour" data-act="plan-tour" title="ver el tutorial">' + C.svg('eye', 13, 1.8) + ' tutorial</button>' +
+      '<button class="pi-refresh" data-act="plans-refresh" title="re-escanear docs del repo">' + C.svg('redo', 12, 2) + '</button></div>';
+  }
+  function renderPlansBoard() {
+    var groups = planView();
+    if (!groups.length) {
+      return '<main class="board plans-board"><div class="plans-empty">' + C.eye(48, false) +
+        '<div class="pe-title">Todavía no detecté planes ni tareas</div>' +
+        '<div class="pe-text">Cuando una sesión presente un <b>plan</b> (plan mode → ExitPlanMode) o arme una lista de <b>tareas</b> (TodoWrite), su progreso —qué está <b>pendiente</b> y qué ya se <b>hizo</b>— aparece acá, agrupado por proyecto. También levanto los <b>plan.md</b> / <b>spec.md</b> de tus repos.</div>' +
+      '</div></main>';
+    }
+    return '<main class="board plans-board">' + groups.map(planColHtml).join('') + '</main>';
+  }
+  function buildPlans(o) {
+    var sidebar = state.collapsed ? C.sidebar(Object.assign({}, o, { collapsed: true })) : C.sidebar(o);
+    return '<div class="app">' + C.topbar(o) +
+      '<div class="main-row">' + sidebar + '<div class="plans-wrap">' + plansIntro() + renderPlansBoard() + '</div></div>' +
+      C.statusbar(o) + C.crt() + '</div>';
+  }
+
   /* ════════ FILTROS / ORDEN / DENSIDAD / PROYECTO ════════ */
   function setActiveProject(p) {
-    state.activeProject = p; state.focusSid = null;
+    state.activeProject = p; state.focusSid = null; state.plansOpen = false;
     var T = window.ConsomniTerms;
     if (p === 'all' || p === '__archived') {
       // "todos" / "archivados" → board (no dock maximizado). Si veníamos de pantalla completa, salimos.
@@ -777,6 +1189,8 @@
     rows.push({ group: 'ACCIONES', ic: 'sliders', tx: 'Cambiar orden', sub: 'actual: ' + curSort().label, keys: ['s'], act: 'sort' });
     rows.push({ group: 'ACCIONES', ic: 'grid', tx: 'Ver en split / grid', sub: 'sesiones activas o seleccionadas', keys: [], act: 'split' });
     rows.push({ group: 'ACCIONES', ic: 'bell', tx: state.muted ? 'Desmutear notificaciones' : 'Mutear notificaciones', sub: '', keys: ['m'], act: 'mute' });
+    rows.push({ group: 'ACCIONES', ic: 'tasks', tx: 'Abrir Planes (frentes)', sub: 'pendiente vs hecho', keys: [], act: 'plans' });
+    rows.push({ group: 'ACCIONES', ic: 'eye', tx: 'Tutorial de Planes', sub: 'tour paso a paso', keys: [], act: 'tour' });
     rows.push({ group: 'ACCIONES', ic: 'gear', tx: 'Abrir settings', sub: '', keys: [], act: 'settings' });
     return rows;
   }
@@ -825,6 +1239,8 @@
     else if (row.act === 'mute') { closePalette(); toggleMute(); }
     else if (row.act === 'dispatch') { closePalette(); dispatchAction('dispatch', state.focusSid); }
     else if (row.act === 'settings') { closePalette(); openSettings(); }
+    else if (row.act === 'plans') { closePalette(); openPlans(); maybeStartPlanTour(); }
+    else if (row.act === 'tour') { closePalette(); openPlans(); startPlanTour(); }
     else if (row.act && row.act.indexOf('a:') === 0) { closePalette(); dispatchAction(row.act.slice(2), state.focusSid); }
     else closePalette();
   }
@@ -930,7 +1346,7 @@
         if (!msg) return;
         if (!u) { msg.textContent = 'no se pudo comprobar'; return; }
         if (u.error) { msg.textContent = 'sin conexión / sin releases (v' + u.current + ')'; }
-        else if (u.hasUpdate) { msg.innerHTML = 'v' + esc(u.latest) + ' disponible · <a data-href="' + esc(u.url) + '" style="color:var(--green);cursor:pointer">abrir releases</a>'; }
+        else if (u.hasUpdate) { state.update = u; addUpdateNotif(u); msg.innerHTML = 'v' + esc(u.latest) + ' disponible · <a data-act="show-changelog" style="color:var(--green);cursor:pointer">ver novedades</a>'; }
         else if (u.latest) { msg.textContent = 'estás al día (v' + u.current + ')'; }
         else { msg.textContent = 'sin releases publicadas aún (v' + u.current + ')'; }
       }).catch(function () { ub.disabled = false; if (msg) msg.textContent = 'error al comprobar'; });
@@ -946,10 +1362,11 @@
   }
 
   /* ── overlay host ── */
-  function setOverlay(html) { var o = document.getElementById('overlays'); if (o) o.innerHTML = html; if (!html) { state.helpOpen = false; state.settingsOpen = false; } }
-  function anyOverlayOpen() { return state.paletteOpen || !!state.detailId || state.helpOpen || state.settingsOpen; }
+  function setOverlay(html) { var o = document.getElementById('overlays'); if (o) o.innerHTML = html; if (!html) { state.helpOpen = false; state.settingsOpen = false; state.changelogOpen = false; } }
+  function anyOverlayOpen() { return state.paletteOpen || !!state.detailId || state.helpOpen || state.settingsOpen || state.changelogOpen; }
   function closeOverlays() {
     if (state.paletteOpen) { closePalette(); return; }
+    if (state.changelogOpen) { closeChangelog(); return; }
     if (state.detailId) { closeDetail(); return; }
     if (state.settingsOpen) { closeSettings(); return; }
     if (state.helpOpen) { setOverlay(''); return; }
@@ -963,11 +1380,20 @@
   document.addEventListener('click', function (e) {
     var t = e.target;
     closeSortMenu();
+    // cerrar el panel de notificaciones si clickeás afuera (no en el bell ni en el panel)
+    if (state.notifOpen && t.closest && !t.closest('#notifPanel') && !t.closest('.notif-bell')) closeNotifPanel();
 
     // el dock (#terminals) maneja sus propios clicks (toolbar, panes, acciones). El board NO debe
     // procesarlos: si lo hace, un click adentro de una terminal matchea el [data-proj] del panel y
     // dispara setActiveProject → openProject → abre OTRA terminal y le roba el foco al xterm.
     if (t.closest && t.closest('#terminals')) return;
+
+    // ── tutorial (coachmark): botones siguiente / anterior / saltar ──
+    var tourBtn = t.closest && t.closest('[data-tour]');
+    if (tourBtn) { e.preventDefault(); e.stopPropagation(); var ta = tourBtn.getAttribute('data-tour'); if (ta === 'next') tourNext(); else if (ta === 'prev') tourPrev(); else endTour(true); return; }
+    // ── fila de notificación → changelog ──
+    var nrow = t.closest && t.closest('.ntf-row[data-notif]');
+    if (nrow) { e.stopPropagation(); var nn = notifById(nrow.getAttribute('data-notif')); closeNotifPanel(); if (nn && nn.kind === 'update') openChangelog(nn.data); return; }
 
     // links externos (autor / github / releases) → navegador del SO
     var href = t.closest && t.closest('[data-href]');
@@ -987,6 +1413,20 @@
       if (act === 'close-settings') { if (t.classList.contains('set-scrim') || actEl.tagName === 'BUTTON') closeSettings(); return; }
       if (act === 'cfm-cancel') { if (t.classList.contains('cfm-scrim') || actEl.tagName === 'BUTTON') { pendingClose = null; setOverlay(''); } return; }
       if (act === 'cfm-ok') { var ccd = document.getElementById('cccDont'); if (ccd && ccd.checked) { state.confirmCloseTerminal = false; if (api && api.saveConfig) api.saveConfig({ confirmCloseTerminal: false }); } var fn = pendingClose; pendingClose = null; setOverlay(''); if (fn) fn(); return; }
+      // ── tablero de Planes (frentes) ──
+      if (act === 'plans') { e.stopPropagation(); openPlans(); maybeStartPlanTour(); return; }
+      if (act === 'plans-refresh') { e.stopPropagation(); loadPlanDocs(); toast('re-escaneando docs…'); return; }
+      if (act === 'plan-tour') { e.stopPropagation(); startPlanTour(); return; }
+      if (act === 'show-changelog') { e.stopPropagation(); openChangelog(state.update); return; }
+      if (act === 'plan-detail') { e.stopPropagation(); var pdsid = actEl.getAttribute('data-sid'); if (pdsid) openDetail(pdsid); return; }
+      if (act === 'plan-resume') { e.stopPropagation(); var prsid = actEl.getAttribute('data-sid'); state.plansOpen = false; render(); dispatchAction('resume', prsid); return; }
+      if (act === 'open-doc') { e.stopPropagation(); openDocFile(actEl.getAttribute('data-doc')); return; }
+      if (act === 'frente-status') { e.stopPropagation(); cycleFrenteStatus(actEl.getAttribute('data-frente')); return; }
+      // ── notificaciones + changelog ──
+      if (act === 'notifs') { e.stopPropagation(); state.notifOpen ? closeNotifPanel() : openNotifPanel(); return; }
+      if (act === 'notif-clear') { e.stopPropagation(); state.notifs = []; markAllSeen(); closeNotifPanel(); applyNotifBadge(); return; }
+      if (act === 'close-changelog') { if (t.classList.contains('cl-scrim') || actEl.tagName === 'BUTTON') closeChangelog(); return; }
+      if (act === 'changelog-update') { e.stopPropagation(); closeChangelog(); startUpdateDownload(); return; }
       if (act === 'settings') { openSettings(); return; }
       if (act === 'terminals') { if (window.ConsomniTerms) window.ConsomniTerms.toggle(); return; }
       if (act === 'theme') { toast('tema oscuro (único por ahora)', 'warn'); return; }
@@ -1014,7 +1454,7 @@
     if (t.closest && t.closest('.sb-add')) { addProjectViaPicker(); return; }
     var rmEl = t.closest && t.closest('[data-unkeep]');
     if (rmEl) { e.stopPropagation(); unkeepProject(rmEl.getAttribute('data-unkeep')); return; }
-    if (t.closest && t.closest('[data-act="home"]')) { state.activeProject = 'all'; render(); if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
+    if (t.closest && t.closest('[data-act="home"]')) { state.activeProject = 'all'; state.plansOpen = false; render(); if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
 
     // ── CARDS PRIMERO (van adentro de la columna, que tiene data-proj) ──
     // closed row → detalle
@@ -1033,6 +1473,12 @@
     var sb = t.closest && t.closest('[data-proj]'); if (sb) { setActiveProject(sb.getAttribute('data-proj')); return; }
   });
 
+  /* ── input vivo: nota privada del frente (no re-renderiza → no pierde foco) ── */
+  document.addEventListener('input', function (e) {
+    var n = e.target && e.target.closest && e.target.closest('.frente-note');
+    if (n) { setFrenteNote(n.getAttribute('data-frente'), n.value); }
+  });
+
   /* ════════ KEYBOARD ════════ */
   var gPending = false;
   document.addEventListener('keydown', function (e) {
@@ -1045,6 +1491,19 @@
       if (e.key === 'Escape') { e.preventDefault(); if (T && T.isMaximized()) T.toggle(); else if (document.activeElement.blur) document.activeElement.blur(); }
       return;
     }
+    // tutorial activo: capturamos navegación (←/→/Enter/Esc) y bloqueamos el resto
+    if (TOUR.active) {
+      if (e.key === 'Escape') { e.preventDefault(); endTour(true); return; }
+      if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); tourNext(); return; }
+      if (e.key === 'ArrowLeft') { e.preventDefault(); tourPrev(); return; }
+      return;
+    }
+
+    // Si hay un input/textarea REAL con foco (nota de frente, settings, qreply), dejá escribir:
+    // sólo Escape sigue (para cerrar overlays / blur). Evita que 'T', 's', 'j'… disparen atajos.
+    var aeTag = document.activeElement && document.activeElement.tagName;
+    if ((aeTag === 'INPUT' || aeTag === 'TEXTAREA') && e.key !== 'Escape') return;
+
     // Abrir/cerrar el dock de terminales (Shift+T para no chocar con 't' = terminal de la card)
     if (!meta && (e.key === 'T')) { e.preventDefault(); T && T.toggle(); return; }
 
@@ -1218,6 +1677,7 @@
     try { window.ConsomniTerms.restoreSession(); } catch (e) {}
   }
   state.userCollapsed = null;
+  state.notifSeen = loadNotifSeen();
   state.collapsed = window.innerWidth < BREAKPOINT;
   if (api) {
     api.getSnapshot().then(setSnapshot).catch(function () { render(); });
@@ -1227,6 +1687,7 @@
       if (cfg) {
         state.keptProjects = Array.isArray(cfg.keptProjects) ? cfg.keptProjects.slice() : [];
         state.confirmCloseTerminal = cfg.confirmCloseTerminal !== false;
+        state.frentes = (cfg.frentes && typeof cfg.frentes === 'object') ? cfg.frentes : {};
       }
       render();
     }).catch(function () {});
@@ -1240,6 +1701,8 @@
   window.__consomni = {
     state: state, render: render, transform: transform,
     openPalette: openPalette, openDetail: openDetail, openHelp: openHelp, openSettings: openSettings,
+    openPlans: openPlans, closePlans: closePlans,
+    startTutorial: startPlanTour, openNotifs: openNotifPanel, openChangelog: openChangelog,
     setActiveProject: setActiveProject, activateSearch: activateSearch,
     toggleDensity: toggleDensity, showOnboarding: showOnboarding,
     enterSplit: enterSplit, exitSplit: exitSplit, dispatchAction: dispatchAction,

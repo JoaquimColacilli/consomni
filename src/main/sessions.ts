@@ -10,7 +10,7 @@ import { app } from 'electron';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { parseSessionFile, parseSessionDetail, type SessionDetail } from './jsonl';
 import { loadConfig, loadLocalState } from './config';
-import type { Session, Snapshot, SessionState, SessionMode, SubagentInfo } from './types';
+import type { Session, Snapshot, SessionState, SessionMode, SubagentInfo, PlanDoc } from './types';
 
 let watcher: FSWatcher | null = null;
 let onUpdateCb: ((s: Snapshot) => void) | null = null;
@@ -315,6 +315,39 @@ function readSubagents(sessionFile: string, id: string): SubagentInfo[] {
       .filter((x): x is SubagentInfo => !!x)
       .slice(0, 12);
   } catch { return []; }
+}
+
+/* ════════ docs de plan/spec en el repo (markdown, read-only) ════════
+   Los planes/specs que Claude escribe a disco (plan.md, .specs/…, docs/plans/…)
+   NO están en el transcript. Los descubrimos glob-eando el cwd: por nombre
+   (plan|spec|design|roadmap|rfc|prd) o por carpeta convencional. Sólo lectura. */
+const PLAN_NAME_RE = /(?:^|[-_. ])(plan|spec|design|architecture|roadmap|rfc|prd)s?(?:[-_. ]|\.md$)/i;
+const PLAN_DIR_RE = /[\\/](\.?specs?|plans?|rfcs?|designs?|proposals?)[\\/]/i;
+const PLAN_SKIP = new Set(['node_modules', '.git', 'dist', 'build', 'release', '.next', 'out', 'vendor', 'coverage', '.cache', 'target', '.venv', '__pycache__']);
+
+export function findPlanDocs(cwd: string): PlanDoc[] {
+  if (!cwd) return [];
+  try { if (!fs.statSync(cwd).isDirectory()) return []; } catch { return []; }
+  const out: PlanDoc[] = [];
+  const walk = (dir: string, depth: number): void => {
+    if (depth > 3 || out.length >= 60) return;
+    let entries: fs.Dirent[] = [];
+    try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
+    for (const e of entries) {
+      if (out.length >= 60) return;
+      const full = path.join(dir, e.name);
+      if (e.isDirectory()) {
+        if (!e.name.startsWith('.git') && !PLAN_SKIP.has(e.name.toLowerCase())) walk(full, depth + 1);
+      } else if (e.isFile() && /\.md$/i.test(e.name) && (PLAN_NAME_RE.test(e.name) || PLAN_DIR_RE.test(full))) {
+        let mtime = 0;
+        try { mtime = fs.statSync(full).mtimeMs; } catch { /* noop */ }
+        out.push({ path: full, name: e.name, mtime });
+      }
+    }
+  };
+  walk(cwd, 0);
+  out.sort((a, b) => b.mtime - a.mtime);
+  return out.slice(0, 24);
 }
 
 export interface FullDetail extends SessionDetail { subagents: SubagentInfo[]; }

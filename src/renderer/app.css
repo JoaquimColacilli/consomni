@@ -378,3 +378,209 @@ body.dk-dragging,body.dk-dragging *{cursor:grabbing !important;user-select:none 
 .pane-foot{flex:none;display:flex;align-items:center;gap:8px;padding:8px 12px;border-top:1px solid var(--border);background:#0d0d11;}
 .pane-foot input{flex:1;background:transparent;border:none;outline:none;color:var(--text-1);font-family:var(--mono);font-size:11px;}
 .pane-foot input::placeholder{color:#4a4a50;}
+
+/* ════════════════════════════════════════════════════════════════
+   TABLERO DE PLANES (frentes) — pantalla nueva, aditiva, sólo tokens.
+   Reusa .board (scroll horizontal de columnas) + .col (ancho fijo). Hard Rule 1.
+   ════════════════════════════════════════════════════════════════ */
+.plans-wrap{flex:1;display:flex;flex-direction:column;min-width:0;min-height:0;}
+/* los frentes ENVUELVEN en grilla (no scroll horizontal escondido): se ven todos
+   con scroll VERTICAL natural (rueda del mouse). Responsive a cualquier ancho. */
+.plans-board{min-height:0;min-width:0;flex-wrap:wrap;align-content:flex-start;overflow-x:hidden;overflow-y:auto;}
+.plans-board .plan-col{align-self:flex-start;}
+.plans-intro{flex:none;display:flex;align-items:center;gap:11px;padding:10px 18px;border-bottom:1px solid var(--border-soft);background:rgba(255,255,255,.012);}
+.plans-intro .pi-eye{display:inline-flex;flex:none;}
+.plans-intro .pi-tx{flex:1;min-width:0;font-size:11.5px;color:var(--text-2);letter-spacing:.2px;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.plans-intro .pi-tx b{color:var(--text-1);font-weight:600;letter-spacing:1px;}
+.plans-intro .pi-dim{color:var(--text-4);}
+.plans-intro .pi-refresh{flex:none;display:inline-flex;align-items:center;justify-content:center;width:28px;height:28px;border-radius:7px;background:var(--surface-input);border:1px solid rgba(255,255,255,.07);color:var(--text-3);cursor:pointer;transition:.13s;}
+.plans-intro .pi-refresh:hover{color:var(--text-1);border-color:var(--border-hover);}
+
+/* frente = una columna del board (reusa .col). cabecera con estado manual + progreso */
+.plan-col .col-head{align-items:flex-start;}
+.frente-pill{display:inline-flex;align-items:center;gap:6px;height:22px;padding:0 9px;border-radius:6px;font-size:10.5px;background:var(--surface-input);border:1px solid var(--border);cursor:pointer;font-family:'Geist Mono',monospace;white-space:nowrap;transition:.13s;}
+.frente-pill:hover{border-color:var(--border-hover);}
+.frente-pill .d{width:7px;height:7px;border-radius:50%;flex:none;}
+.frente-prog{display:flex;align-items:center;gap:9px;padding:9px 0 3px;}
+.fp-bar{flex:1;height:6px;border-radius:4px;background:var(--surface-input);overflow:hidden;}
+.fp-fill{display:block;height:100%;background:var(--green);border-radius:4px;transition:width .3s ease;}
+.fp-tx{flex:none;font-size:10px;color:var(--text-3);white-space:nowrap;}
+.fp-tx b{color:var(--green);font-weight:600;}
+
+/* card de plan = una sesión con plan/tareas dentro del frente */
+.plan-card{background:var(--surface-card);border:1px solid var(--border);border-radius:10px;padding:10px 11px;display:flex;flex-direction:column;gap:7px;transition:border-color .14s;}
+.plan-card:hover{border-color:var(--border-hover);}
+.plan-card-head{display:flex;align-items:center;gap:7px;}
+.plan-card-head .pc-nm{flex:1;min-width:0;font-size:12.5px;font-weight:600;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.plan-card-sub{display:flex;align-items:center;gap:6px;font-size:10.5px;color:var(--text-3);}
+.pl-chip{display:inline-flex;align-items:center;gap:3px;margin-left:auto;color:var(--blue-2);font-size:9px;border:1px solid rgba(96,165,250,.3);border-radius:5px;padding:1px 5px;white-space:nowrap;}
+.plan-roll{display:flex;align-items:center;gap:9px;font-size:10.5px;color:var(--text-3);}
+.plan-roll .rl{display:inline-flex;align-items:center;gap:3px;flex:none;}
+.plan-roll .rl-done{color:var(--green);}
+.plan-roll .rl-prog{color:var(--amber);}
+.plan-roll .rl-pend{color:var(--text-3);}
+.plan-roll .rl-bar{flex:1;height:5px;border-radius:3px;background:var(--surface-input);overflow:hidden;}
+.plan-roll .rl-fill{display:block;height:100%;background:var(--green);border-radius:3px;transition:width .3s ease;}
+/* iconitos de estado de tarea */
+.tw-o{width:9px;height:9px;border-radius:50%;border:1.5px solid currentColor;display:inline-block;opacity:.7;}
+.tw-spin{width:9px;height:9px;border-radius:50%;border:1.5px solid var(--amber);border-top-color:transparent;display:inline-block;animation:nlspin .8s linear infinite;}
+@keyframes nlspin{to{transform:rotate(360deg);}}
+.plan-todos{margin-top:1px;}
+.plan-todos summary{list-style:none;cursor:pointer;font-size:10.5px;color:var(--text-3);display:flex;align-items:center;gap:5px;padding:3px 0;user-select:none;}
+.plan-todos summary::-webkit-details-marker{display:none;}
+.plan-todos summary svg{transition:transform .15s;}
+.plan-todos[open]>summary svg{transform:rotate(90deg);}
+.plan-todos summary:hover{color:var(--text-2);}
+.tw-list{display:flex;flex-direction:column;gap:5px;padding:5px 0 2px;}
+.tw-item{display:flex;align-items:flex-start;gap:7px;font-size:11px;line-height:1.45;}
+.tw-ic{flex:none;width:13px;display:inline-flex;justify-content:center;padding-top:2px;}
+.tw-tx{flex:1;color:var(--text-2);word-break:break-word;}
+.tw-done .tw-ic{color:var(--green);}
+.tw-done .tw-tx{color:var(--text-4);text-decoration:line-through;}
+.tw-prog .tw-tx{color:var(--text-1);}
+.tw-pend .tw-ic{color:var(--text-faint);}
+.plan-card-acts{display:flex;gap:6px;margin-top:1px;}
+.pc-act{flex:1;display:inline-flex;align-items:center;justify-content:center;gap:5px;height:26px;border-radius:6px;font-size:10.5px;background:var(--surface-input);border:1px solid rgba(255,255,255,.07);color:var(--text-2);cursor:pointer;transition:.13s;}
+.pc-act:hover{color:var(--text-1);border-color:var(--border-hover);}
+
+/* docs plan.md / spec.md del repo */
+.plan-docs{margin-top:5px;border-top:1px solid var(--border-soft);padding-top:9px;}
+.pd-lbl{font-size:9px;letter-spacing:1.4px;color:var(--text-4);margin-bottom:6px;}
+.pd-row{display:flex;align-items:center;gap:8px;width:100%;padding:6px 8px;border-radius:6px;background:transparent;border:1px solid var(--border-soft);color:var(--text-2);font-size:11px;cursor:pointer;margin-bottom:5px;font-family:'Geist Mono',monospace;transition:.13s;}
+.pd-row:hover{border-color:var(--border-hover);color:var(--text-1);}
+.pd-nm{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;text-align:left;}
+.pd-go{flex:none;color:var(--text-4);display:inline-flex;}
+.pd-row:hover .pd-go{color:var(--green);}
+
+/* nota privada / idea por frente */
+.frente-note-wrap{margin-top:9px;border-top:1px solid var(--border-soft);padding-top:9px;}
+.frente-note{width:100%;resize:vertical;min-height:48px;background:var(--surface-input);border:1px solid rgba(255,255,255,.07);border-radius:7px;padding:8px 9px;color:var(--text-1);font-family:'Geist Mono',monospace;font-size:11px;line-height:1.55;outline:none;}
+.frente-note:focus{border-color:var(--border-hover);}
+.frente-note::placeholder{color:#56565c;}
+
+/* estado vacío del tablero de planes */
+.plans-empty{flex:1;width:100%;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:13px;text-align:center;padding:30px;}
+.plans-empty>svg{opacity:.5;}
+.plans-empty .pe-title{font-size:15px;font-weight:600;color:var(--text-2);font-family:'Geist Mono',monospace;letter-spacing:.3px;}
+.plans-empty .pe-text{font-size:12px;line-height:1.75;max-width:540px;color:var(--text-3);}
+.plans-empty .pe-text b{color:var(--green);font-weight:500;}
+
+/* ════════════════════════════════════════════════════════════════
+   Helper "comando por lenguaje natural" en las terminales del dock.
+   Barra inline sobre la PTY; botón ✨ visible sólo con nlHelper on. Aditivo.
+   ════════════════════════════════════════════════════════════════ */
+.dk-ask{flex:none;display:flex;flex-direction:column;gap:7px;padding:7px 9px;background:var(--surface-sidebar);border-bottom:1px solid var(--border);}
+.dk-ask-row{display:flex;align-items:center;gap:8px;}
+.dk-ask-ic{color:var(--green);display:inline-flex;flex:none;}
+.dk-ask-inp{flex:1;min-width:0;height:27px;background:var(--surface-input);border:1px solid rgba(255,255,255,.08);border-radius:6px;padding:0 9px;color:var(--text-1);font-family:'Geist Mono',monospace;font-size:11.5px;outline:none;}
+.dk-ask-inp:focus{border-color:var(--border-hover);}
+.dk-ask-inp::placeholder{color:#56565c;}
+.dk-ask-go{flex:none;display:inline-flex;align-items:center;gap:5px;height:27px;padding:0 10px;border-radius:6px;font-size:11px;color:var(--green);background:rgba(74,222,128,.08);border:1px solid rgba(74,222,128,.4);cursor:pointer;white-space:nowrap;transition:.13s;}
+.dk-ask-go:hover{background:rgba(74,222,128,.16);border-color:var(--green);}
+.dk-ask.busy .dk-ask-go{opacity:.55;cursor:default;}
+.dk-ask-x{flex:none;display:inline-flex;align-items:center;justify-content:center;width:25px;height:25px;border-radius:5px;background:transparent;border:1px solid transparent;color:var(--text-4);cursor:pointer;}
+.dk-ask-x:hover{color:var(--text-1);background:var(--surface-input);}
+/* atajos rápidos (chips) — visibles, identificables, un click */
+.dk-ask-presets{display:flex;flex-wrap:wrap;align-items:center;gap:6px;}
+.dk-preset{display:inline-flex;align-items:center;height:24px;padding:0 11px;border-radius:13px;font-size:10.5px;font-family:'Geist Mono',monospace;color:var(--text-2);background:var(--surface-input);border:1px solid rgba(255,255,255,.08);cursor:pointer;transition:.12s;white-space:nowrap;}
+.dk-preset:hover{color:var(--text-1);border-color:var(--green);background:rgba(74,222,128,.08);}
+.dk-ask-msg{margin-left:auto;font-size:9.5px;color:var(--text-4);white-space:nowrap;}
+.dk-ask-msg.err{color:var(--error);}
+/* botón ✨ del head: SIEMPRE visible en paneles terminal (feature a la vista) */
+.dk-ask-btn{display:none;}
+.dk-pane--shell .dk-ask-btn,.dk-pane--claude .dk-ask-btn{display:inline-flex;color:var(--green);}
+/* botón "comandos" del toolbar del dock */
+.dk-new-cmd{color:var(--green);}
+
+/* botón "tutorial" en la intro de Planes (override del .pi-refresh cuadrado) */
+.plans-intro .pi-tour{width:auto;height:28px;padding:0 11px;gap:5px;font-size:11px;color:var(--green);border-color:rgba(74,222,128,.4);}
+.plans-intro .pi-tour:hover{color:var(--green);border-color:var(--green);background:rgba(74,222,128,.1);}
+
+/* ════════════════════════════════════════════════════════════════
+   NOTIFICACIONES (bell badge + panel) + CHANGELOG modal. Aditivo, tokens.
+   ════════════════════════════════════════════════════════════════ */
+.notif-bell{position:relative;}
+.notif-badge{position:absolute;top:-2px;right:-2px;min-width:15px;height:15px;padding:0 3px;border-radius:8px;background:var(--red);color:#fff;font-size:8.5px;font-weight:700;display:flex;align-items:center;justify-content:center;line-height:1;box-shadow:0 0 0 2px var(--bg-chrome);}
+.notif-badge[hidden]{display:none;}
+.notif-panel{position:fixed;right:16px;z-index:56;width:332px;max-width:calc(100vw - 24px);background:var(--surface-raised);border:1px solid var(--border-hover);border-radius:12px;box-shadow:0 22px 56px -18px rgba(0,0,0,.8);overflow:hidden;animation:toastIn .2s cubic-bezier(.2,.8,.2,1) both;}
+.ntf-head{display:flex;align-items:center;padding:11px 14px;border-bottom:1px solid var(--border-soft);}
+.ntf-h-ttl{flex:1;font-size:10px;letter-spacing:1.5px;color:var(--text-3);}
+.ntf-clear{font-size:10.5px;color:var(--text-3);background:transparent;border:none;cursor:pointer;}
+.ntf-clear:hover{color:var(--text-1);}
+.ntf-list{max-height:380px;overflow-y:auto;}
+.ntf-row{display:flex;align-items:flex-start;gap:10px;padding:11px 14px;border-bottom:1px solid var(--border-soft);}
+.ntf-row:last-child{border-bottom:none;}
+.ntf-row.clickable{cursor:pointer;}
+.ntf-row.clickable:hover{background:rgba(255,255,255,.03);}
+.ntf-row.unseen{background:rgba(74,222,128,.05);}
+.ntf-ic{flex:none;color:var(--green);display:inline-flex;padding-top:1px;}
+.ntf-bd{flex:1;min-width:0;display:flex;flex-direction:column;gap:2px;}
+.ntf-ttl{font-size:12px;color:var(--text-1);font-weight:600;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.ntf-tx{font-size:11px;color:var(--text-3);line-height:1.4;}
+.ntf-ts{font-size:9.5px;color:var(--text-4);margin-top:1px;}
+.ntf-go{flex:none;color:var(--text-4);display:inline-flex;align-self:center;}
+.ntf-row:hover .ntf-go{color:var(--green);}
+.ntf-empty{padding:24px 14px;text-align:center;font-size:11.5px;color:var(--text-4);display:flex;align-items:center;justify-content:center;gap:7px;}
+
+.cl-scrim{position:fixed;inset:0;z-index:58;background:var(--overlay);backdrop-filter:blur(3px);display:flex;align-items:center;justify-content:center;}
+.cl-card{width:min(560px,calc(100vw - 40px));max-height:calc(100vh - 80px);display:flex;flex-direction:column;background:var(--surface-card);border:1px solid var(--border-hover);border-radius:var(--radius);box-shadow:0 26px 64px -20px rgba(0,0,0,.8);animation:paletteIn .2s ease both;overflow:hidden;}
+.cl-head{flex:none;display:flex;align-items:center;gap:12px;padding:16px 18px;border-bottom:1px solid var(--border-soft);}
+.cl-eye{display:inline-flex;flex:none;}
+.cl-hh{flex:1;min-width:0;display:flex;flex-direction:column;gap:1px;}
+.cl-ttl{font-size:15px;font-weight:600;color:var(--text-1);}
+.cl-sub{font-size:11px;color:var(--text-3);overflow:hidden;text-overflow:ellipsis;white-space:nowrap;}
+.cl-body{flex:1;overflow-y:auto;padding:16px 20px;min-height:0;}
+.cl-h{font-size:12.5px;color:var(--text-1);letter-spacing:.3px;margin:14px 0 8px;font-weight:600;}
+.cl-h:first-child{margin-top:0;}
+.cl-p{font-size:12px;line-height:1.65;color:var(--text-2);margin:0 0 9px;}
+.cl-ul{margin:0 0 10px;padding:0;list-style:none;display:flex;flex-direction:column;gap:6px;}
+.cl-ul li{position:relative;padding-left:18px;font-size:12px;line-height:1.55;color:var(--text-2);}
+.cl-ul li::before{content:"";position:absolute;left:4px;top:7px;width:5px;height:5px;border-radius:50%;background:var(--green);}
+.cl-body code{font-family:'Geist Mono',monospace;font-size:11px;background:var(--surface-input);border:1px solid var(--border-soft);border-radius:4px;padding:1px 5px;color:var(--green);}
+.cl-pre{font-family:'Geist Mono',monospace;font-size:11px;background:var(--surface-input);border:1px solid var(--border-soft);border-radius:8px;padding:10px 12px;overflow-x:auto;color:var(--text-2);white-space:pre;margin:0 0 10px;}
+.cl-link{color:var(--green);cursor:pointer;text-decoration:underline;text-underline-offset:2px;}
+.cl-empty{color:var(--text-4);}
+.cl-foot{flex:none;display:flex;align-items:center;gap:10px;padding:13px 18px;border-top:1px solid var(--border-soft);background:rgba(0,0,0,.18);}
+
+/* ════════════════════════════════════════════════════════════════
+   TUTORIAL (coachmark spotlight) — recorte exacto + tarjeta. Responsive.
+   ════════════════════════════════════════════════════════════════ */
+.tour{position:fixed;inset:0;z-index:70;pointer-events:none;}
+.tour-block{position:fixed;inset:0;z-index:70;pointer-events:auto;}
+.tour.tour-centered .tour-block{background:rgba(8,8,11,.72);backdrop-filter:blur(2px);}
+.tour-spot{position:fixed;z-index:71;border-radius:11px;pointer-events:none;
+  box-shadow:0 0 0 9999px rgba(8,8,11,.74),0 0 0 1.5px var(--green),0 0 22px 3px rgba(74,222,128,.35);
+  transition:left .3s cubic-bezier(.2,.8,.2,1),top .3s cubic-bezier(.2,.8,.2,1),width .3s cubic-bezier(.2,.8,.2,1),height .3s cubic-bezier(.2,.8,.2,1);}
+.tour-pop{position:fixed;z-index:72;width:332px;max-width:calc(100vw - 24px);background:var(--surface-card);border:1px solid var(--border-hover);border-radius:14px;box-shadow:0 26px 64px -18px rgba(0,0,0,.82);padding:16px 17px 13px;pointer-events:auto;animation:tourPop .26s cubic-bezier(.2,.8,.2,1) both;}
+.tour-centered .tour-pop{left:50%!important;top:50%!important;width:420px;animation:tourPopC .28s cubic-bezier(.2,.8,.2,1) both;}
+@keyframes tourPop{from{opacity:0;transform:translateY(7px) scale(.98);}to{opacity:1;transform:translateY(0) scale(1);}}
+@keyframes tourPopC{from{opacity:0;transform:translate(-50%,-46%) scale(.98);}to{opacity:1;transform:translate(-50%,-50%) scale(1);}}
+.tour-pop-head{display:flex;align-items:center;gap:9px;margin-bottom:9px;}
+.tour-ic{display:inline-flex;color:var(--green);flex:none;}
+.tour-ttl{flex:1;font-size:14px;font-weight:600;color:var(--text-1);letter-spacing:.2px;}
+.tour-step{flex:none;font-size:10px;color:var(--text-4);font-family:'Geist Mono',monospace;}
+.tour-body{font-size:12px;line-height:1.65;color:var(--text-2);margin-bottom:13px;}
+.tour-body b{color:var(--text-1);font-weight:600;}
+.tour-body code{font-family:'Geist Mono',monospace;font-size:11px;background:var(--surface-input);border-radius:4px;padding:1px 5px;color:var(--green);}
+/* footer en DOS filas: puntos arriba, botones abajo (saltar a la izquierda,
+   anterior/siguiente a la derecha). Así "siguiente" nunca desborda la tarjeta. */
+.tour-foot{display:flex;flex-direction:column;gap:12px;}
+.tour-dots{display:flex;gap:5px;align-items:center;}
+.tour-dot{width:6px;height:6px;border-radius:50%;background:var(--border-hover);transition:.2s;}
+.tour-dot.done{background:var(--green-deep);}
+.tour-dot.on{background:var(--green);box-shadow:0 0 6px rgba(74,222,128,.6);transform:scale(1.18);}
+.tour-actrow{display:flex;align-items:center;gap:8px;}
+.tour-btn{display:inline-flex;align-items:center;gap:4px;height:30px;padding:0 12px;border-radius:8px;font-family:'Geist Mono',monospace;font-size:11.5px;white-space:nowrap;cursor:pointer;border:1px solid transparent;transition:.13s;}
+.tour-skip{background:transparent;color:var(--text-4);padding:0 6px;margin-right:auto;}
+.tour-skip:hover{color:var(--text-2);}
+.tour-ghost{background:var(--surface-input);border-color:rgba(255,255,255,.07);color:var(--text-2);}
+.tour-ghost:hover{color:var(--text-1);border-color:var(--border-hover);}
+.tour-next{background:var(--green);color:#08160d;font-weight:600;}
+.tour-next:hover{filter:brightness(1.08);}
+.tour-arrow{position:absolute;width:12px;height:12px;background:var(--surface-card);border:1px solid var(--border-hover);transform:rotate(45deg);display:none;}
+.tour-arrow--bottom{top:-7px;border-right:none;border-bottom:none;}
+.tour-arrow--top{bottom:-7px;border-left:none;border-top:none;}
+.tour-arrow--right{left:-7px;border-top:none;border-right:none;}
+.tour-arrow--left{right:-7px;border-bottom:none;border-left:none;}
+/* en pantallas chicas la tarjeta del tour no se va de borde */
+@media (max-width:560px){ .tour-pop{width:calc(100vw - 24px);} }

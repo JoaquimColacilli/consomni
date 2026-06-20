@@ -26,6 +26,16 @@
   var sessions = new Map();    // sid   -> pane
   var paneSeq = 0;
   var focused = null;
+  // "comandos rápidos": atajos deterministas (insertan al toque, gratis) + traducción
+  // por lenguaje natural con tu claude LOCAL. Siempre visibles en las terminales.
+  var ASK_PRESETS = [
+    { label: 'crear carpeta…', q: 'crear una carpeta llamada ' },
+    { label: 'git status', cmd: 'git status' },
+    { label: 'últimos commits', cmd: 'git log --oneline -15' },
+    { label: 'listar por tamaño', cmd: 'Get-ChildItem | Sort-Object Length -Descending' },
+    { label: 'árbol de archivos', cmd: 'Get-ChildItem -Recurse -Name' },
+    { label: 'buscar archivo…', q: 'buscar archivos cuyo nombre contenga ' }
+  ];
   var bound = false, snapBound = false, restoring = false;
   var view = '__home__';       // vista activa: '__home__' (inicio) o id de proyecto (projKey)
   var viewCwd = '';            // cwd por defecto para terminales nuevas en la vista de proyecto
@@ -146,6 +156,8 @@
           '<button class="dk-newbtn dk-new-claude" title="nueva sesión claude">' + svg('dispatch', 12, 2) + ' claude</button>' +
           '<button class="dk-newbtn dk-new-claude-skip" title="claude SIN permisos (--dangerously-skip-permissions)">' + svg('dispatch', 12, 2) + ' claude ⚡</button>' +
           '<span class="dk-div"></span>' +
+          '<button class="dk-newbtn dk-new-cmd" title="comandos rápidos: atajos (crear carpeta, git status…) + describilo en castellano y lo traduce tu claude">' + svg('dispatch', 12, 2) + ' comandos</button>' +
+          '<span class="dk-div"></span>' +
           '<button class="dk-newbtn dk-exit" title="salir de pantalla completa (volver al board)">' + svg('chevD', 13, 2.4) + ' salir</button>' +
           '<button class="dk-pb dk-max" title="pantalla completa / restaurar">' + maxIcon() + '</button>' +
           '<button class="dk-pb dk-min" title="minimizar / ocultar">' + svg('chevD', 15, 2.4) + '</button>' +
@@ -161,6 +173,7 @@
     host.querySelector('.dk-new-term').addEventListener('click', function () { spawn('shell'); });
     host.querySelector('.dk-new-claude').addEventListener('click', function () { spawn('claude'); });
     host.querySelector('.dk-new-claude-skip').addEventListener('click', function () { spawn('claude', null, null, { skip: true }); });
+    host.querySelector('.dk-new-cmd').addEventListener('click', openQuickCommands);
     host.querySelector('.dk-exit').addEventListener('click', function () { host.classList.remove('maximized'); notifyMax(); refitSoon(); persist(); });
     host.querySelector('.dk-max').addEventListener('click', toggleMax);
     host.querySelector('.dk-min').addEventListener('click', toggleMin);
@@ -287,6 +300,7 @@
         '<span class="dk-pane-ic"></span>' +
         '<span class="dk-pane-title">…</span>' +
         '<span class="dk-pane-btns">' +
+          '<button class="dk-pbtn dk-ask-btn" title="comandos rápidos (atajos + IA local)">' + svg('dispatch', 12, 1.8) + '</button>' +
           '<button class="dk-pbtn dk-pin" title="fijar en inicio (★ favorito)">' + svg('star', 12, 1.8) + '</button>' +
           '<button class="dk-pbtn dk-split-r" title="dividir a la derecha">' + splitRIcon() + '</button>' +
           '<button class="dk-pbtn dk-split-d" title="dividir abajo">' + splitDIcon() + '</button>' +
@@ -295,6 +309,7 @@
       '</div>' +
       '<div class="dk-pane-body"></div>';
     pane.addEventListener('mousedown', function () { setFocus(pane); });
+    pane.querySelector('.dk-ask-btn').addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); toggleAsk(pane); });
     pane.querySelector('.dk-pin').addEventListener('click', function (e) { e.stopPropagation(); pinToggle(pane); });
     pane.querySelector('.dk-split-r').addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); spawn('shell', null, 'right'); });
     pane.querySelector('.dk-split-d').addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); spawn('shell', null, 'down'); });
@@ -441,6 +456,76 @@
         persist();
       }).catch(function () { term.write('\r\n  \x1b[31mfalló el IPC\x1b[0m\r\n'); });
     });
+  }
+
+  /* ── helper "comando por lenguaje natural" (tipo Warp `#`) ──
+     Barra inline sobre la terminal: escribís en castellano, claude LOCAL lo
+     traduce a UN comando y se INSERTA en la PTY (sin \r) → el usuario revisa
+     y aprieta Enter. NUNCA auto-ejecuta (toda la seguridad está en el insert). */
+  function setNlEnabled() { /* el feature ahora es SIEMPRE visible (ver CSS .dk-ask-btn); no-op por compat */ }
+  // insertar texto en la PTY SIN \r (insert-don't-exec): el usuario revisa y aprieta Enter
+  function insertCmd(pane, text) {
+    var tid = pane.dataset.tid;
+    if (tid && api && api.term && api.term.write) api.term.write(tid, text);
+    var t = terms.get(tid); if (t) { try { t.term.focus(); } catch (e) {} }
+  }
+  // abre "comandos rápidos" en la terminal enfocada (o la 1ª, o spawnea una)
+  function openQuickCommands() {
+    ensureDock(); show();
+    var isTerm = function (p) { return p && (p.dataset.kind === 'shell' || p.dataset.kind === 'claude'); };
+    var pane = (isTerm(focused) && rootEl.contains(focused)) ? focused : panesOf().filter(isTerm)[0];
+    if (pane) { setFocus(pane); var ex = pane.querySelector('.dk-ask'); if (ex) { var i = ex.querySelector('.dk-ask-inp'); if (i) i.focus(); } else toggleAsk(pane); return; }
+    spawn('shell');
+    setTimeout(function () { var np = panesOf().filter(isTerm)[0]; if (np) toggleAsk(np); }, 450);
+  }
+  function toggleAsk(pane) {
+    var kind = pane.dataset.kind;
+    if (kind !== 'shell' && kind !== 'claude') { notifier('los comandos rápidos son para terminales', 'warn'); return; }
+    var existing = pane.querySelector('.dk-ask');
+    if (existing) { existing.remove(); refitAll(); return; }
+    var bar = document.createElement('div');
+    bar.className = 'dk-ask';
+    var chips = ASK_PRESETS.map(function (p, i) { return '<button class="dk-preset" data-pi="' + i + '">' + esc(p.label) + '</button>'; }).join('');
+    bar.innerHTML =
+      '<div class="dk-ask-row">' +
+        '<span class="dk-ask-ic">' + svg('dispatch', 13, 1.8) + '</span>' +
+        '<input class="dk-ask-inp" placeholder="describí lo que querés y lo traduce tu claude… (ej: borrar todos los .log)" spellcheck="false">' +
+        '<button class="dk-ask-go" title="traducir con tu claude local (~5s, usa tu uso de claude)">' + svg('enter', 12, 2) + ' traducir</button>' +
+        '<button class="dk-ask-x" title="cerrar (Esc)">' + svg('x', 12, 2) + '</button>' +
+      '</div>' +
+      '<div class="dk-ask-presets">' + chips +
+        '<span class="dk-ask-msg">se INSERTA, no se ejecuta · revisás y Enter</span>' +
+      '</div>';
+    var head = pane.querySelector('.dk-pane-head');
+    pane.insertBefore(bar, head.nextSibling);
+    var inp = bar.querySelector('.dk-ask-inp'), go = bar.querySelector('.dk-ask-go'), msg = bar.querySelector('.dk-ask-msg');
+    function close() { bar.remove(); refitAll(); var t = terms.get(pane.dataset.tid); if (t) { try { t.term.focus(); } catch (e) {} } }
+    function run() {
+      var q = (inp.value || '').trim();
+      if (!q) { inp.focus(); return; }
+      if (!api || !api.term || !api.term.nl) { msg.textContent = 'no disponible'; msg.className = 'dk-ask-msg err'; return; }
+      bar.classList.add('busy'); go.disabled = true; inp.disabled = true; msg.className = 'dk-ask-msg'; msg.textContent = 'traduciendo con tu claude… (~5s)';
+      api.term.nl(q, pane.dataset.cwd || undefined).then(function (r) {
+        bar.classList.remove('busy'); go.disabled = false; inp.disabled = false;
+        if (!r || !r.ok) { msg.textContent = (r && r.error) || 'no se pudo'; msg.className = 'dk-ask-msg err'; try { inp.focus(); } catch (e) {} return; }
+        insertCmd(pane, r.command);   // SIN \r → insertar; revisás y Enter vos
+        notifier('comando insertado · revisá y apretá Enter');
+        close();
+      }).catch(function () { bar.classList.remove('busy'); go.disabled = false; inp.disabled = false; msg.textContent = 'error'; msg.className = 'dk-ask-msg err'; });
+    }
+    // presets: cmd = determinista (inserta al toque, gratis) · q = prellena el input (IA)
+    bar.querySelector('.dk-ask-presets').addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('.dk-preset'); if (!b) return;
+      e.stopPropagation();
+      var p = ASK_PRESETS[+b.getAttribute('data-pi')]; if (!p) return;
+      if (p.cmd) { insertCmd(pane, p.cmd); notifier('comando insertado · revisá y apretá Enter'); close(); }
+      else { inp.value = p.q || ''; inp.focus(); try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (e2) {} }
+    });
+    go.addEventListener('click', function (e) { e.stopPropagation(); run(); });
+    bar.querySelector('.dk-ask-x').addEventListener('click', function (e) { e.stopPropagation(); close(); });
+    inp.addEventListener('keydown', function (e) { e.stopPropagation(); if (e.key === 'Enter') { e.preventDefault(); run(); } else if (e.key === 'Escape') { e.preventDefault(); close(); } });
+    refitAll();
+    setTimeout(function () { try { inp.focus(); } catch (e) {} }, 0);
   }
 
   /* ── panel de SESIÓN ── */
@@ -668,6 +753,7 @@
     isOpen: isOpen, count: count, refreshActive: refreshActive,
     setNotifier: setNotifier, setActionHandler: setActionHandler, setMaxObserver: setMaxObserver,
     restoreSession: restoreSession, isMaximized: isMaximized, getView: function () { return view; },
-    resumeSession: resumeSession, setBoardChecker: setBoardChecker, setCloseConfirmer: setCloseConfirmer
+    resumeSession: resumeSession, setBoardChecker: setBoardChecker, setCloseConfirmer: setCloseConfirmer,
+    setNlEnabled: setNlEnabled
   };
 })(window);

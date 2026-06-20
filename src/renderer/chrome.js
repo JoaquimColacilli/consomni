@@ -54,7 +54,8 @@
     grid:   '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
     dispatch:'<polyline points="4 7 8 11 4 15"/><line x1="10" y1="16" x2="15" y2="16"/><path d="M18.5 3.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"/>',
     eye:    '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
-    download:'<path d="M12 3v12"/><polyline points="7 11 12 16 17 11"/><path d="M5 20h14"/>'
+    download:'<path d="M12 3v12"/><polyline points="7 11 12 16 17 11"/><path d="M5 20h14"/>',
+    tasks:  '<polyline points="3.5 7 5.5 9 8.5 5"/><polyline points="3.5 16 5.5 18 8.5 14"/><line x1="11" y1="7" x2="20" y2="7"/><line x1="11" y1="17" x2="20" y2="17"/>'
   };
   function svg(name, sz, sw) {
     sz = sz || 14; sw = sw || 1.7;
@@ -172,7 +173,7 @@
     const searchTxt = o.searchValue ? o.searchValue : 'buscar nombre / proyecto / branch…';
 
     return '<header class="topbar">' +
-      '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span><span class="brand-ver">' + esc(o.version || 'v1.2.5') + '</span></div>' +
+      '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span><span class="brand-ver">' + esc(o.version || 'v1.3.0') + '</span></div>' +
       '<div class="divider-v"></div>' +
       '<div class="counters">' +
         '<span><b>' + total + '</b> sesiones</span><span class="sep">·</span>' +
@@ -193,7 +194,7 @@
         '<span class="upbtn-ic">' + svg('download', 13, 2) + '</span>' +
         '<span class="upbtn-tx">Actualizar</span>' +
       '</button>' +
-      '<button class="iconbtn" title="notificaciones">' + svg('bell', 15, 1.7) + '</button>' +
+      '<button class="iconbtn notif-bell" title="notificaciones" data-act="notifs">' + svg('bell', 15, 1.7) + '<span class="notif-badge" hidden></span></button>' +
       '<button class="cmdk"><kbd class="kbd">⌘</kbd><kbd class="kbd">K</kbd></button>' +
     '</header>';
   }
@@ -257,6 +258,7 @@
       return '<aside class="sidebar collapsed">' +
         '<div class="sb-head" style="justify-content:center;padding:15px 0 11px;"><button class="sb-add" style="padding:5px;">' + svg('plus', 13, 2.4) + '</button></div>' +
         '<div class="ci ci-home' + ((tree && tree.home) ? ' active' : '') + '" data-act="home" title="inicio · terminales" style="margin:0 auto 6px;">' + svg('grid', 17, 1.8) + '</div>' +
+        '<div class="ci ci-plans' + ((tree && tree.plans) ? ' active' : '') + '" data-act="plans" title="planes · frentes (pendiente vs hecho)" style="margin:0 auto 6px;">' + svg('tasks', 17, 1.8) + '</div>' +
         '<div class="sb-scroll" style="gap:6px;">' + items + '</div>' +
         '<div class="sb-foot" style="flex-direction:column;gap:7px;padding:10px 0;">' +
           '<button class="sbtn sb-toggle" data-act="sbtoggle" title="expandir sidebar">' + svg('chevR', 15, 2.4) + '</button>' +
@@ -269,7 +271,7 @@
 
     let body;
     if (tree) {
-      const all = sbItem({ isAll: true, active: !tree.home && (!tree.active || tree.active === 'all') });
+      const all = sbItem({ isAll: true, active: !tree.home && !tree.plans && (!tree.active || tree.active === 'all') });
       const groups = (tree.groups || []).map(function (gr) {
         const head = '<div class="sb-group">' + esc(gr.label) + '</div>';
         const rows = (gr.items || []).map(function (it) { return sbItem(it, false); }).join('');
@@ -295,6 +297,7 @@
 
     return '<aside class="sidebar">' +
       '<div class="sb-home' + ((tree && tree.home) ? ' active' : '') + '" data-act="home" title="tus terminales abiertas (pantalla completa)">' + svg('grid', 14, 1.8) + '<span class="nm">inicio</span><span class="sb-home-tag">terminales</span></div>' +
+      '<div class="sb-home sb-plans' + ((tree && tree.plans) ? ' active' : '') + '" data-act="plans" title="planes y specs detectados · pendiente vs hecho">' + svg('tasks', 14, 1.8) + '<span class="nm">planes</span><span class="sb-home-tag">frentes</span></div>' +
       '<div class="sb-head"><span class="lbl">proyectos</span>' +
         '<button class="sb-add">' + svg('plus', 11, 2.4) + ' agregar</button></div>' +
       '<div class="sb-scroll">' + body + '</div>' +
@@ -305,7 +308,7 @@
         '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
         '<button class="sbtn" data-act="theme">' + svg('moon', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v1.2.5') + '</span></div>' +
+        '<span class="ver">' + esc(o.version || 'v1.3.0') + '</span></div>' +
     '</aside>';
   }
 

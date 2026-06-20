@@ -154,6 +154,7 @@ export async function runAction(name: string, p: ActionPayload): Promise<ActionR
     case 'branch': return copy(p.branch || '', 'branch');
     case 'copyId': return copy(p.id || '', 'session id');
     case 'transcript': return openFile(p.file || '');
+    case 'openDoc': return openFile(p.file || '');
     case 'openExternal': return openExternal(p.url || '');
     default: return { ok: false, error: 'acción desconocida: ' + name };
   }

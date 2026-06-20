@@ -26,6 +26,9 @@ const api = {
 
   /* ── detalle / estado local ── */
   getSessionDetail: (id: string): Promise<Snapshot> => ipcRenderer.invoke('consomni:getSessionDetail', id),
+  /** Docs de plan/spec (markdown) por cwd → tablero de Planes. */
+  getPlanDocs: (cwds: string[]): Promise<Record<string, Array<{ path: string; name: string; mtime: number }>>> =>
+    ipcRenderer.invoke('consomni:getPlanDocs', cwds),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   setLocalState: (id: string, patch: any): Promise<Snapshot> => ipcRenderer.invoke('consomni:setLocalState', { id, patch }),
 
@@ -85,6 +88,9 @@ const api = {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     create: (opts: any): Promise<any> => ipcRenderer.invoke('consomni:termCreate', opts),
     write: (id: string, data: string): void => ipcRenderer.send('consomni:termWrite', { id, data }),
+    /** Traducir lenguaje natural → comando (claude local). Devuelve {ok,command} o {ok:false,error}. */
+    nl: (text: string, cwd?: string): Promise<{ ok: boolean; command?: string; error?: string }> =>
+      ipcRenderer.invoke('consomni:nlCommand', { text, cwd }),
     resize: (id: string, cols: number, rows: number): void => ipcRenderer.send('consomni:termResize', { id, cols, rows }),
     kill: (id: string): Promise<boolean> => ipcRenderer.invoke('consomni:termKill', id),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -21,6 +21,16 @@ export interface AppConfig {
   checkUpdates: boolean;       // chequeo de updates al iniciar (sólo al repo del proyecto, opt-out)
   keptProjects: string[];      // proyectos "fijados" al sidebar (projKey) → no caen a archivados aunque no tengan sesiones activas
   confirmCloseTerminal: boolean; // avisar antes de cerrar una terminal viva (corta el proceso); "no volver a mostrar" lo apaga
+  nlHelper: boolean;           // helper de comando por lenguaje natural en las terminales (claude local; opt-in, default off)
+  nlModel: string;             // modelo para el helper NL ('haiku' por costo/latencia)
+  frentes: Record<string, FrenteMeta>; // estado MANUAL de cada frente (proyecto) — privado, local. key = projKey
+}
+
+/** Estado manual y privado de un "frente" (= proyecto) en el tablero de Planes. */
+export interface FrenteMeta {
+  status?: string;   // '', 'backlog', 'dev', 'idea', 'pausado', 'listo'
+  note?: string;     // nota / idea privada (nunca sale de la máquina)
+  updated?: number;
 }
 
 export const HOME = os.homedir();
@@ -47,6 +57,9 @@ const DEFAULTS: AppConfig = {
   checkUpdates: true,
   keptProjects: [],
   confirmCloseTerminal: true,
+  nlHelper: false,
+  nlModel: 'haiku',
+  frentes: {},
 };
 
 function ensureDir(p: string): void {

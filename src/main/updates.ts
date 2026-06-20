@@ -28,6 +28,9 @@ export interface UpdateInfo {
   latest: string | null;
   hasUpdate: boolean;
   url: string;
+  notes?: string;      // cuerpo del release (changelog markdown) — para el modal de novedades
+  name?: string;       // título del release
+  publishedAt?: string;
   error?: string;
 }
 
@@ -83,6 +86,9 @@ export function checkForUpdate(): Promise<UpdateInfo> {
               latest: tag || null,
               hasUpdate: tag ? isNewer(tag, current) : false,
               url: json.html_url || RELEASES_URL,
+              notes: typeof json.body === 'string' ? json.body : undefined,
+              name: typeof json.name === 'string' ? json.name : undefined,
+              publishedAt: typeof json.published_at === 'string' ? json.published_at : undefined,
             });
           } catch {
             finish({ error: 'parse' });
@@ -112,6 +118,16 @@ function send(channel: string, data?: unknown): void {
   if (win && !win.isDestroyed()) win.webContents.send(channel, data);
 }
 
+/** electron-updater entrega releaseNotes como string O array {version,note}: lo aplanamos a texto. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function normalizeNotes(notes: any): string | undefined {
+  if (!notes) return undefined;
+  if (typeof notes === 'string') return notes;
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  if (Array.isArray(notes)) return notes.map((n: any) => (n && n.version ? '## ' + n.version + '\n' : '') + ((n && n.note) || '')).join('\n\n');
+  return undefined;
+}
+
 /** Arranca el flujo de auto-update: wiring de eventos + chequeo inicial + polling.
  *  No hace nada en dev (no empaquetado) ni si el usuario lo desactivó (opt-out). */
 export function initAutoUpdate(winGetter: () => BrowserWindow | null, enabled: boolean): void {
@@ -124,8 +140,9 @@ export function initAutoUpdate(winGetter: () => BrowserWindow | null, enabled: b
 
   if (!auWired) {
     auWired = true;
-    autoUpdater.on('update-available', (info: { version?: string }) => {
-      send('consomni:update-available', { latest: info && info.version, current: app.getVersion(), url: RELEASES_URL });
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    autoUpdater.on('update-available', (info: any) => {
+      send('consomni:update-available', { latest: info && info.version, current: app.getVersion(), url: RELEASES_URL, notes: normalizeNotes(info && info.releaseNotes), name: (info && info.releaseName) || undefined });
     });
     autoUpdater.on('update-not-available', () => send('consomni:update-none', {}));
     autoUpdater.on('download-progress', (p: { percent?: number; transferred?: number; total?: number; bytesPerSecond?: number }) => {

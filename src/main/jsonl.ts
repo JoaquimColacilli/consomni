@@ -10,12 +10,17 @@ import * as fs from 'fs';
 import * as path from 'path';
 import type {
   Session, SessionMode, SessionState, ToolCall, LocalSessionState,
+  SessionPlan, PlanTodo, TodoStatus,
 } from './types';
 
-/* ── lectura eficiente: archivos chicos enteros; grandes, head+tail ── */
+/* ── lectura eficiente: archivos chicos enteros; grandes, head+tail ──
+   El tail es ancho (640KB) para que la detección de planes/tareas (collectPlan)
+   alcance el ÚLTIMO TodoWrite aunque la conversación haya seguido un buen rato
+   después; ExitPlanMode suele estar en el head (plan mode = arranque). En
+   transcripts gigantes (>varios MB) el medio queda fuera → limitación conocida. */
 const MAX_FULL = 1_500_000; // 1.5MB
 const HEAD_BYTES = 96 * 1024;
-const TAIL_BYTES = 384 * 1024;
+const TAIL_BYTES = 640 * 1024;
 
 interface Chunks { head: string[]; tail: string[]; }
 
@@ -154,6 +159,70 @@ function collectToolCalls(recs: Rec[], max: number): ToolCall[] {
   return calls.slice(-max);
 }
 
+/* ── planes / tareas detectados desde los tool_use del transcript ──
+   ExitPlanMode → se presentó un plan (el texto del plan NO está en el .jsonl;
+   vive en ~/.claude/plans o en el turno previo). TodoWrite → snapshot completo
+   (se REEMPLAZA en cada llamada: vale el ÚLTIMO). Task* (Claude Code 2.1.142+)
+   reemplaza a TodoWrite: lo reconstruimos por taskId, defensivo a field-repair. */
+const MAX_TODOS = 60;
+function isTodoStatus(s: unknown): s is TodoStatus {
+  return s === 'pending' || s === 'in_progress' || s === 'completed';
+}
+function normTodo(t: Rec): PlanTodo | null {
+  if (!t) return null;
+  const content = String(t.content ?? t.text ?? t.title ?? '').trim();
+  if (!content) return null;
+  const status: TodoStatus = isTodoStatus(t.status) ? t.status : 'pending';
+  const activeForm = t.activeForm || t.active_form;
+  return { content: content.slice(0, 200), status, activeForm: activeForm ? String(activeForm).slice(0, 200) : undefined };
+}
+export function collectPlan(recs: Rec[]): SessionPlan {
+  let hasPlan = false, planAt = 0;
+  let todoSnap: PlanTodo[] | null = null, todoAt = 0;
+  const taskMap = new Map<string, PlanTodo>();
+  let taskAt = 0;
+  for (const r of recs) {
+    if (r.type !== 'assistant') continue;
+    const content = r.message?.content;
+    if (!Array.isArray(content)) continue;
+    const ts = Date.parse(r.timestamp || '') || 0;
+    for (const b of content) {
+      if (!b || b.type !== 'tool_use') continue;
+      const name = String(b.name || '');
+      if (name === 'ExitPlanMode') { hasPlan = true; if (ts >= planAt) planAt = ts; }
+      else if (name === 'TodoWrite') {
+        const todos = b.input?.todos;
+        if (Array.isArray(todos)) { todoSnap = todos.map(normTodo).filter((x: PlanTodo | null): x is PlanTodo => !!x); todoAt = ts; }
+      } else if (name === 'TaskCreate' || name === 'TaskUpdate') {
+        const inp = b.input || {};
+        const tid = String(inp.taskId || inp.id || inp.task_id || '');
+        if (!tid) continue;
+        const prev: PlanTodo = taskMap.get(tid) || { content: '', status: 'pending' };
+        const c = inp.content || inp.prompt || inp.description;
+        if (c && !prev.content) prev.content = String(c).slice(0, 200);
+        else if (c) prev.content = String(c).slice(0, 200);
+        if (isTodoStatus(inp.status)) prev.status = inp.status;
+        const af = inp.activeForm || inp.active_form;
+        if (af) prev.activeForm = String(af).slice(0, 200);
+        if (prev.content) taskMap.set(tid, prev);
+        taskAt = ts;
+      }
+    }
+  }
+  // fuente más reciente gana (Task* vs TodoWrite)
+  let todos: PlanTodo[];
+  if (taskMap.size && taskAt >= todoAt) todos = Array.from(taskMap.values());
+  else todos = todoSnap || [];
+  todos = todos.slice(0, MAX_TODOS);
+  let pending = 0, inProgress = 0, completed = 0;
+  for (const t of todos) {
+    if (t.status === 'completed') completed++;
+    else if (t.status === 'in_progress') inProgress++;
+    else pending++;
+  }
+  return { hasPlan, planAt: planAt || undefined, todos, pending, inProgress, completed, todoAt: Math.max(todoAt, taskAt) || undefined };
+}
+
 const ACTIVE_MS = 90 * 1000;       // < 90s sin hooks ⇒ "working"
 const IDLE_MS = 24 * 60 * 60 * 1000; // > 24h ⇒ "closed" (a cerradas)
 
@@ -271,6 +340,10 @@ export function parseSessionFile(
     pinned: local?.pinned,
     stateSource: 'jsonl',
   };
+  // planes / tareas detectados (sólo se adjunta si hay alguno → snapshot liviano)
+  const plan = collectPlan(all);
+  if (plan.hasPlan || plan.todos.length) session.plan = plan;
+
   // adjuntamos el "kind" para que el renderer elija el lead del status sin recomputar
   (session as Session & { statusKind?: string }).statusKind = statusKind;
   return session;

@@ -18,6 +18,31 @@ export interface SubagentInfo {
   agentType?: string;
 }
 
+/* ── planes / specs detectados desde el transcript (read-only) ──
+   ExitPlanMode = "se presentó un plan"; TodoWrite/Task* = checklist
+   pendiente/en curso/hecho. Todo sale de los .jsonl que ya leemos. */
+export type TodoStatus = 'pending' | 'in_progress' | 'completed';
+export interface PlanTodo {
+  content: string;
+  status: TodoStatus;
+  activeForm?: string;
+}
+/** Documento de plan/spec (markdown) hallado en el repo (glob, read-only). */
+export interface PlanDoc {
+  path: string;
+  name: string;
+  mtime: number;
+}
+export interface SessionPlan {
+  hasPlan: boolean;        // se vio ExitPlanMode (plan presentado)
+  planAt?: number;         // ts del último ExitPlanMode
+  todos: PlanTodo[];       // último snapshot de TodoWrite / Task*
+  pending: number;
+  inProgress: number;
+  completed: number;
+  todoAt?: number;         // ts de la última actualización de tareas
+}
+
 export interface Session {
   id: string;
   name: string;
@@ -42,6 +67,7 @@ export interface Session {
   cost?: number;
   subagents?: SubagentInfo[];
   lastToolCalls?: ToolCall[];
+  plan?: SessionPlan;     // planes/tareas detectados (sólo si hay alguno)
   fav?: boolean;
   pinned?: boolean;
   selected?: boolean;

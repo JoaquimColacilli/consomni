@@ -10,10 +10,11 @@
    el resto de la app sigue funcionando y avisamos por toast).
    ════════════════════════════════════════════════════════════════ */
 import { BrowserWindow } from 'electron';
-import { execFileSync } from 'child_process';
+import { execFile, execFileSync } from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
+import { loadConfig } from './config';
 
 // Tipos mínimos (evita acoplar el build al .d.ts del fork).
 interface IPty {
@@ -155,4 +156,71 @@ export function listTerms(): Array<{ id: string; title: string; cwd: string; kin
 export function killAllTerms(): void {
   for (const t of terms.values()) { try { t.proc.kill(); } catch { /* noop */ } }
   terms.clear();
+}
+
+/* ════════════════════════════════════════════════════════════════
+   Helper "comando por lenguaje natural" (tipo Warp `#`), con el CLI
+   LOCAL de claude. NO es API de Anthropic: spawneamos el `claude` del
+   usuario (mismo patrón que el dock) en modo print one-shot, forzado a
+   TRADUCIR (nunca actuar) y a devolver UNA sola línea de comando.
+   El renderer lo INSERTA en la PTY (sin \r) → el usuario revisa y Enter.
+   ════════════════════════════════════════════════════════════════ */
+export interface NlResult { ok: boolean; command?: string; error?: string; }
+
+const NL_SYS =
+  'You are a shell command translator, not an agent. Translate the user request into ONE single ' +
+  'Windows PowerShell command line that accomplishes it in the current directory. Output ONLY the ' +
+  'command: no explanation, no prose, no markdown, no code fences, no backticks, exactly one line. ' +
+  'Never call tools, never read or write files yourself — only emit the command text. If the request ' +
+  'is impossible or not a shell task, output exactly: # no-op';
+
+function sanitizeCommand(s: string): string {
+  if (!s) return '';
+  let t = String(s).replace(/```[a-zA-Z]*\s*/g, '').replace(/```/g, '').trim();
+  t = (t.split(/\r?\n/).map((x) => x.trim()).filter(Boolean)[0]) || '';
+  if (!t || /^#\s*no-?op/i.test(t)) return '';
+  t = t.replace(/^\$\s+/, '').replace(/^PS\b[^>]*>\s*/i, '').replace(/^`+|`+$/g, '').trim();
+  return t.slice(0, 600);
+}
+
+let claudeBin: string | null | undefined;
+function resolveClaude(): string | null {
+  if (claudeBin !== undefined) return claudeBin;
+  claudeBin = which('claude') || which('claude.exe') || which('claude.cmd') || null;
+  return claudeBin;
+}
+
+export function nlToCommand(text: string, cwd?: string): Promise<NlResult> {
+  return new Promise((resolve) => {
+    const prompt = String(text || '').trim().slice(0, 400);
+    if (!prompt) return resolve({ ok: false, error: 'pedido vacío' });
+    const claude = resolveClaude();
+    if (!claude) return resolve({ ok: false, error: 'claude no está en PATH' });
+    const model = loadConfig().nlModel || 'haiku';
+    const wd = (cwd && (() => { try { return fs.statSync(cwd).isDirectory(); } catch { return false; } })()) ? cwd : os.homedir();
+    const env: NodeJS.ProcessEnv = { ...process.env };
+    delete env.ELECTRON_RUN_AS_NODE;     // rompería al CLI si corre bajo el host del agente
+    const args = [
+      '-p', prompt,
+      '--model', model,
+      '--append-system-prompt', NL_SYS,
+      '--disallowedTools', 'Bash,Read,Edit,Write,MultiEdit,Glob,Grep,WebFetch,WebSearch,Task',
+      '--output-format', 'json',
+    ];
+    let done = false;
+    const child = execFile(claude, args, { cwd: wd, env, windowsHide: true, timeout: 30000, maxBuffer: 8 * 1024 * 1024 },
+      (err, stdout, stderr) => {
+        if (done) return; done = true;
+        const raw = String(stdout || '').trim();
+        if (!raw) return resolve({ ok: false, error: 'claude no respondió: ' + String((stderr || (err && err.message) || '')).slice(0, 100) });
+        let result = '';
+        try { const j = JSON.parse(raw); result = String(j.result || j.text || j.content || '').trim(); }
+        catch { result = raw; }
+        const cmd = sanitizeCommand(result);
+        if (!cmd) return resolve({ ok: false, error: 'no obtuve un comando' });
+        resolve({ ok: true, command: cmd });
+      });
+    // cerrar stdin: `claude -p` si no, espera ~3s a que llegue algo por stdin
+    try { if (child.stdin) child.stdin.end(); } catch { /* noop */ }
+  });
 }

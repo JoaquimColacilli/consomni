@@ -5,13 +5,13 @@
    ════════════════════════════════════════════════════════════════ */
 import { app, BrowserWindow, ipcMain, session, Notification, dialog } from 'electron';
 import * as path from 'path';
-import { start as startSessions, stop as stopSessions, buildSnapshot, rescanNow, setHooksConnected, applyHookEvent, getDetail, findSessionFile, setAttnCallback, restartWatcher, type AttnInfo } from './sessions';
+import { start as startSessions, stop as stopSessions, buildSnapshot, rescanNow, setHooksConnected, applyHookEvent, getDetail, findSessionFile, findPlanDocs, setAttnCallback, restartWatcher, type AttnInfo } from './sessions';
 import { runAction, type ActionPayload } from './actions';
 import { startHooksServer, stopHooksServer, isServerListening } from './hooks-server';
 import { install as installHooks, uninstall as uninstallHooks, getStatus as getHooksStatus, isInstalled } from './hooks-install';
 import { loadConfig, saveConfig, setLocalState, loadDock, saveDock, type AppConfig } from './config';
 import { checkForUpdate, initAutoUpdate, triggerAutoCheck, downloadUpdate } from './updates';
-import { setTerminalWindow, createTerm, writeTerm, resizeTerm, killTerm, listTerms, killAllTerms, terminalsAvailable } from './terminals';
+import { setTerminalWindow, createTerm, writeTerm, resizeTerm, killTerm, listTerms, killAllTerms, terminalsAvailable, nlToCommand } from './terminals';
 import type { Snapshot, LocalSessionState } from './types';
 
 const RENDERER_DIR = path.join(__dirname, '..', '..', 'src', 'renderer');
@@ -138,6 +138,15 @@ if (!gotLock) {
     ipcMain.handle('consomni:getSnapshot', () => buildSnapshot());
     ipcMain.handle('consomni:rescan', () => rescanNow());
     ipcMain.handle('consomni:getSessionDetail', (_e, id: string) => getDetail(String(id)));
+    // docs de plan/spec (markdown) por cwd → tablero de Planes (read-only, on-demand)
+    ipcMain.handle('consomni:getPlanDocs', (_e, cwds: string[]) => {
+      const out: Record<string, ReturnType<typeof findPlanDocs>> = {};
+      (Array.isArray(cwds) ? cwds : []).slice(0, 40).forEach((c) => { const cc = String(c || ''); if (cc && !(cc in out)) out[cc] = findPlanDocs(cc); });
+      return out;
+    });
+    // comando por lenguaje natural → claude LOCAL (print one-shot, translate-only). Devuelve {ok,command}.
+    ipcMain.handle('consomni:nlCommand', (_e, arg: { text: string; cwd?: string }) =>
+      nlToCommand(String(arg?.text || ''), arg?.cwd ? String(arg.cwd) : undefined));
     ipcMain.handle('consomni:setLocalState', (_e, arg: { id: string; patch: LocalSessionState }) => {
       setLocalState(String(arg.id), arg.patch || {});
       return rescanNow();

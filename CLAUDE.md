@@ -345,6 +345,92 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
 
 ---
 
+## v1.3.0 — Planes/Frentes · Terminal IA local · Notificaciones · Tutorial
+> Cuatro features que van juntos (feedback de Facundo + Franco). Versión bumpeada **1.2.5 → 1.3.0**
+> (`package.json` + fallbacks `brand-ver`/`.ver` en `chrome.js`). Todo verificado por screenshot.
+
+### 1) Tablero de PLANES / SPECS ("frentes")
+- **Qué:** vista nueva (item **planes** en el sidebar, al lado de **inicio**; `data-act="plans"`, icono
+  `tasks`) que agrupa por proyecto los **planes** y **tareas** de tus sesiones — "qué está pendiente y qué
+  ya se hizo" (Facundo) + "frentes encarpetados que flageo y no comparto" (Franco). **Cero fuentes nuevas,
+  cero API:** sale de los `.jsonl` que YA leemos + glob read-only del repo.
+- **Fuentes (en `jsonl.ts → collectPlan(all)`):** `TodoWrite` (status `pending|in_progress|completed`; ⚠️ el
+  array se REEMPLAZA → vale el ÚLTIMO) · `ExitPlanMode` (hubo plan + ts; el texto del plan NO está en el
+  `.jsonl`) · **Task tools** v2.1.142+ (`TaskCreate`/`TaskUpdate` reconstruidos por `taskId`, defensivo al
+  field-repair; gana la fuente más reciente vs TodoWrite). Adjunta `session.plan: SessionPlan` SÓLO si hay
+  algo (snapshot liviano; todos capados a 60, content 200). Docs `plan.md`/`spec.md` → `findPlanDocs(cwd)`
+  en `sessions.ts` (glob por nombre `plan|spec|design|architecture|roadmap|rfc|prd` o carpeta `.specs/|plans/…`,
+  prof ≤3, salta `node_modules`/`.git`, tope 24), on-demand vía IPC `getPlanDocs(cwds[])` (no en cada snapshot).
+- **UI (`app.js`):** `planView()` agrupa por `projKey`, suma rollups, ordena inProgress→pending→reciente.
+  Reusa `.board`+`.col` pero los frentes **ENVUELVEN en grilla** (`.plans-board{flex-wrap:wrap;overflow-y:auto}`)
+  → se ven todos con scroll VERTICAL (rueda del mouse), responsive a cualquier ancho (el scroll horizontal
+  escondido confundía: parecía "sin scroll"). Cada frente: pill de **estado MANUAL** (ciclo
+  `sin estado→backlog→dev→idea→pausado→listo`), barra de progreso, cards por sesión (rollup + checklist
+  `<details>`), docs con "abrir" (acción `openDoc` nueva en `actions.ts`), y **nota privada** (textarea).
+  "continuar" → `resumeSession` (`claude --resume`); "detalle" → E2. Al entrar se **minimiza el dock**.
+- **Privado y local:** estado + nota viven en `config.frentes: {[projKey]:{status,note}}` (persistido por
+  `saveConfig` con debounce). El foco/caret de la nota se preserva entre re-renders (capture+restore en
+  `render()`; input por delegación, NO re-render). El keydown global ahora ignora atajos si hay
+  `INPUT`/**`TEXTAREA`** con foco (antes 's'/'j'/'T' rompían la escritura). Marcadores del sidebar: `tree.plans`.
+
+### 2) Terminal · "COMANDOS RÁPIDOS" (atajos + lenguaje natural, tipo Warp `#`)
+> **Rediseñado tras feedback del usuario** (la 1ª versión —✨ oculto detrás de un toggle de Settings— no se
+> entendía / no se encontraba; encima confundía con sesiones de prueba que clutteraban el sidebar). Ahora es
+> **visible y se activa fácil**: botón **comandos** en el toolbar del dock + ✨ en cada terminal (SIEMPRE
+> visibles, sin gate). Abre una barra `.dk-ask` con **chips de atajo** (crear carpeta…, git status, últimos
+> commits, listar por tamaño, árbol de archivos, buscar archivo…) + un input de lenguaje natural.
+- **Dos caminos (ambos INSERTAN en la PTY sin `\r` → revisás y Enter; NUNCA auto-ejecuta):**
+  - **Atajos deterministas (`ASK_PRESETS` con `cmd`)** → insertan el comando al toque, **gratis e instantáneo**
+    (no llaman a claude). Ej: `git status`, `Get-ChildItem | Sort-Object Length -Descending`.
+  - **Lenguaje natural (input + "traducir", o presets con `q` que prellenan)** → `terminals.ts → nlToCommand`:
+    `claude -p "<texto>" --model haiku --append-system-prompt "<translate-only: ONE PowerShell command, never
+    call tools, # no-op si imposible>" --disallowedTools … --output-format json`, **stdin cerrado** (si no,
+    `-p` espera ~3s), `timeout 30s`, `ELECTRON_RUN_AS_NODE` borrado. Parsea `.result`, `sanitizeCommand()` →
+    una línea. IPC `consomni:nlCommand` → preload `term.nl`. ~5–7s, ~US$0.02/ask (gasta el uso de claude del user).
+- **UI:** `terminals-ui.js → toggleAsk(pane)` (barra entre head y body, refit) · `openQuickCommands()` (botón
+  del toolbar → abre en la terminal enfocada / la 1ª / spawnea shell) · `insertCmd(pane,text)` (write sin `\r`).
+  El ✨ ahora se muestra SIEMPRE en paneles terminal (CSS `.dk-pane--shell/.dk-pane--claude .dk-ask-btn`); se
+  removió el gate `#terminals.nl-on` y el toggle de Settings (`setNlEnabled` quedó no-op por compat).
+- **NO viola Hard Rule 3:** spawnea el CLI del usuario (Consomni nunca tiene key ni pega a `api.anthropic.com`).
+  `config.nlModel='haiku'`. NO usar `--bare` (exige `ANTHROPIC_API_KEY` → driftea la regla).
+- **Limpieza:** las sesiones de prueba que generó la verificación empírica de `claude -p` (carpetas `nltest-*`
+  / `Temp` en `~/.claude/projects`) se borraron (eran artefactos de testing, no del usuario).
+
+### 3) Notificaciones (centro + changelog)
+- El **bell** del topbar (`data-act="notifs"`) ahora abre un panel con las notificaciones + **badge** rojo de
+  no-leídas (persistido en `localStorage 'consomni.notif.seen'`). Al detectar nueva versión (evento
+  `update-available` o chequeo manual de Settings) se agrega una notif **"Nueva versión vX"**; al click →
+  **modal de changelog** con las release notes de esa versión (render markdown SEGURO: `renderNotes`/`inlineMd`
+  escapan TODO y aplican headings/bullets/`**bold**`/`` `code` ``/links). Botón "Actualizar ahora" (si el
+  flujo de descarga está disponible) o "listo". Convive con el toast persistente de update (z-60).
+- **`updates.ts`** ahora incluye `notes`/`name`/`publishedAt` en `checkForUpdate()` (de `json.body`) y en el
+  evento `update-available` (`normalizeNotes` aplana el `releaseNotes` string|array de electron-updater).
+- QA: `__consomni.simulateUpdate('available',{latest,name,notes,url})` + `__consomni.openNotifs()` /
+  `__consomni.openChangelog({…})`.
+
+### 4) Tutorial (coachmark spotlight) — para Planes
+- Tour paso a paso que **opaca todo MENOS el elemento resaltado** (recorte EXACTO vía `box-shadow:0 0 0 9999px`
+  sobre un div posicionado en el `getBoundingClientRect` del target + borde/glow verde) y una tarjeta al lado
+  con flecha. 7 pasos que explican Planes (la idea de Facundo: spec → plan → chunks → pendiente/hecho).
+  **Responsive:** reencuadra en `resize` y en cada `render()` (rAF); el `place` cae a top/right/left si no
+  entra abajo; clamping al viewport. Pasos con `before` que abren la vista (`openPlansForTour`) y `alt`
+  selectors; `open` despliega un `<details>`. Navegación: botones `data-tour` + teclado (←/→/Enter/Esc).
+- **Trigger:** auto la 1ª vez que abrís Planes (`maybeStartPlanTour`, gate `localStorage 'consomni.tour.plans'`);
+  replay desde el botón **"tutorial"** de la intro de Planes (`data-act="plan-tour"`) o la palette ("Tutorial
+  de Planes"). Engine genérico (`startTour(steps)`) reutilizable para otros features.
+- **⚠️ Gotchas (fixed, feedback del usuario + review adversaria):**
+  - Footer desbordaba "siguiente" en angosto (puntos `flex:1` + botones `flex:none`). Fix: footer en **DOS
+    filas** (`.tour-foot{flex-direction:column}`): puntos arriba, `.tour-actrow` abajo (`saltar` con
+    `margin-right:auto`). Verificado 760px/1440px.
+  - **Target abajo del fold no se veía** (paso "Tu nota"): `paintTourStep` ahora hace
+    `target.scrollIntoView({block:'center'})` ANTES de recortar → el elemento entra a la vista y se spotlightea.
+  - **Tour en Planes vacío** apuntaba a `.plan-col` inexistentes → `planTourSteps()` chequea `planView().length`:
+    sin datos, muestra sólo intro + nav + un paso "todavía no hay frentes" (no targetea elementos ausentes).
+- **⚠️ Otro fix de la review:** `jsonl.ts` `TAIL_BYTES` 384KB→**640KB** para que `collectPlan` alcance el último
+  `TodoWrite`/`ExitPlanMode` en archivos grandes (transcripts gigantes de varios MB: limitación conocida del medio).
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).
