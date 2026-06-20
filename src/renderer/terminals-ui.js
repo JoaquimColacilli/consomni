@@ -30,7 +30,7 @@
   var view = '__home__';       // vista activa: '__home__' (inicio) o id de proyecto (projKey)
   var viewCwd = '';            // cwd por defecto para terminales nuevas en la vista de proyecto
   var viewName = '';           // nombre lindo del proyecto activo (para mostrar; el id es un path)
-  var notifier = function () {}, actionHandler = function () {}, maxObserver = function () {};
+  var notifier = function () {}, actionHandler = function () {}, maxObserver = function () {}, boardChecker = null;
   function isMaximized() { return !!host && host.classList.contains('maximized'); }
   function notifyMax() { try { maxObserver(isMaximized()); } catch (e) {} }
 
@@ -223,7 +223,11 @@
     rootEl.innerHTML = '';
     // 2) los que matchean, a una fila
     var match = allPanes().filter(function (p) { return matchesView(p, v); });
-    if (!match.length) { rootEl.innerHTML = placeholderHTML(v); updateCount(); return; }
+    if (!match.length) {
+      // vista de proyecto sin terminales pero CON cards (sesiones) → mostrar su board en vez del placeholder
+      if (v !== '__home__' && boardChecker && boardChecker(v)) { rootEl.innerHTML = ''; updateCount(); minimize(); return; }
+      rootEl.innerHTML = placeholderHTML(v); updateCount(); return;
+    }
     if (match.length === 1) { match[0].style.flex = '1 1 0'; rootEl.appendChild(match[0]); }
     else {
       var split = document.createElement('div'); split.className = 'dk-split row';
@@ -445,6 +449,26 @@
     persist();
   }
 
+  // "responder": convierte el panel de sesión ABIERTO (si existe) en una terminal claude --resume
+  // interactiva, EN EL MISMO panel (no abre uno nuevo). Sin panel abierto → abre una terminal nueva.
+  function resumeSession(sid, cwd) {
+    if (!Terminal) { notifier('xterm no cargó', 'err'); return; }
+    if (!api || !api.term) { notifier('terminales no disponibles', 'err'); return; }
+    var rid = String(sid || '').replace(/[^A-Za-z0-9_-]/g, '');   // se tipea en el shell → sanitizar
+    if (!rid) { notifier('id de sesión inválido', 'err'); return; }
+    ensureDock(); bindIpc(); show();
+    var pane = sessions.get(sid);
+    if (pane) {
+      sessions.delete(sid);
+      pane.removeAttribute('data-sid'); pane.removeAttribute('data-sname');
+      if (!rootEl.contains(pane)) showView(view);                 // por si estaba en el pool
+      mountTerminal(pane, 'claude', cwd || pane.dataset.cwd || undefined, rid, false);
+      setFocus(pane); persist();
+      return;
+    }
+    spawn('claude', cwd, null, { resume: rid });                  // sin panel abierto → nueva terminal
+  }
+
   // monta la conversación read-only dentro de un panel YA colocado
   function mountSession(pane, sid, name, proj) {
     pane.classList.remove('dk-pane--shell', 'dk-pane--claude');
@@ -621,6 +645,7 @@
   function setNotifier(fn) { if (typeof fn === 'function') notifier = fn; }
   function setActionHandler(fn) { if (typeof fn === 'function') actionHandler = fn; }
   function setMaxObserver(fn) { if (typeof fn === 'function') maxObserver = fn; }
+  function setBoardChecker(fn) { if (typeof fn === 'function') boardChecker = fn; }
 
   var rt = null;
   window.addEventListener('resize', function () { if (isOpen()) { if (rt) clearTimeout(rt); rt = setTimeout(refitAll, 120); } });
@@ -631,6 +656,7 @@
     toggle: toggle, home: home, setView: setView, openProject: openProject,
     isOpen: isOpen, count: count, refreshActive: refreshActive,
     setNotifier: setNotifier, setActionHandler: setActionHandler, setMaxObserver: setMaxObserver,
-    restoreSession: restoreSession, isMaximized: isMaximized, getView: function () { return view; }
+    restoreSession: restoreSession, isMaximized: isMaximized, getView: function () { return view; },
+    resumeSession: resumeSession, setBoardChecker: setBoardChecker
   };
 })(window);

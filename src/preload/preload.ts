@@ -15,6 +15,8 @@ const api = {
   getSnapshot: (): Promise<Snapshot> => ipcRenderer.invoke('consomni:getSnapshot'),
   /** Forzar rescan inmediato. */
   rescan: (): Promise<Snapshot> => ipcRenderer.invoke('consomni:rescan'),
+  /** Selector de carpeta nativo (agregar proyecto) → path elegido o null. */
+  pickFolder: (): Promise<string | null> => ipcRenderer.invoke('consomni:pickFolder'),
   /** Suscribirse a los pushes de snapshot. Devuelve función para desuscribir. */
   onSnapshot: (cb: (snap: Snapshot) => void): (() => void) => {
     const listener = (_e: unknown, snap: Snapshot): void => cb(snap);

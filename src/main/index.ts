@@ -3,7 +3,7 @@
    Bootstrap del proceso main: ventana, seguridad, network guard, IPC.
    Hard Rule 3: cero red salvo 127.0.0.1.
    ════════════════════════════════════════════════════════════════ */
-import { app, BrowserWindow, ipcMain, session, Notification } from 'electron';
+import { app, BrowserWindow, ipcMain, session, Notification, dialog } from 'electron';
 import * as path from 'path';
 import { start as startSessions, stop as stopSessions, buildSnapshot, rescanNow, setHooksConnected, applyHookEvent, getDetail, findSessionFile, setAttnCallback, restartWatcher, type AttnInfo } from './sessions';
 import { runAction, type ActionPayload } from './actions';
@@ -167,6 +167,15 @@ if (!gotLock) {
     ipcMain.on('consomni:termResize', (_e, arg: { id: string; cols: number; rows: number }) => resizeTerm(String(arg?.id), Number(arg?.cols), Number(arg?.rows)));
     ipcMain.handle('consomni:termKill', (_e, id: string) => { killTerm(String(id)); return true; });
     ipcMain.handle('consomni:termList', () => listTerms());
+    // selector de carpeta nativo para "agregar proyecto" → devuelve el path elegido o null
+    ipcMain.handle('consomni:pickFolder', async () => {
+      const win = mainWindow && !mainWindow.isDestroyed() ? mainWindow : null;
+      const res = win
+        ? await dialog.showOpenDialog(win, { properties: ['openDirectory'], title: 'Agregar proyecto — elegí la carpeta raíz' })
+        : await dialog.showOpenDialog({ properties: ['openDirectory'], title: 'Agregar proyecto — elegí la carpeta raíz' });
+      if (res.canceled || !res.filePaths.length) return null;
+      return res.filePaths[0];
+    });
     // persistencia del layout del dock (para arrancar siempre en "inicio")
     ipcMain.handle('consomni:getDock', () => loadDock());
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

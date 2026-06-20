@@ -294,6 +294,26 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
     (54px = alto del topbar, igual que el panel E2) → logo y statusbar enteros visibles, el dock cubre sólo el board.
   - **`archivados` ahora se ve en el sidebar colapsado:** `transform()` agrega un ítem `ci` con `icon:'archive'`,
     `proj:'__archived'` (mismo target que el ítem expandido) cuando `archivedGroups.length`.
+- **Fixes v1.2.4 (feedback del usuario):**
+  - **"responder" continúa la sesión EN EL MISMO panel.** Antes `dispatchAction('resume')` abría una terminal
+    nueva. Ahora `ConsomniTerms.resumeSession(sid, cwd)` busca el panel de sesión abierto (Map `sessions`), lo
+    des-registra y lo convierte in-place a una terminal `claude --resume` (mismo `.dk-pane`, vía `mountTerminal`);
+    sin panel abierto, cae a `spawn` (terminal nueva). El id se sanitiza `[A-Za-z0-9_-]` (se tipea en el shell).
+  - **"archivados" abre su board** (antes quedaba vacío). `'__archived'` ya NO se trata como proyecto (no
+    `openProject`): `setActiveProject` lo manda al board (como "todos") y `transform` usa
+    `boardGroups = archivedGroups` cuando `activeProject==='__archived'`. El ítem del sidebar (expandido y
+    colapsado) se marca `.active`.
+  - **Entrar a un proyecto auto-abre activas + cerradas recientes** (no sólo activas). `projSessions(p)` ordena
+    activas primero y rellena con las cerradas más recientes hasta `AUTO_OPEN_MAX=8` (las activas nunca se
+    descartan); cada panel cerrado se continúa con "responder".
+  - **"+ agregar" abre un selector de carpeta nativo** (`dialog.showOpenDialog openDirectory` vía IPC
+    `consomni:pickFolder` + preload `pickFolder`). El path se normaliza a `projId` y se abre como proyecto
+    (`openProject(projId, path, name, projSessions(projId))`); si la carpeta no tiene sesiones, muestra el
+    placeholder-guía en su cwd para abrir terminal/claude.
+  - **Cerrar las terminales de un proyecto muestra SUS cards** (no el placeholder). El dock consulta
+    `boardChecker(projId)` (registrado desde app.js = `projHasCards`): en una vista de proyecto SIN paneles, si
+    el proyecto tiene cards → `minimize()` el dock → el board (filtrado a `activeProject`) muestra las cards; si
+    no tiene cards (carpeta nueva) → placeholder-guía. `closePane` enruta por `showView`, que decide.
 - **Seguridad:** sigue **cero API de Anthropic** — Consomni sólo hospeda el proceso; `claude` hace
   lo suyo. Se borra `ELECTRON_RUN_AS_NODE` del env del hijo.
 

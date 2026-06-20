@@ -166,8 +166,8 @@
     var liveGroups = groups.filter(function (g) { return g.active > 0 || g.fav; });
     var archivedGroups = groups.filter(function (g) { return g.active === 0 && !g.fav; });
 
-    var boardGroups = (state.activeProject !== 'all')
-      ? groups.filter(function (g) { return g.id === state.activeProject; })
+    var boardGroups = (state.activeProject === '__archived') ? archivedGroups
+      : (state.activeProject !== 'all') ? groups.filter(function (g) { return g.id === state.activeProject; })
       : liveGroups;
     boardGroups = boardGroups.slice().sort(function (a, b) {
       if (!!b.counts.attn !== !!a.counts.attn) return (b.counts.attn ? 1 : 0) - (a.counts.attn ? 1 : 0);
@@ -201,7 +201,7 @@
     var grp = [];
     if (favItems.length) grp.push({ label: 'favoritos', items: favItems });
     if (actItems.length) grp.push({ label: 'activos', items: actItems });
-    if (archivedGroups.length) grp.push({ label: 'archivados', items: [{ isArchived: true, id: '__archived', name: 'archivados', count: archivedGroups.length }] });
+    if (archivedGroups.length) grp.push({ label: 'archivados', items: [{ isArchived: true, id: '__archived', name: 'archivados', count: archivedGroups.length, active: state.activeProject === '__archived' }] });
     // "inicio" (vista activa) = dock maximizado mostrando '__home__'. Si es así, el marcador
     // activo va en INICIO, no en "todos" (aunque activeProject siga siendo 'all').
     var _T = window.ConsomniTerms;
@@ -370,11 +370,39 @@
     for (var i = 0; i < list.length; i++) { if (projKey(list[i]) === p) { if (!name) name = list[i].project || ''; if (list[i].cwd) { cwd = list[i].cwd; break; } } }
     return { cwd: cwd, name: name };
   }
-  // sesiones ACTIVAS (no cerradas) de un proyecto → para auto-abrirlas como paneles al entrar a su vista
-  function projActiveSessions(p) {
+  // sesiones de un proyecto para auto-abrir como paneles al entrar a su vista: las ACTIVAS siempre,
+  // + las cerradas más recientes hasta un tope (se continúan con "responder" → claude --resume).
+  var AUTO_OPEN_MAX = 8;
+  function projSessions(p) {
+    var list = ((state.snapshot && state.snapshot.sessions) || []).filter(function (s) { return projKey(s) === p; });
+    var activeN = 0;
+    list.forEach(function (s) { if (s.state !== 'closed') activeN++; });
+    list.sort(function (a, b) {
+      var ac = a.state === 'closed' ? 1 : 0, bc = b.state === 'closed' ? 1 : 0;
+      if (ac !== bc) return ac - bc;                            // activas primero
+      return (b.lastActivity || 0) - (a.lastActivity || 0);    // luego, más recientes
+    });
+    return list.slice(0, Math.max(activeN, AUTO_OPEN_MAX)).map(function (s) { return { sid: s.id, name: s.name, projName: s.project }; });
+  }
+  // ¿el proyecto tiene cards (sesiones) en el board? (para mostrar el board en vez del placeholder al cerrar terminales)
+  function projHasCards(projId) {
     var list = (state.snapshot && state.snapshot.sessions) || [];
-    return list.filter(function (s) { return projKey(s) === p && s.state !== 'closed'; })
-               .map(function (s) { return { sid: s.id, name: s.name, projName: s.project }; });
+    for (var i = 0; i < list.length; i++) { if (projKey(list[i]) === projId) return true; }
+    return false;
+  }
+  function normPath(p) { return String(p || '').toLowerCase().replace(/\\/g, '/').replace(/\/+$/, ''); }
+  function baseName(p) { return String(p || '').replace(/[\\/]+$/, '').split(/[\\/]/).pop() || String(p || ''); }
+  // "+ agregar": selector de carpeta nativo → abre esa raíz como proyecto (sus terminales/sesiones; arranca en su cwd)
+  function addProjectViaPicker() {
+    if (!api || !api.pickFolder) { toast('selector no disponible', 'warn'); return; }
+    api.pickFolder().then(function (path) {
+      if (!path) return;
+      var projId = normPath(path), name = baseName(path);
+      state.activeProject = projId; state.focusSid = null;
+      render();
+      var T = window.ConsomniTerms;
+      if (T) T.openProject(projId, path, name, projSessions(projId));
+    }).catch(function () { toast('no se pudo abrir el selector', 'err'); });
   }
 
   var REAL = { ext: 1, folder: 1, diff: 1, pr: 1, copy: 1, branch: 1, copyId: 1, transcript: 1 };
@@ -387,7 +415,7 @@
     if (act === 'term') { openEmbeddedTerminal(s ? s.cwd : null, 'shell', null, sProj(s)); if (s) closeDetail(); return; }
     if (act === 'dispatch') { openEmbeddedTerminal(s ? s.cwd : null, 'claude', null, sProj(s)); if (s) closeDetail(); return; }
     if (act === 'dispatch-skip') { openEmbeddedTerminal(s ? s.cwd : null, 'claude', null, sProj(s, true)); if (s) closeDetail(); return; }
-    if (act === 'resume') { if (!s) { toast('elegí una sesión', 'warn'); return; } openEmbeddedTerminal(s.cwd, 'claude', s.id, sProj(s)); closeDetail(); return; }
+    if (act === 'resume') { if (!s) { toast('elegí una sesión', 'warn'); return; } var T2 = window.ConsomniTerms; if (T2 && T2.resumeSession) T2.resumeSession(s.id, s.cwd); else openEmbeddedTerminal(s.cwd, 'claude', s.id, sProj(s)); closeDetail(); return; }
     if (REAL[act]) {
       if (!s) { toast('elegí una sesión primero', 'warn'); return; }
       if (!api || !api.action) { toast('acción no disponible', 'err'); return; }
@@ -484,15 +512,15 @@
   function setActiveProject(p) {
     state.activeProject = p; state.focusSid = null;
     var T = window.ConsomniTerms;
-    if (p === 'all') {
-      // "todos" → se muestra como antes (board). Si veníamos de pantalla completa, salimos.
+    if (p === 'all' || p === '__archived') {
+      // "todos" / "archivados" → board (no dock maximizado). Si veníamos de pantalla completa, salimos.
       if (T) { if (T.isMaximized()) T.minimize(); T.setView('__home__'); }
       render(); return;
     }
-    // proyecto puntual → abrir SUS terminales DE UNA (pantalla completa) + auto-abrir sus sesiones activas
+    // proyecto puntual → abrir SUS terminales DE UNA (pantalla completa) + auto-abrir sus sesiones
     var info = projInfo(p);
     render();
-    if (T) T.openProject(p, info.cwd, info.name, projActiveSessions(p));
+    if (T) T.openProject(p, info.cwd, info.name, projSessions(p));
   }
   function toggleMode(m) { if (state.modeFilter[m]) delete state.modeFilter[m]; else state.modeFilter[m] = true; render(); }
   function cycleMode() {
@@ -929,6 +957,7 @@
     var pill = t.closest && t.closest('.fpill[data-mode]'); if (pill) { toggleMode(pill.getAttribute('data-mode')); return; }
     var sortBtn = t.closest && t.closest('.tbtn'); if (sortBtn) { openSortMenu(sortBtn); return; }
     if (t.closest && t.closest('[data-act="sbtoggle"]')) { setSidebarCollapsed(!state.collapsed); return; }
+    if (t.closest && t.closest('.sb-add')) { addProjectViaPicker(); return; }
     if (t.closest && t.closest('[data-act="home"]')) { state.activeProject = 'all'; render(); if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
 
     // ── CARDS PRIMERO (van adentro de la columna, que tiene data-proj) ──
@@ -1125,6 +1154,8 @@
       }
       render();   // el sidebar refleja inicio vs todos/proyecto según el estado vivo del dock
     });
+    // el dock consulta esto: proyecto sin terminales pero CON cards → muestra el board, no el placeholder
+    if (window.ConsomniTerms.setBoardChecker) window.ConsomniTerms.setBoardChecker(function (projId) { return projHasCards(projId); });
     // SIEMPRE arrancar en "inicio" con las terminales que quedaron de la sesión anterior
     try { window.ConsomniTerms.restoreSession(); } catch (e) {}
   }
