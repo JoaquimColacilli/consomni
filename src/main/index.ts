@@ -172,7 +172,7 @@ if (!gotLock) {
 
     // ── terminales embebidas (PTYs reales; ver terminals.ts) ──
     ipcMain.handle('consomni:termAvailable', () => terminalsAvailable());
-    ipcMain.handle('consomni:termCreate', (_e, opts: { cwd?: string; kind?: 'shell' | 'claude'; cols?: number; rows?: number; resume?: string; skip?: boolean }) => createTerm(opts || {}));
+    ipcMain.handle('consomni:termCreate', (_e, opts: { cwd?: string; kind?: 'shell' | 'claude'; cols?: number; rows?: number; resume?: string; skip?: boolean; pick?: boolean }) => createTerm(opts || {}));
     ipcMain.on('consomni:termWrite', (_e, arg: { id: string; data: string }) => writeTerm(String(arg?.id), String(arg?.data ?? '')));
     ipcMain.on('consomni:termResize', (_e, arg: { id: string; cols: number; rows: number }) => resizeTerm(String(arg?.id), Number(arg?.cols), Number(arg?.rows)));
     ipcMain.handle('consomni:termKill', (_e, id: string) => { killTerm(String(id)); return true; });

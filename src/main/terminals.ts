@@ -83,7 +83,7 @@ function resolveShell(): { file: string; args: string[]; label: string } {
 
 export interface CreateResult { ok: boolean; id?: string; title?: string; cwd?: string; kind?: TermKind; error?: string; }
 
-export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number; rows?: number; resume?: string; skip?: boolean }): CreateResult {
+export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number; rows?: number; resume?: string; skip?: boolean; pick?: boolean }): CreateResult {
   const mod = getPty();
   if (!mod) return { ok: false, error: 'node-pty no disponible: ' + (ptyError || 'binario nativo ausente') };
 
@@ -105,8 +105,9 @@ export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number;
     const rid = String(opts.resume || '').replace(/[^A-Za-z0-9_-]/g, '');   // sanitizar (se escribe en el shell)
     // --dangerously-skip-permissions: claude no pide permiso para cada acción (opt-in del usuario).
     const skip = opts.skip ? ' --dangerously-skip-permissions' : '';
-    bootCmd = (rid ? `claude --resume ${rid}` : 'claude') + skip;
-    resumed = !!rid;
+    // pick (sin id): `claude --resume` abre el SELECTOR interactivo (flechitas), scopeado al cwd del proyecto.
+    bootCmd = (rid ? `claude --resume ${rid}` : (opts.pick ? 'claude --resume' : 'claude')) + skip;
+    resumed = !!rid || !!opts.pick;
   }
 
   let proc: IPty;

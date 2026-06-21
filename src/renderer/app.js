@@ -637,6 +637,12 @@
       }).catch(go);
     } else { go(); }
   }
+  // CTRL+ESPACIO: abre una terminal nueva según config (shell / claude / claude --dangerously-skip-permissions)
+  function openQuickTerm() {
+    var k = state.quickTermKind || 'claude-skip';
+    var kind = (k === 'shell') ? 'shell' : 'claude';
+    openEmbeddedTerminal(null, kind, null, { skip: (k === 'claude-skip') });
+  }
   // datos de proyecto de una sesión para taguear el panel (id = projKey, igual que la vista; name = lindo)
   function sProj(s, skip) { var o = s ? { proj: projKey(s), projName: s.project } : {}; if (skip) o.skip = true; return o; }
   // cwd + nombre representativo de un proyecto (por su projKey) desde el snapshot
@@ -730,6 +736,7 @@
     if (act === 'dispatch') { openEmbeddedTerminal(s ? s.cwd : null, 'claude', null, sProj(s)); if (s) closeDetail(); return; }
     if (act === 'dispatch-skip') { openEmbeddedTerminal(s ? s.cwd : null, 'claude', null, sProj(s, true)); if (s) closeDetail(); return; }
     if (act === 'resume') { if (!s) { toast('elegí una sesión', 'warn'); return; } var T2 = window.ConsomniTerms; if (T2 && T2.resumeSession) T2.resumeSession(s.id, s.cwd); else openEmbeddedTerminal(s.cwd, 'claude', s.id, sProj(s)); closeDetail(); return; }
+    if (act === 'resume-skip') { if (!s) { toast('elegí una sesión', 'warn'); return; } var T3 = window.ConsomniTerms; if (T3 && T3.resumeSession) T3.resumeSession(s.id, s.cwd, { skip: true }); else openEmbeddedTerminal(s.cwd, 'claude', s.id, sProj(s, true)); closeDetail(); return; }
     if (REAL[act]) {
       if (!s) { toast('elegí una sesión primero', 'warn'); return; }
       if (!api || !api.action) { toast('acción no disponible', 'err'); return; }
@@ -1574,6 +1581,7 @@
       '<div class="set-sec"><div class="lbl">EDITOR & TERMINAL</div>' +
         '<div class="set-row"><span class="k">editor preferido</span>' + seg2('editor', cfg.editor, [['code', 'VS Code'], ['cursor', 'Cursor']]) + '</div>' +
         '<div class="set-row"><span class="k">terminal preferida</span>' + seg2('terminal', cfg.terminal, [['wt', 'Win Terminal'], ['powershell', 'PowerShell']]) + '</div>' +
+        '<div class="set-row"><span class="k">Ctrl+Espacio abre</span>' + seg2('quickTermKind', cfg.quickTermKind || 'claude-skip', [['shell', 'terminal'], ['claude', 'claude'], ['claude-skip', 'claude ⚡']]) + '</div>' +
       '</div>' +
       '<div class="set-sec"><div class="lbl">DIRECTORIOS VIGILADOS (read-only)</div>' + dirs +
         '<div class="set-row" style="margin-top:8px"><input class="set-inp" id="setDirAdd" style="flex:1;width:auto" placeholder="C:\\ruta\\.claude\\projects"><button class="btn btn--sm" id="setDirAddBtn">' + C.svg('plus', 12, 2) + ' agregar</button></div>' +
@@ -1613,6 +1621,7 @@
         var key = el.getAttribute('data-set'), val = el.getAttribute('data-val');
         var patch = {};
         if (key === 'sounds' || key === 'checkUpdates') patch[key] = (val === 'on'); else patch[key] = val;
+        if (key === 'quickTermKind') state.quickTermKind = val;   // aplica sin reiniciar
         saveSetting(patch);
       });
     });
@@ -1813,6 +1822,10 @@
     var aeTag = document.activeElement && document.activeElement.tagName;
     if ((aeTag === 'INPUT' || aeTag === 'TEXTAREA') && e.key !== 'Escape') return;
 
+    // CTRL+ESPACIO: abre una terminal nueva (configurable en Settings: shell / claude / claude ⚡).
+    // Dentro de un xterm enfocado lo intercepta terminals-ui (attachCustomKeyEventHandler); acá es el caso board.
+    if (e.ctrlKey && e.code === 'Space') { e.preventDefault(); openQuickTerm(); return; }
+
     // Abrir/cerrar el dock de terminales (Shift+T para no chocar con 't' = terminal de la card)
     if (!meta && (e.key === 'T')) { e.preventDefault(); T && T.toggle(); return; }
 
@@ -1964,18 +1977,19 @@
       if (act === 'detail') { openDetail(sid); return; }
       dispatchAction(act, sid);
     });
-    // pantalla completa de terminales → comprime el sidebar, pero NO de forma pegajosa:
-    // al salir de pantalla completa, restaura el estado previo del sidebar.
-    var preMaxCollapse; // undefined = no guardado
+    // CTRL+ESPACIO dentro de un xterm enfocado → abre una terminal nueva (el dock lo intercepta)
+    if (window.ConsomniTerms.setQuickTermHook) window.ConsomniTerms.setQuickTermHook(openQuickTerm);
+    // botón VSCode de una terminal: abre su cwd en el editor (acción 'ext', basada en cwd, sin sid)
+    if (window.ConsomniTerms.setEditorOpener) window.ConsomniTerms.setEditorOpener(function (cwd) {
+      if (!cwd) { toast('sin carpeta', 'warn'); return; }
+      if (!api || !api.action) { toast('acción no disponible', 'err'); return; }
+      api.action('ext', { cwd: cwd }).then(function (r) {
+        toast((r && r.ok ? (r.message || 'abriendo editor') : ('✗ ' + ((r && r.error) || 'editor'))), (r && r.ok) ? '' : 'err');
+      }).catch(function () { toast('✗ editor', 'err'); });
+    });
+    // pantalla completa de terminales: NO toca el sidebar. Entrar a un proyecto / maximizar el dock
+    // ya NO colapsa el sidebar — solo el chevron manual (setSidebarCollapsed) o el responsive lo hacen.
     window.ConsomniTerms.setMaxObserver(function (isMax) {
-      if (isMax) {
-        if (preMaxCollapse === undefined) preMaxCollapse = state.userCollapsed;
-        setSidebarCollapsed(true);
-      } else if (preMaxCollapse !== undefined) {
-        state.userCollapsed = preMaxCollapse; preMaxCollapse = undefined;
-        var should = (state.userCollapsed != null) ? state.userCollapsed : (window.innerWidth < BREAKPOINT);
-        state.collapsed = should;
-      }
       render();   // el sidebar refleja inicio vs todos/proyecto según el estado vivo del dock
     });
     // el dock consulta esto: proyecto sin terminales pero CON cards → muestra el board, no el placeholder
@@ -1997,6 +2011,7 @@
         state.keptProjects = Array.isArray(cfg.keptProjects) ? cfg.keptProjects.slice() : [];
         state.confirmCloseTerminal = cfg.confirmCloseTerminal !== false;
         state.frentes = (cfg.frentes && typeof cfg.frentes === 'object') ? cfg.frentes : {};
+        state.quickTermKind = cfg.quickTermKind || 'claude-skip';
       }
       render();
     }).catch(function () {});

@@ -473,6 +473,48 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
 
 ---
 
+## v1.5.0 — Dock de terminales: entrar a proyecto = `claude --resume`, contexto y Ctrl+Espacio
+> Cinco ajustes al **dock de terminales** (feedback del usuario). Bump **1.4.0 → 1.5.0** (`package.json` +
+> fallbacks `brand-ver`/`.ver` en `chrome.js`). Todo verificado en vivo por screenshot (TS compila limpio).
+> Aditivo, respeta las 3 Hard Rules (fidelidad visual, responsive, cero API de Anthropic).
+
+1. **Entrar a un proyecto NO colapsa el sidebar.** El callback de `setMaxObserver` (`app.js`) dejó de forzar
+   `setSidebarCollapsed(true)` al maximizar el dock; ahora solo hace `render()`. El sidebar se colapsa SOLO
+   con el chevron manual (`setSidebarCollapsed`) o por responsive (`syncResponsive`, `<820px`, Hard Rule 2).
+2. **Entrar a un proyecto abre UNA terminal `claude --resume` (selector interactivo), reemplazando las
+   tarjetas read-only.** Flag nuevo `pick` que fluye `createTerm` (`terminals.ts`: `claude --resume` SIN id
+   = picker, scopeado al cwd del proyecto porque Claude guarda transcripts por carpeta) → IPC `termCreate`
+   (`index.ts`) → `mountTerminal`/`spawn`/`open` (`terminals-ui.js`, 6º arg). `openProject` reescrito: si el
+   proyecto NO tiene paneles abiertos + tiene sesiones + cwd válido → 1 panel claude con `pick:true`; si no
+   tiene sesiones/cwd → `showView` decide (placeholder o board vía `boardChecker`); si ya tiene paneles, no
+   abre nada. `mountSession`/`openSession` siguen para el click en una card del board. El picker tiene `proj`
+   y NO es pinned → no se persiste (no se re-dispara al reabrir).
+3. **La cabecera del dock muestra el nombre del proyecto.** `updateTitle()` (llamado desde `showView`, único
+   choke point) setea el `textContent` de `.dk-tb-label`: nombre del proyecto si `view!=='__home__'`,
+   `'TERMINALES'` en inicio. Solo cambia texto → markup/clases intactos (Hard Rule 1).
+4. **Botones por panel según contexto.**
+   - **Panel de sesión claude** (`mountSession`): los botones de claude **continúan ESA sesión**. "claude ⚡"
+     pasó de `dispatch-skip` (sesión nueva) a un act nuevo **`resume-skip`** = `claude --resume <id>
+     --dangerously-skip-permissions`; "responder" sigue siendo `resume` (`claude --resume <id>`). Se quitó
+     "claude nuevo". `app.js dispatchAction` suma el case `resume-skip`; `resumeSession(sid,cwd,opts)` acepta
+     `opts.skip` y lo pasa a `mountTerminal`. Los cases `dispatch`/`dispatch-skip` SIGUEN (los usan las cards
+     del board y el detalle E2) — solo se dejaron de EMITIR desde `mountSession`.
+   - **Terminal (shell/claude)**: botón **VSCode** nuevo en la cabecera (`ensureVscodeBtn(pane)` en
+     `mountTerminal`, idempotente) → abre el cwd vía `editorOpener` (bridge `setEditorOpener` inyectado por
+     `app.js` → `api.action('ext',{cwd})` → `openEditor(cwd)`). Reusa `.dk-pbtn` e ícono `ext` (sin CSS nuevo).
+5. **CTRL+ESPACIO abre una terminal nueva.** Config nueva `quickTermKind: 'shell'|'claude'|'claude-skip'`
+   (`config.ts`, default **`claude-skip`**). `app.js`: `openQuickTerm()` lee `state.quickTermKind` y llama
+   `openEmbeddedTerminal`. Funciona en DOS contextos: (a) board → keydown global (`e.ctrlKey && e.code===
+   'Space'`, antes del switch); (b) DENTRO de un xterm enfocado → `term.attachCustomKeyEventHandler` en
+   `mountTerminal` (devuelve `false` para que xterm no mande NUL `\x00`) → bridge `setQuickTermHook` →
+   `openQuickTerm`. Fila en Settings ("EDITOR & TERMINAL"): `seg2('quickTermKind', …, [terminal/claude/claude ⚡])`;
+   `wireSettings` lo guarda como string (no entra en la coerción a bool) y actualiza `state.quickTermKind` en vivo.
+- **Changelog:** las release notes de esta versión (cuerpo del GitHub Release) son lo que ven TODOS los
+  usuarios en su centro de notificaciones → modal de novedades (`updates.ts checkForUpdate()` lee `json.body`;
+  `update-available` trae `releaseNotes`). Por eso el `gh release` debe llevar notas markdown completas.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

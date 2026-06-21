@@ -23,6 +23,7 @@ export interface AppConfig {
   confirmCloseTerminal: boolean; // avisar antes de cerrar una terminal viva (corta el proceso); "no volver a mostrar" lo apaga
   nlHelper: boolean;           // helper de comando por lenguaje natural en las terminales (claude local; opt-in, default off)
   nlModel: string;             // modelo para el helper NL ('haiku' por costo/latencia)
+  quickTermKind: 'shell' | 'claude' | 'claude-skip'; // qué abre CTRL+ESPACIO (terminal shell / claude / claude --dangerously-skip-permissions)
   frentes: Record<string, FrenteMeta>; // estado MANUAL de cada frente (proyecto) — privado, local. key = projKey
 }
 
@@ -60,6 +61,7 @@ const DEFAULTS: AppConfig = {
   confirmCloseTerminal: true,
   nlHelper: false,
   nlModel: 'haiku',
+  quickTermKind: 'claude-skip',
   frentes: {},
 };
 

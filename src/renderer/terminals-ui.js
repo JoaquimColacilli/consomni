@@ -41,6 +41,8 @@
   var viewCwd = '';            // cwd por defecto para terminales nuevas en la vista de proyecto
   var viewName = '';           // nombre lindo del proyecto activo (para mostrar; el id es un path)
   var notifier = function () {}, actionHandler = function () {}, maxObserver = function () {}, boardChecker = null, closeConfirmer = null;
+  var editorOpener = null;     // abre un cwd en el editor (lo inyecta app.js → api.action('ext',{cwd}))
+  var quickTermHook = null;    // CTRL+ESPACIO dentro de un xterm → abre una terminal nueva (lo inyecta app.js)
   function isMaximized() { return !!host && host.classList.contains('maximized'); }
   function notifyMax() { try { maxObserver(isMaximized()); } catch (e) {} }
 
@@ -135,6 +137,12 @@
   function elemChildren(el) { return Array.prototype.filter.call(el.children, function (c) { return c.nodeType === 1; }); }
   function panesOf() { return rootEl ? Array.prototype.slice.call(rootEl.querySelectorAll('.dk-pane')) : []; }
   function allPanes() { return host ? Array.prototype.slice.call(host.querySelectorAll('.dk-pane')) : []; }
+  // cabecera del dock: "TERMINALES" en inicio; el NOMBRE del proyecto cuando estás dentro de uno.
+  function updateTitle() {
+    var lbl = host && host.querySelector('.dk-tb-label');
+    if (!lbl) return;
+    lbl.textContent = (view === '__home__' || !viewName) ? 'TERMINALES' : viewName;
+  }
   // etiqueta linda del proyecto del panel (el id `proj` es un path; mostramos el nombre o el último segmento)
   function projLabel(pane) {
     var d = pane.dataset; if (d.projname) return d.projname;
@@ -231,6 +239,7 @@
   function showView(v) {
     ensureDock();
     view = v;
+    updateTitle();   // cabecera del dock: nombre del proyecto / "TERMINALES" en inicio
     // 1) todo lo visible al pool
     panesOf().forEach(function (p) { poolEl.appendChild(p); });
     rootEl.innerHTML = '';
@@ -263,18 +272,18 @@
     ensureDock(); bindIpc(); bindSnap();
     viewCwd = cwd || ''; viewName = name || '';
     view = projId;   // vista activa ANTES de crear paneles → no se pinnean, quedan scoped al proyecto
-    (sessList || []).forEach(function (it) {
-      if (!it || !it.sid) return;
-      var ex = sessions.get(it.sid);
-      if (ex) {   // ya abierta → re-taguear al proyecto, sin duplicar
-        if (!ex.dataset.proj) ex.dataset.proj = projId;
-        if (it.projName && !ex.dataset.projname) ex.dataset.projname = it.projName;
-        return;
-      }
-      var pane = buildPane({ kind: 'session', sid: it.sid, name: it.name, proj: projId, projname: it.projName });
-      poolEl.appendChild(pane);
-      mountSession(pane, it.sid, it.name, projId);
-    });
+    // ¿el proyecto ya tiene paneles abiertos (terminales/sesiones)? entonces NO abrimos nada nuevo.
+    var existing = allPanes().filter(function (p) { return p.dataset.proj === projId; });
+    // Sin paneles + hay sesiones + cwd válido → abrir UNA terminal `claude --resume` (SELECTOR interactivo,
+    // flechitas, scopeado SOLO a las sesiones de ESTE proyecto por su cwd). Reemplaza las viejas tarjetas read-only.
+    if (!existing.length && cwd && (sessList || []).length) {
+      var pane = makePaneShell('claude');
+      pane.dataset.proj = projId;
+      if (name) pane.dataset.projname = name;
+      poolEl.appendChild(pane);                                   // showView lo trae a la vista (proj === projId)
+      mountTerminal(pane, 'claude', cwd, null, false, /*pick*/ true);
+    }
+    // Sin sesiones (o sin cwd) → showView decide: placeholder-guía o board de cards (vía boardChecker).
     showView(projId);
     host.hidden = false; host.classList.remove('minimized'); host.classList.add('maximized');
     document.body.classList.add('dock-open'); document.body.classList.remove('dock-min');
@@ -315,6 +324,18 @@
     pane.querySelector('.dk-split-d').addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); spawn('shell', null, 'down'); });
     pane.querySelector('.dk-pane-x').addEventListener('click', function (e) { e.stopPropagation(); closePane(pane); });
     return pane;
+  }
+  // botón VSCode en la cabecera de una TERMINAL (abre su cwd en el editor). Idempotente (no duplica al re-montar).
+  function ensureVscodeBtn(pane) {
+    var btns = pane.querySelector('.dk-pane-btns');
+    if (!btns || btns.querySelector('.dk-pane-vscode')) return;
+    var vb = document.createElement('button');
+    vb.className = 'dk-pbtn dk-pane-vscode';
+    vb.title = 'abrir esta carpeta en VSCode/Cursor';
+    vb.innerHTML = svg('ext', 12, 1.8);
+    vb.addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); if (editorOpener) editorOpener(pane.dataset.cwd); });
+    var x = btns.querySelector('.dk-pane-x');
+    if (x) btns.insertBefore(vb, x); else btns.appendChild(vb);
   }
   function setPaneMeta(pane, icon, title, proj) {
     pane.querySelector('.dk-pane-ic').innerHTML = icon;
@@ -409,12 +430,13 @@
     if (projName) pane.dataset.projname = projName;
     if (pinned) pane.dataset.pinned = '1';
     placeContent(pane, dir || 'right');
-    mountTerminal(pane, kind, cwd, opts.resume || null, !!opts.skip);
+    mountTerminal(pane, kind, cwd, opts.resume || null, !!opts.skip, !!opts.pick);
     persist();
   }
 
   // monta xterm + PTY dentro de un panel YA colocado (lo usa spawn y la restauración)
-  function mountTerminal(pane, kind, cwd, resume, skip) {
+  // pick (sin resume): `claude --resume` abre el SELECTOR interactivo scopeado al cwd del proyecto.
+  function mountTerminal(pane, kind, cwd, resume, skip, pick) {
     kind = (kind === 'claude') ? 'claude' : 'shell';
     pane.dataset.kind = kind;
     if (cwd) pane.dataset.cwd = cwd;
@@ -423,9 +445,10 @@
     pane.classList.remove('dk-pane--session', 'dk-pane--shell', 'dk-pane--claude');
     pane.classList.add('dk-pane--' + kind);
     var ic = kind === 'claude' ? '<span class="dk-tdot"></span>' : svg('term', 11, 2);
-    var lbl = kind === 'claude' ? (resume ? 'claude ↻…' : (skip ? 'claude ⚡…' : 'claude…')) : 'shell…';
+    var lbl = kind === 'claude' ? ((resume || pick) ? 'claude ↻…' : (skip ? 'claude ⚡…' : 'claude…')) : 'shell…';
     setPaneMeta(pane, ic, lbl, projLabel(pane));
     updatePinUI(pane);
+    ensureVscodeBtn(pane);   // botón VSCode en la cabecera de la terminal (abre su cwd en el editor)
     var body = pane.querySelector('.dk-pane-body');
     body.innerHTML = '';
 
@@ -437,6 +460,13 @@
     var fit = new FitNS.FitAddon();
     term.loadAddon(fit);
     term.open(body);
+    // CTRL+ESPACIO dentro de la terminal → abre OTRA terminal nueva (no manda NUL al shell)
+    try {
+      term.attachCustomKeyEventHandler(function (ev) {
+        if (ev.type === 'keydown' && ev.ctrlKey && ev.code === 'Space') { if (quickTermHook) quickTermHook(); return false; }
+        return true;
+      });
+    } catch (e) {}
 
     var ro = null;
     if (g.ResizeObserver) { ro = new g.ResizeObserver(function () { try { fit.fit(); } catch (e) {} }); ro.observe(body); }
@@ -444,7 +474,7 @@
 
     requestAnimationFrame(function () {
       try { fit.fit(); } catch (e) {}
-      api.term.create({ cwd: cwd, kind: kind, cols: term.cols || 80, rows: term.rows || 24, resume: resume, skip: skip }).then(function (res) {
+      api.term.create({ cwd: cwd, kind: kind, cols: term.cols || 80, rows: term.rows || 24, resume: resume, skip: skip, pick: pick }).then(function (res) {
         if (!res || !res.ok) { term.write('\r\n  \x1b[31m' + ((res && res.error) || 'no se pudo abrir') + '\x1b[0m\r\n'); return; }
         pane.dataset.tid = res.id;
         pane.dataset.cwd = res.cwd || cwd || '';
@@ -560,22 +590,24 @@
 
   // "responder": convierte el panel de sesión ABIERTO (si existe) en una terminal claude --resume
   // interactiva, EN EL MISMO panel (no abre uno nuevo). Sin panel abierto → abre una terminal nueva.
-  function resumeSession(sid, cwd) {
+  // opts.skip → claude --resume <id> --dangerously-skip-permissions (continúa ESA sesión sin permisos).
+  function resumeSession(sid, cwd, opts) {
     if (!Terminal) { notifier('xterm no cargó', 'err'); return; }
     if (!api || !api.term) { notifier('terminales no disponibles', 'err'); return; }
     var rid = String(sid || '').replace(/[^A-Za-z0-9_-]/g, '');   // se tipea en el shell → sanitizar
     if (!rid) { notifier('id de sesión inválido', 'err'); return; }
+    var skip = !!(opts && opts.skip);
     ensureDock(); bindIpc(); show();
     var pane = sessions.get(sid);
     if (pane) {
       sessions.delete(sid);
       pane.removeAttribute('data-sid'); pane.removeAttribute('data-sname');
       if (!rootEl.contains(pane)) showView(view);                 // por si estaba en el pool
-      mountTerminal(pane, 'claude', cwd || pane.dataset.cwd || undefined, rid, false);
+      mountTerminal(pane, 'claude', cwd || pane.dataset.cwd || undefined, rid, skip);
       setFocus(pane); persist();
       return;
     }
-    spawn('claude', cwd, null, { resume: rid });                  // sin panel abierto → nueva terminal
+    spawn('claude', cwd, null, { resume: rid, skip: skip });      // sin panel abierto → nueva terminal
   }
 
   // monta la conversación read-only dentro de un panel YA colocado
@@ -593,8 +625,7 @@
       '<div class="dk-shead">' +
         '<span class="dk-sactions">' +
           '<button class="btn btn--sm btn--green" data-dock-act="resume" data-sid="' + esc(sid) + '" title="continuar ESTA conversación de forma interactiva (claude --resume)">' + svg('reply', 11, 2) + ' responder</button>' +
-          '<button class="btn btn--sm" data-dock-act="dispatch" data-sid="' + esc(sid) + '" title="nueva sesión claude en esta carpeta">' + svg('dispatch', 11, 2) + ' claude nuevo</button>' +
-          '<button class="btn btn--sm" data-dock-act="dispatch-skip" data-sid="' + esc(sid) + '" title="claude sin permisos (--dangerously-skip-permissions)">' + svg('dispatch', 11, 2) + ' claude ⚡</button>' +
+          '<button class="btn btn--sm" data-dock-act="resume-skip" data-sid="' + esc(sid) + '" title="continuar ESTA conversación SIN permisos (claude --resume --dangerously-skip-permissions)">' + svg('dispatch', 11, 2) + ' claude ⚡</button>' +
           '<button class="btn btn--sm" data-dock-act="term" data-sid="' + esc(sid) + '">' + svg('term', 11, 2) + ' terminal</button>' +
           '<button class="btn btn--sm" data-dock-act="ext" data-sid="' + esc(sid) + '">' + svg('ext', 11, 2) + ' VSCode</button>' +
           '<button class="btn btn--sm" data-dock-act="detail" data-sid="' + esc(sid) + '">detalle</button>' +
@@ -737,7 +768,7 @@
   function hide() { if (!host) return; host.hidden = true; host.classList.remove('maximized', 'minimized'); document.body.classList.remove('dock-open', 'dock-min'); notifyMax(); }
   function home() {
     ensureDock(); bindIpc();
-    view = '__home__'; viewCwd = '';
+    view = '__home__'; viewCwd = ''; viewName = '';
     showView('__home__');
     host.hidden = false; host.classList.remove('minimized'); host.classList.add('maximized');
     document.body.classList.add('dock-open'); document.body.classList.remove('dock-min');
@@ -755,18 +786,21 @@
   function setActionHandler(fn) { if (typeof fn === 'function') actionHandler = fn; }
   function setMaxObserver(fn) { if (typeof fn === 'function') maxObserver = fn; }
   function setBoardChecker(fn) { if (typeof fn === 'function') boardChecker = fn; }
+  function setEditorOpener(fn) { if (typeof fn === 'function') editorOpener = fn; }
+  function setQuickTermHook(fn) { if (typeof fn === 'function') quickTermHook = fn; }
 
   var rt = null;
   window.addEventListener('resize', function () { if (isOpen()) { if (rt) clearTimeout(rt); rt = setTimeout(refitAll, 120); } });
 
   g.ConsomniTerms = {
-    spawn: spawn, open: function (o) { o = o || {}; spawn(o.kind === 'claude' ? 'claude' : 'shell', o.cwd, null, { resume: o.resume, skip: o.skip, proj: o.proj, projName: o.projName }); },
+    spawn: spawn, open: function (o) { o = o || {}; spawn(o.kind === 'claude' ? 'claude' : 'shell', o.cwd, null, { resume: o.resume, skip: o.skip, pick: o.pick, proj: o.proj, projName: o.projName }); },
     openSession: openSession, show: show, hide: hide, minimize: minimize, restore: restore,
     toggle: toggle, home: home, setView: setView, openProject: openProject,
     isOpen: isOpen, count: count, refreshActive: refreshActive,
     setNotifier: setNotifier, setActionHandler: setActionHandler, setMaxObserver: setMaxObserver,
     restoreSession: restoreSession, isMaximized: isMaximized, getView: function () { return view; },
     resumeSession: resumeSession, setBoardChecker: setBoardChecker, setCloseConfirmer: setCloseConfirmer,
-    setNlEnabled: setNlEnabled, insertIntoFocused: insertIntoFocused
+    setNlEnabled: setNlEnabled, insertIntoFocused: insertIntoFocused,
+    setEditorOpener: setEditorOpener, setQuickTermHook: setQuickTermHook
   };
 })(window);
