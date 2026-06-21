@@ -340,8 +340,13 @@ body.dk-dragging,body.dk-dragging *{cursor:grabbing !important;user-select:none 
 /* el chevron del toggle apunta « (colapsar) cuando está expandido, » (expandir) cuando colapsado */
 .sb-toggle svg{transition:transform .18s;}
 .sidebar:not(.collapsed) .sb-toggle svg{transform:rotate(180deg);}
-/* versión al lado del wordmark (visible, on-brand) */
-.brand-ver{font-size:9px;line-height:1;color:var(--text-4);letter-spacing:.4px;align-self:flex-start;margin-top:3px;margin-left:1px;}
+/* versión + botón "Changelog" al lado del wordmark (columna: versión arriba, botón abajo) */
+.brand-meta{display:flex;flex-direction:column;align-items:flex-start;gap:2px;align-self:flex-start;margin-top:3px;margin-left:2px;}
+.brand-ver{font-size:9px;line-height:1;color:var(--text-4);letter-spacing:.4px;}
+.brand-changelog{display:inline-flex;align-items:center;gap:3px;padding:0;background:transparent;border:none;cursor:pointer;font-family:inherit;font-size:8.5px;line-height:1;letter-spacing:.3px;color:var(--text-3);transition:color .14s;}
+.brand-changelog svg{width:10px;height:10px;color:var(--text-4);transition:color .14s;}
+.brand-changelog:hover{color:var(--green);}
+.brand-changelog:hover svg{color:var(--green);}
 
 /* ── atención: banner E4 + inline approve/deny (.perm) ── */
 .attn-banner{flex:none;display:flex;align-items:center;gap:11px;padding:9px 16px;background:linear-gradient(90deg, rgba(245,158,11,.14), rgba(245,158,11,.05) 60%, transparent);border-bottom:1px solid rgba(245,158,11,.25);position:relative;z-index:9;}
@@ -550,6 +555,50 @@ body.dk-dragging,body.dk-dragging *{cursor:grabbing !important;user-select:none 
 .cl-link{color:var(--green);cursor:pointer;text-decoration:underline;text-underline-offset:2px;}
 .cl-empty{color:var(--text-4);}
 .cl-foot{flex:none;display:flex;align-items:center;gap:10px;padding:13px 18px;border-top:1px solid var(--border-soft);background:rgba(0,0,0,.18);}
+
+/* ════════════════════════════════════════════════════════════════
+   CHANGELOG — pantalla completa con timeline de versiones (v1.5.2).
+   Aditiva, 100% tokens existentes. z-index 70 (sobre todo, incl. dock).
+   ════════════════════════════════════════════════════════════════ */
+.chl-screen{position:fixed;inset:0;z-index:70;display:flex;flex-direction:column;
+  background:radial-gradient(1300px 560px at 50% -8%, rgba(74,222,128,.07), transparent 62%), radial-gradient(900px 500px at 86% 4%, rgba(52,211,153,.05), transparent 60%), var(--bg);
+  animation:chlScreenIn .3s cubic-bezier(.2,.85,.25,1) both;}
+@keyframes chlScreenIn{from{opacity:0;transform:translateY(10px);}to{opacity:1;transform:none;}}
+.chl-top{flex:none;height:54px;display:flex;align-items:center;gap:13px;padding:0 22px;border-bottom:1px solid var(--border-soft);background:rgba(12,12,15,.66);backdrop-filter:blur(10px);}
+.chl-top .chl-brand{display:flex;align-items:center;gap:10px;}
+.chl-wm{font-family:'Geist Mono',ui-monospace,monospace;font-size:13px;letter-spacing:2.5px;color:var(--text-2);}
+.chl-tdiv{width:1px;height:18px;background:var(--border-soft);}
+.chl-toplabel{font-family:'Geist Mono',ui-monospace,monospace;font-size:11px;letter-spacing:1.6px;text-transform:uppercase;color:var(--text-3);}
+.chl-close{margin-left:auto;display:inline-flex;align-items:center;justify-content:center;width:30px;height:30px;border-radius:var(--radius-sm);background:var(--surface-input);border:1px solid rgba(255,255,255,.07);color:var(--text-2);cursor:pointer;transition:.14s;}
+.chl-close:hover{color:var(--text-1);border-color:var(--border-hover);}
+.chl-scroll{flex:1;min-height:0;overflow-y:auto;padding:46px 24px 96px;}
+.chl-wrap{max-width:760px;margin:0 auto;}
+.chl-hero{margin-bottom:42px;}
+.chl-eyebrow{display:inline-flex;align-items:center;gap:7px;font-family:'Geist Mono',ui-monospace,monospace;font-size:10px;letter-spacing:2px;text-transform:uppercase;color:var(--green);margin-bottom:14px;}
+.chl-eyebrow svg{width:13px;height:13px;}
+.chl-hero h1{font-family:'Geist Mono',ui-monospace,monospace;font-size:30px;line-height:1.05;letter-spacing:-.5px;color:var(--text-1);margin:0 0 10px;font-weight:600;}
+.chl-hero p{font-size:13.5px;line-height:1.55;color:var(--text-3);margin:0;max-width:540px;}
+/* timeline */
+.chl-timeline{position:relative;padding-left:30px;}
+.chl-timeline::before{content:'';position:absolute;left:5px;top:7px;bottom:6px;width:1.5px;background:linear-gradient(180deg, var(--border-hover), var(--border-soft) 30%, var(--border-soft));}
+.chl-entry{position:relative;padding-bottom:38px;animation:chlEntryIn .42s cubic-bezier(.2,.8,.25,1) both;}
+.chl-entry:last-child{padding-bottom:8px;}
+@keyframes chlEntryIn{from{opacity:0;transform:translateY(7px);}to{opacity:1;transform:none;}}
+.chl-entry::before{content:'';position:absolute;left:-30px;top:5px;width:11px;height:11px;border-radius:50%;background:var(--surface-raised);border:2px solid var(--text-4);transition:.14s;}
+.chl-entry.latest::before{background:var(--green);border-color:var(--green);box-shadow:0 0 0 4px rgba(74,222,128,.14);}
+.chl-vrow{display:flex;align-items:center;gap:10px;margin-bottom:9px;}
+.chl-v{font-family:'Geist Mono',ui-monospace,monospace;font-size:16px;font-weight:600;letter-spacing:.2px;color:var(--text-1);}
+.chl-entry.latest .chl-v{color:var(--green);}
+.chl-pill{font-family:'Geist Mono',ui-monospace,monospace;font-size:8.5px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--green);border:1px solid rgba(74,222,128,.32);background:rgba(74,222,128,.09);padding:2px 6px;border-radius:5px;}
+.chl-date{margin-left:auto;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;letter-spacing:.3px;color:var(--text-4);}
+.chl-etitle{font-size:13.5px;font-weight:500;color:var(--text-2);margin:0 0 12px;letter-spacing:.1px;}
+.chl-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;}
+.chl-items li{position:relative;padding-left:17px;font-size:12.5px;line-height:1.55;color:var(--text-2);}
+.chl-items li::before{content:'';position:absolute;left:1px;top:7px;width:5px;height:5px;border-radius:1.5px;background:var(--green-deep);transform:rotate(45deg);}
+.chl-foot2{max-width:760px;margin:30px auto 0;padding-top:22px;border-top:1px solid var(--border-soft);display:flex;align-items:center;gap:8px;font-size:11.5px;color:var(--text-4);}
+.chl-foot2 a{display:inline-flex;align-items:center;gap:5px;color:var(--text-3);cursor:pointer;transition:.14s;}
+.chl-foot2 a:hover{color:var(--green);}
+@media (max-width:560px){.chl-hero h1{font-size:24px;}.chl-scroll{padding:32px 16px 72px;}.chl-date{display:none;}}
 
 /* ════════════════════════════════════════════════════════════════
    TUTORIAL (coachmark spotlight) — recorte exacto + tarjeta. Responsive.

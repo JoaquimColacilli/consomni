@@ -58,7 +58,8 @@
     tasks:  '<polyline points="3.5 7 5.5 9 8.5 5"/><polyline points="3.5 16 5.5 18 8.5 14"/><line x1="11" y1="7" x2="20" y2="7"/><line x1="11" y1="17" x2="20" y2="17"/>',
     book:   '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
     edit:   '<path d="M12 20h9"/><path d="M16.5 3.5a2.1 2.1 0 0 1 3 3L7 19l-4 1 1-4z"/>',
-    trash:  '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>'
+    trash:  '<polyline points="3 6 5 6 21 6"/><path d="M19 6l-1 14a2 2 0 0 1-2 2H8a2 2 0 0 1-2-2L5 6"/><line x1="10" y1="11" x2="10" y2="17"/><line x1="14" y1="11" x2="14" y2="17"/><path d="M9 6V4a1 1 0 0 1 1-1h4a1 1 0 0 1 1 1v2"/>',
+    sparkles: '<path d="M12 4l1.7 4.8L18.5 10l-4.8 1.5L12 16l-1.5-4.5L5.5 10l4.8-1.2z"/><path d="M18.5 4.5l.6 1.7 1.7.6-1.7.6-.6 1.7-.6-1.7-1.7-.6 1.7-.6z"/>'
   };
   function svg(name, sz, sw) {
     sz = sz || 14; sw = sw || 1.7;
@@ -176,7 +177,9 @@
     const searchTxt = o.searchValue ? o.searchValue : 'buscar nombre / proyecto / branch…';
 
     return '<header class="topbar">' +
-      '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span><span class="brand-ver">' + esc(o.version || 'v1.5.1') + '</span></div>' +
+      '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span>' +
+        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.5.2') + '</span>' +
+        '<button class="brand-changelog" data-act="changelog-all" title="ver todas las novedades">' + svg('sparkles', 10, 1.7) + '<span>Changelog</span></button></span></div>' +
       '<div class="divider-v"></div>' +
       '<div class="counters">' +
         '<span><b>' + total + '</b> sesiones</span><span class="sep">·</span>' +
@@ -313,7 +316,7 @@
         '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
         '<button class="sbtn" data-act="theme">' + svg('moon', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v1.5.1') + '</span></div>' +
+        '<span class="ver">' + esc(o.version || 'v1.5.2') + '</span></div>' +
     '</aside>';
   }
 

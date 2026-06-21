@@ -54,6 +54,7 @@
     notifOpen: false,
     notifHistoryOpen: false,     // overlay "ver todas"
     changelogOpen: false,
+    changelogAllOpen: false,     // pantalla full de Changelog (timeline de versiones)
   };
 
   /* ── estados manuales del frente (privados, on-brand con tokens) ── */
@@ -488,6 +489,82 @@
     setOverlay(html);
   }
   function closeChangelog() { state.changelogOpen = false; setOverlay(''); }
+
+  /* ════════ CHANGELOG COMPLETO (pantalla full, timeline de versiones) ════════
+     Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
+     Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
+  var CHANGELOG = [
+    { v: '1.5.2', date: '21 jun 2026', title: 'Historial de novedades', items: [
+      'Nueva pantalla de Changelog: un registro completo de todo lo que cambió en Consomni, versión por versión, accesible desde el número de versión.',
+    ] },
+    { v: '1.5.1', date: '21 jun 2026', title: 'Terminal y notificaciones', items: [
+      'Links clickeables en la terminal: las URLs se abren completas en el navegador, incluso las largas que ocupan varias líneas (como la del login de Claude).',
+      'Copiar y pegar con Ctrl+C y Ctrl+V (y sus variantes con Shift), más un menú de click derecho.',
+      'Soporte para el atajo "c to copy" de Claude.',
+      'Las notificaciones ahora persisten y se pueden revisar todas desde un historial.',
+    ] },
+    { v: '1.5.0', date: '21 jun 2026', title: 'Dock de terminales', items: [
+      'Entrar a un proyecto abre un selector de conversaciones de Claude acotado a ese proyecto.',
+      'La cabecera del dock muestra el nombre del proyecto en el que estás.',
+      'Botones por panel para continuar una sesión de Claude, con o sin permisos.',
+      'Ctrl+Espacio abre una terminal nueva, configurable desde Settings.',
+      'El sidebar ya no se colapsa solo al entrar a un proyecto.',
+    ] },
+    { v: '1.4.0', date: '20 jun 2026', title: 'Biblioteca', items: [
+      'Guardá, editá y reutilizá tus prompts, skills y reglas favoritas en una biblioteca local.',
+    ] },
+    { v: '1.3.0', date: '20 jun 2026', title: 'Planes, comandos y tutorial', items: [
+      'Tablero de planes y frentes: qué está pendiente y qué ya se hizo, por proyecto.',
+      'Comandos rápidos en la terminal: atajos y traducción de lenguaje natural a comandos.',
+      'Centro de notificaciones con el changelog de cada versión.',
+      'Tutorial guiado para las funciones nuevas.',
+    ] },
+    { v: '1.2.0', date: '19 jun 2026', title: 'Instalación y actualizaciones', items: [
+      'Instalador con acceso directo opcional en el escritorio.',
+      'Actualizaciones automáticas: aviso de versión nueva y botón para actualizar desde la app.',
+      'Dock contextual por proyecto, terminales fijables y Claude sin permisos.',
+    ] },
+    { v: '1.0.0', date: '19 jun 2026', title: 'Primera versión estable', items: [
+      'Consomni llega a producción: monitoreo y orquestación de tus sesiones de Claude Code, 100% local.',
+    ] },
+    { v: '0.6.0', date: '19 jun 2026', title: 'Terminales embebidas', items: [
+      'Consomni dejó de ser solo un observador: ahora hospeda terminales reales adentro, shell o Claude, con paneles divisibles.',
+    ] },
+    { v: '0.5.0', date: '19 jun 2026', title: 'Pulido y empaquetado', items: [
+      'Chequeo de actualizaciones, icono propio y la app empaquetada para Windows.',
+    ] },
+    { v: '0.1.0', date: '19 jun 2026', title: 'El monitor', items: [
+      'La base de todo: monitoreo en tiempo real de tus sesiones de Claude Code, leyendo los transcripts en disco.',
+    ] },
+  ];
+  function openChangelogAll() {
+    state.changelogAllOpen = true;
+    var rows = CHANGELOG.map(function (e, i) {
+      var latest = i === 0;
+      var items = (e.items || []).map(function (it) { return '<li>' + esc(it) + '</li>'; }).join('');
+      return '<div class="chl-entry' + (latest ? ' latest' : '') + '" style="animation-delay:' + Math.min(i * 45, 360) + 'ms">' +
+        '<div class="chl-vrow"><span class="chl-v">v' + esc(e.v) + '</span>' +
+          (latest ? '<span class="chl-pill">actual</span>' : '') +
+          '<span class="chl-date">' + esc(e.date || '') + '</span></div>' +
+        (e.title ? '<div class="chl-etitle">' + esc(e.title) + '</div>' : '') +
+        '<ul class="chl-items">' + items + '</ul>' +
+      '</div>';
+    }).join('');
+    var html = '<div class="chl-screen" role="dialog" aria-modal="true">' +
+      '<div class="chl-top"><span class="chl-brand">' + C.eye(22, false) + '<span class="chl-wm">CONSOMNI</span></span>' +
+        '<span class="chl-tdiv"></span><span class="chl-toplabel">Changelog</span>' +
+        '<button class="chl-close" data-act="close-changelog-all" title="cerrar (Esc)">' + C.svg('x', 15, 2) + '</button></div>' +
+      '<div class="chl-scroll"><div class="chl-wrap">' +
+        '<div class="chl-hero"><span class="chl-eyebrow">' + C.svg('sparkles', 13, 1.8) + ' Novedades</span>' +
+          '<h1>Todo lo que fue cambiando</h1>' +
+          '<p>El registro completo de Consomni, versión por versión. Cien por ciento local, sin telemetría — como toda la app.</p></div>' +
+        '<div class="chl-timeline">' + rows + '</div>' +
+        '<div class="chl-foot2"><span>¿Querés el detalle técnico de cada release?</span>' +
+          '<a data-href="https://github.com/JoaquimColacilli/consomni/releases">' + C.svg('ext', 12, 2) + ' Verlo en GitHub</a></div>' +
+      '</div></div></div>';
+    setOverlay(html);
+  }
+  function closeChangelogAll() { state.changelogAllOpen = false; setOverlay(''); }
   // mini-render markdown SEGURO (escapa TODO primero, después aplica un puñado de reglas)
   function renderNotes(md) {
     var lines = String(md).replace(/\r/g, '').split('\n');
@@ -1693,11 +1770,12 @@
   }
 
   /* ── overlay host ── */
-  function setOverlay(html) { var o = document.getElementById('overlays'); if (o) o.innerHTML = html; if (!html) { state.helpOpen = false; state.settingsOpen = false; state.changelogOpen = false; state.libEditOpen = false; state.notifHistoryOpen = false; } }
-  function anyOverlayOpen() { return state.paletteOpen || !!state.detailId || state.helpOpen || state.settingsOpen || state.changelogOpen || state.libEditOpen || state.notifHistoryOpen; }
+  function setOverlay(html) { var o = document.getElementById('overlays'); if (o) o.innerHTML = html; if (!html) { state.helpOpen = false; state.settingsOpen = false; state.changelogOpen = false; state.changelogAllOpen = false; state.libEditOpen = false; state.notifHistoryOpen = false; } }
+  function anyOverlayOpen() { return state.paletteOpen || !!state.detailId || state.helpOpen || state.settingsOpen || state.changelogOpen || state.changelogAllOpen || state.libEditOpen || state.notifHistoryOpen; }
   function closeOverlays() {
     if (state.libEditOpen) { closeLibEdit(); return; }
     if (state.paletteOpen) { closePalette(); return; }
+    if (state.changelogAllOpen) { closeChangelogAll(); return; }
     if (state.notifHistoryOpen) { closeNotifHistory(); return; }
     if (state.changelogOpen) { closeChangelog(); return; }
     if (state.detailId) { closeDetail(); return; }
@@ -1775,6 +1853,8 @@
       if (act === 'close-notif-history') { if (t.classList.contains('cl-scrim') || actEl.tagName === 'BUTTON') closeNotifHistory(); return; }
       if (act === 'notif-clear') { e.stopPropagation(); state.notifs = []; applyNotifBadge(); persistNotifs(); closeNotifPanel(); if (state.notifHistoryOpen) closeNotifHistory(); return; }
       if (act === 'close-changelog') { if (t.classList.contains('cl-scrim') || actEl.tagName === 'BUTTON') closeChangelog(); return; }
+      if (act === 'changelog-all') { e.stopPropagation(); closeNotifPanel(); openChangelogAll(); return; }
+      if (act === 'close-changelog-all') { e.stopPropagation(); closeChangelogAll(); return; }
       if (act === 'changelog-update') { e.stopPropagation(); closeChangelog(); startUpdateDownload(); return; }
       if (act === 'settings') { openSettings(); return; }
       if (act === 'terminals') { if (window.ConsomniTerms) window.ConsomniTerms.toggle(); return; }
@@ -2077,7 +2157,7 @@
     openPalette: openPalette, openDetail: openDetail, openHelp: openHelp, openSettings: openSettings,
     openPlans: openPlans, closePlans: closePlans,
     openLibrary: openLibrary, closeLibrary: closeLibrary, openLibEdit: openLibEdit, startLibraryTour: startLibraryTour,
-    startTutorial: startPlanTour, openNotifs: openNotifPanel, openNotifHistory: openNotifHistory, openChangelog: openChangelog,
+    startTutorial: startPlanTour, openNotifs: openNotifPanel, openNotifHistory: openNotifHistory, openChangelog: openChangelog, openChangelogAll: openChangelogAll,
     setActiveProject: setActiveProject, activateSearch: activateSearch,
     toggleDensity: toggleDensity, showOnboarding: showOnboarding,
     enterSplit: enterSplit, exitSplit: exitSplit, dispatchAction: dispatchAction,

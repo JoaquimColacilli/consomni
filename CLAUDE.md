@@ -565,6 +565,30 @@ bloqueada (CSP `connect-src 'self'`) → `navigator.clipboard` NO sirve; todo va
 
 ---
 
+## v1.5.2 — Pantalla de Changelog (timeline de versiones)
+> Pedido del usuario: debajo del número de versión, un botón "Changelog" que abre una **pantalla full,
+> excesivamente hermosa**, con TODAS las versiones. Bump **1.5.1 → 1.5.2** (`package.json` + fallbacks
+> `brand-ver`/`.ver` en `chrome.js`). Aditivo, 100% tokens existentes, **sin emojis**, verificado por screenshot.
+> 100% local/offline: el registro está **bundleado** en el renderer (no se pega a GitHub) → sin red, control
+> total del formato, e incluye versiones que no tienen GitHub Release.
+
+- **Trigger** (`chrome.js`): el brand del topbar pasó a `eye + wordmark + .brand-meta`, donde `.brand-meta` es
+  una **columna**: `.brand-ver` (la versión) arriba y un `<button class="brand-changelog" data-act="changelog-all">`
+  abajo (ícono `sparkles` nuevo + texto "Changelog"). CSS aditivo `.brand-meta`/`.brand-changelog` (hover verde).
+- **Datos** (`app.js`): const `CHANGELOG` = array newest-first `{v, date, title, items[]}`, curado y
+  user-facing (sin jerga, sin emojis). **Al sacar una versión nueva: agregar su entrada arriba.** (No usa las
+  release notes de GitHub porque esas llevan emojis y no todas las versiones viejas tienen Release.)
+- **Pantalla** (`app.js openChangelogAll`/`closeChangelogAll`, `state.changelogAllOpen`): overlay full
+  (`setOverlay`) `.chl-screen` (z-index 70, sobre el dock) con topbar (eye + CONSOMNI + "Changelog" + cerrar),
+  hero (eyebrow "Novedades" + título + bajada) y un **timeline** (`.chl-timeline` con riel vertical + dots; el
+  más nuevo va verde con pill "actual", los viejos con dot hueco; cada entrada: versión + fecha + título +
+  bullets con marcador cuadrado verde). Footer con link a GitHub Releases (`data-href`). Entra en
+  `anyOverlayOpen`/`closeOverlays`/`setOverlay('')` (Esc); click handlers `changelog-all`/`close-changelog-all`.
+  CSS aditivo `.chl-*` (tokens existentes, gradientes verdes sutiles, animaciones `chlScreenIn`/`chlEntryIn`,
+  responsive `<560px`). Ícono nuevo `sparkles` en `chrome.js`. QA: `__consomni.openChangelogAll()`.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).
