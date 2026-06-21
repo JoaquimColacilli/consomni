@@ -19,7 +19,7 @@
    ════════════════════════════════════════════════════════════════ */
 (function (g) {
   'use strict';
-  var C = g.Chrome, api = g.consomni, Terminal = g.Terminal, FitNS = g.FitAddon;
+  var C = g.Chrome, api = g.consomni, Terminal = g.Terminal, FitNS = g.FitAddon, WebLinksNS = g.WebLinksAddon;
 
   var host = null, rootEl = null, poolEl = null, dropInd = null, countEl = null;
   var terms = new Map();       // ptyId -> { term, fit, pane, ro }
@@ -434,6 +434,62 @@
     persist();
   }
 
+  /* ── copiar / pegar / seleccionar (clipboard vía IPC; navigator.clipboard está bloqueado por la CSP) ── */
+  function termCopy(term) {
+    try {
+      if (term.hasSelection && term.hasSelection()) {
+        var sel = term.getSelection();
+        if (sel && api && api.action) api.action('copyText', { text: sel }).catch(function () {});
+        try { term.clearSelection(); } catch (e) {}   // así un 2º Ctrl+C cae a SIGINT
+        return true;
+      }
+    } catch (e) {}
+    return false;   // sin selección → el caller deja pasar la tecla
+  }
+  function termPaste(term) {
+    try {
+      if (api && api.clipboardRead) api.clipboardRead().then(function (txt) {
+        if (txt) { try { term.paste(txt); } catch (e) {} }   // term.paste respeta bracketed-paste
+        try { term.focus(); } catch (e) {}                    // re-focus (la lectura es async)
+      }).catch(function () {});
+    } catch (e) {}
+  }
+  function termSelectAll(term) { try { term.selectAll(); } catch (e) {} }
+
+  // menú contextual (copiar/pegar/seleccionar todo) sobre la terminal. Vive en document.body (fuera de
+  // #terminals) → no lo traga el handler global de clicks de app.js.
+  function closeTermCtx() {
+    var m = g.document.getElementById('dkCtx'); if (m) m.remove();
+    g.document.removeEventListener('mousedown', onCtxOutside, true);
+    g.document.removeEventListener('keydown', onCtxKey, true);
+  }
+  function onCtxOutside(e) { if (!e.target.closest || !e.target.closest('#dkCtx')) closeTermCtx(); }
+  function onCtxKey(e) { if (e.key === 'Escape') { e.preventDefault(); closeTermCtx(); } }
+  function showTermCtx(x, y, term) {
+    closeTermCtx();
+    var hasSel = false; try { hasSel = !!(term.hasSelection && term.hasSelection()); } catch (e) {}
+    var m = g.document.createElement('div');
+    m.id = 'dkCtx'; m.className = 'dk-ctx';
+    m.innerHTML =
+      '<button class="dk-ctx-i" data-ctx="copy"' + (hasSel ? '' : ' disabled') + '>Copiar</button>' +
+      '<button class="dk-ctx-i" data-ctx="paste">Pegar</button>' +
+      '<button class="dk-ctx-i" data-ctx="all">Seleccionar todo</button>';
+    g.document.body.appendChild(m);
+    var mw = m.offsetWidth || 168, mh = m.offsetHeight || 96;
+    m.style.left = Math.max(4, Math.min(x, g.innerWidth - mw - 4)) + 'px';
+    m.style.top = Math.max(4, Math.min(y, g.innerHeight - mh - 4)) + 'px';
+    m.addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('[data-ctx]'); if (!b || b.disabled) return;
+      var act = b.getAttribute('data-ctx');
+      if (act === 'copy') termCopy(term); else if (act === 'paste') termPaste(term); else if (act === 'all') termSelectAll(term);
+      closeTermCtx(); try { term.focus(); } catch (e2) {}
+    });
+    setTimeout(function () {
+      g.document.addEventListener('mousedown', onCtxOutside, true);
+      g.document.addEventListener('keydown', onCtxKey, true);
+    }, 0);
+  }
+
   // monta xterm + PTY dentro de un panel YA colocado (lo usa spawn y la restauración)
   // pick (sin resume): `claude --resume` abre el SELECTOR interactivo scopeado al cwd del proyecto.
   function mountTerminal(pane, kind, cwd, resume, skip, pick) {
@@ -459,14 +515,47 @@
     });
     var fit = new FitNS.FitAddon();
     term.loadAddon(fit);
+    // links clickeables: une filas envueltas (la URL de login de claude entra en 3 filas) → abre la URL ENTERA
+    // en el navegador del SO. El handler propio sobrescribe el window.open del addon (que la CSP bloquearía).
+    try {
+      if (WebLinksNS && WebLinksNS.WebLinksAddon) {
+        term.loadAddon(new WebLinksNS.WebLinksAddon(function (ev, uri) {
+          try { if (api && api.action) api.action('openExternal', { url: uri }).catch(function () {}); } catch (e) {}
+        }));
+      }
+    } catch (e) {}
     term.open(body);
-    // CTRL+ESPACIO dentro de la terminal → abre OTRA terminal nueva (no manda NUL al shell)
+    // CTRL+ESPACIO → otra terminal · Ctrl+C/Ctrl+Shift+C copiar (preservando SIGINT) · Ctrl+V/Ctrl+Shift+V pegar
     try {
       term.attachCustomKeyEventHandler(function (ev) {
-        if (ev.type === 'keydown' && ev.ctrlKey && ev.code === 'Space') { if (quickTermHook) quickTermHook(); return false; }
+        if (ev.type !== 'keydown') return true;
+        if (ev.ctrlKey && ev.code === 'Space') { if (quickTermHook) quickTermHook(); return false; }
+        if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') { termCopy(term); return false; }              // copiar siempre
+        if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.code === 'KeyC') {
+          if (termCopy(term)) return false;   // había selección → copió + limpió → no mandar nada
+          return true;                        // sin selección → la shell recibe SIGINT (\x03)
+        }
+        if (ev.ctrlKey && ev.code === 'KeyV') { termPaste(term); return false; }                            // pegar (Ctrl+V / Ctrl+Shift+V)
         return true;
       });
     } catch (e) {}
+    // "c to copy" de claude (OSC 52): decodificá base64 UTF-8 y copiá al portapapeles (sin addon extra)
+    try {
+      term.parser.registerOscHandler(52, function (data) {
+        try {
+          var semi = String(data || '').indexOf(';'); if (semi < 0) return true;
+          var b64 = data.slice(semi + 1);
+          if (!b64 || b64 === '?') return true;                       // query de lectura → ignorar
+          var bin = atob(b64), bytes = new Uint8Array(bin.length);
+          for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i) & 0xff;
+          var text = new TextDecoder('utf-8').decode(bytes);
+          if (text && api && api.action) api.action('copyText', { text: text }).catch(function () {});
+        } catch (e) {}
+        return true;
+      });
+    } catch (e) {}
+    // menú contextual (click derecho): copiar / pegar / seleccionar todo
+    try { body.addEventListener('contextmenu', function (ev) { ev.preventDefault(); showTermCtx(ev.clientX, ev.clientY, term); }); } catch (e) {}
 
     var ro = null;
     if (g.ResizeObserver) { ro = new g.ResizeObserver(function () { try { fit.fit(); } catch (e) {} }); ro.observe(body); }

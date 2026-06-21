@@ -515,6 +515,56 @@ Fallback: `curl.exe`. Tipos `http`/`mcp_tool` NO confirmados en 2.1.181 → usar
 
 ---
 
+## v1.5.1 — Terminal (links/copiar/pegar/login) + persistencia de notificaciones
+> Dos fixes (feedback de Facundo sobre 1.5.0). Bump **1.5.0 → 1.5.1** (`package.json` + fallbacks
+> `brand-ver`/`.ver` en `chrome.js`). La terminal **debe andar perfecto**. Aditivo, respeta las 3 Hard Rules.
+> Verificado en vivo por screenshot (menú contextual, persistencia, historial); TS compila limpio.
+
+### 1) Terminal embebida (xterm): links clickeables + copiar + pegar + OSC52 + menú contextual
+Todo en `mountTerminal` de `terminals-ui.js` (único camino para shell **y** claude; las sesiones read-only no
+pasan por ahí). Todo guardado en try/catch (un fallo de clipboard/addon nunca rompe la terminal). La red está
+bloqueada (CSP `connect-src 'self'`) → `navigator.clipboard` NO sirve; todo va por IPC del preload.
+- **Links** (`@xterm/addon-web-links@0.12.0`, devDep, vendorizado a `assets/xterm/addon-web-links.js`, `<script>`
+  en `index.html` tras `addon-fit.js`; global UMD `window.WebLinksAddon`, ctor `WebLinksAddon.WebLinksAddon`):
+  `term.loadAddon(new WebLinksAddon((ev,uri)=>api.action('openExternal',{url:uri})))` — el handler propio
+  sobrescribe el `window.open` (que la CSP bloquearía). **Une filas envueltas** → la URL de login de claude (3
+  filas) se abre ENTERA → fix del 404 al copiarla a mano. https-only (login es https).
+- **Copiar/pegar/select** (helpers module-scope `termCopy`/`termPaste`/`termSelectAll`): copiar vía
+  `api.action('copyText',{text:getSelection()})` + `clearSelection()`; pegar vía `api.clipboardRead()` →
+  `term.paste(txt)` (respeta bracketed-paste) + `term.focus()`.
+- **Teclado** (extendido en el `attachCustomKeyEventHandler` que ya tenía Ctrl+Espacio, con `ev.code`):
+  `Ctrl+Shift+C` copia siempre; `Ctrl+C` copia si hay selección (y la limpia → un 2º Ctrl+C cae a **SIGINT**),
+  si no hay selección deja pasar (`return true`, la shell recibe `\x03`); `Ctrl+V`/`Ctrl+Shift+V` pegan.
+- **"c to copy" de claude (OSC 52)**: `term.parser.registerOscHandler(52, data => …)` — toma lo posterior al 1er
+  `;`, `atob` → `Uint8Array` → `TextDecoder('utf-8')` (UTF-8 correcto), `api.action('copyText',{text})`. Ignora
+  el query `?`. **Sin** `@xterm/addon-clipboard`.
+- **Menú contextual** (click derecho en `.dk-pane-body` → `showTermCtx`): `.dk-ctx` en `document.body` (fuera de
+  `#terminals`, así no lo traga el handler global de clicks), z-index 57, clamp al viewport, con **Copiar**
+  (disabled sin selección) / **Pegar** / **Seleccionar todo**; cierra con click afuera / Esc. CSS aditivo
+  `.dk-ctx`/`.dk-ctx-i` con tokens existentes.
+- **Plumbing nuevo de clipboard READ** (para pegar): IPC `consomni:clipboardRead` (`index.ts`, importa `clipboard`
+  de electron) → preload `clipboardRead()`. El WRITE reusa `api.action('copyText',{text})` (ya existía).
+
+### 2) Notificaciones: persistencia + historial ("ver todas")
+- **Causa raíz del bug** (las notifs desaparecían al actualizar aunque estuvieran sin leer): `state.notifs` vivía
+  solo en MEMORIA; tras actualizar no se vuelve a emitir `update-available` (ya estás en la última) → lista vacía.
+- **Persistencia** en `~/.consomni/notifications.json` (store dedicado, espejo de `loadDock/saveDock`):
+  `config.ts loadNotifications/saveNotifications` + `NOTIFICATIONS_PATH`; IPC `getNotifications`/`saveNotifications`
+  (`index.ts`); preload bridges. Shape `{notifs:[{id,kind,title,body,data,ts,read}]}`, cap 60. Se carga al iniciar
+  (espejo del load de la biblioteca). Se reemplazó el `localStorage 'consomni.notif.seen'` (no confiable bajo
+  file://) por el flag `read` por-notif.
+- **Modelo** (`app.js`): `addNotif` dedupea por id **preservando `read`** (no resucita como no-leída);
+  `persistNotifs()` debounced 300ms; badge = no-leídas (`unreadCount`); `markAllSeen()` marca `read=true` (lo
+  llama abrir el panel / el historial). **2.1 resuelto:** la notif sobrevive reinicio/update como `read:false`
+  hasta que abrís la campanita; nunca sale del historial al leerse (solo el "limpiar" la borra).
+- **UI:** la campanita (`openNotifPanel`) muestra las recientes (~6) + footer **"ver todas (N)"**
+  (`data-act="notif-all"`); `openNotifHistory()` = overlay on-brand **reusando** las clases del changelog
+  (`.cl-*`) + `.ntf-row`, lista TODAS, filas update clickeables → `openChangelog`. `state.notifHistoryOpen`
+  entra en `anyOverlayOpen`/`closeOverlays`/`setOverlay('')` (Esc/scrim). CSS aditivo `.ntf-foot`/`.ntf-all`.
+  QA: `__consomni.openNotifHistory()`.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

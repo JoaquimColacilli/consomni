@@ -43,6 +43,7 @@ export const CONFIG_PATH = path.join(CONSOMNI_DIR, 'config.json');
 export const STATE_PATH = path.join(CONSOMNI_DIR, 'state.json');
 export const DOCK_PATH = path.join(CONSOMNI_DIR, 'dock.json');
 export const LIBRARY_PATH = path.join(CONSOMNI_DIR, 'library.json');
+export const NOTIFICATIONS_PATH = path.join(CONSOMNI_DIR, 'notifications.json');
 export const BACKUPS_DIR = path.join(CONSOMNI_DIR, 'backups');
 export const SETUP_LOG = path.join(CONSOMNI_DIR, 'setup.log');
 
@@ -133,6 +134,19 @@ export function loadDock(): any {
 export function saveDock(data: any): void {
   ensureConsomniDir();
   try { fs.writeFileSync(DOCK_PATH, JSON.stringify(data), 'utf8'); } catch { /* noop */ }
+}
+
+/* ── centro de notificaciones (store dedicado) ──
+   La LISTA persiste para que una notif sin leer sobreviva reinicios/updates (solo se va al "limpiar"). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function loadNotifications(): any {
+  try { if (fs.existsSync(NOTIFICATIONS_PATH)) return JSON.parse(fs.readFileSync(NOTIFICATIONS_PATH, 'utf8')); } catch { /* noop */ }
+  return null;
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function saveNotifications(data: any): void {
+  ensureConsomniDir();
+  try { fs.writeFileSync(NOTIFICATIONS_PATH, JSON.stringify(data), 'utf8'); } catch { /* noop */ }
 }
 
 /* ── biblioteca de prompts/skills/rules (store dedicado, NO config.json) ──

@@ -37,6 +37,8 @@ const api = {
   action: (name: string, payload: any): Promise<{ ok: boolean; message?: string; error?: string }> =>
     ipcRenderer.invoke('consomni:action', { name, payload }),
   setMuted: (v: boolean): Promise<boolean> => ipcRenderer.invoke('consomni:setMuted', v),
+  /** Lee el portapapeles del SO (para PEGAR en la terminal; navigator.clipboard está bloqueado por la CSP). */
+  clipboardRead: (): Promise<string> => ipcRenderer.invoke('consomni:clipboardRead'),
   /** El main pide saltar a una sesión (click en la notificación nativa). */
   onJump: (cb: (sid: string) => void): (() => void) => {
     const listener = (_e: unknown, sid: string): void => cb(sid);
@@ -54,6 +56,11 @@ const api = {
   getLibrary: (): Promise<{ entries: any[]; seeded: boolean }> => ipcRenderer.invoke('consomni:getLibrary'),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   saveLibrary: (data: any): void => ipcRenderer.send('consomni:saveLibrary', data),
+  /* ── centro de notificaciones (store dedicado, persiste hasta "limpiar") ── */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getNotifications: (): Promise<any> => ipcRenderer.invoke('consomni:getNotifications'),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  saveNotifications: (data: any): void => ipcRenderer.send('consomni:saveNotifications', data),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   exportLibrary: (entries: any[]): Promise<{ ok: boolean; path?: string; count?: number; error?: string }> =>
     ipcRenderer.invoke('consomni:exportLibrary', entries),

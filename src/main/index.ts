@@ -3,14 +3,14 @@
    Bootstrap del proceso main: ventana, seguridad, network guard, IPC.
    Hard Rule 3: cero red salvo 127.0.0.1.
    ════════════════════════════════════════════════════════════════ */
-import { app, BrowserWindow, ipcMain, session, Notification, dialog } from 'electron';
+import { app, BrowserWindow, ipcMain, session, Notification, dialog, clipboard } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
 import { start as startSessions, stop as stopSessions, buildSnapshot, rescanNow, setHooksConnected, applyHookEvent, getDetail, findSessionFile, findPlanDocs, setAttnCallback, restartWatcher, type AttnInfo } from './sessions';
 import { runAction, type ActionPayload } from './actions';
 import { startHooksServer, stopHooksServer, isServerListening } from './hooks-server';
 import { install as installHooks, uninstall as uninstallHooks, getStatus as getHooksStatus, isInstalled } from './hooks-install';
-import { loadConfig, saveConfig, setLocalState, loadDock, saveDock, loadLibrary, saveLibrary, type AppConfig } from './config';
+import { loadConfig, saveConfig, setLocalState, loadDock, saveDock, loadLibrary, saveLibrary, loadNotifications, saveNotifications, type AppConfig } from './config';
 import { checkForUpdate, initAutoUpdate, triggerAutoCheck, downloadUpdate } from './updates';
 import { setTerminalWindow, createTerm, writeTerm, resizeTerm, killTerm, listTerms, killAllTerms, terminalsAvailable, nlToCommand } from './terminals';
 import type { Snapshot, LocalSessionState } from './types';
@@ -190,6 +190,14 @@ if (!gotLock) {
     ipcMain.handle('consomni:getDock', () => loadDock());
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ipcMain.on('consomni:saveDock', (_e, data: any) => saveDock(data));
+
+    // lectura del portapapeles (para PEGAR en la terminal embebida; navigator.clipboard está bloqueado por la CSP)
+    ipcMain.handle('consomni:clipboardRead', () => { try { return clipboard.readText(); } catch { return ''; } });
+
+    // centro de notificaciones persistido (sobrevive reinicios/updates; solo se va al "limpiar")
+    ipcMain.handle('consomni:getNotifications', () => loadNotifications());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ipcMain.on('consomni:saveNotifications', (_e, data: any) => saveNotifications(data));
 
     // ── biblioteca de prompts/skills/rules (store dedicado, 100% local) ──
     ipcMain.handle('consomni:getLibrary', () => loadLibrary());

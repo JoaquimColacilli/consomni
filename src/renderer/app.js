@@ -50,9 +50,9 @@
     libEditOpen: false,          // editor (modal) abierto
     libEditId: null,             // id en edición (null = item nuevo)
     nlHelper: false,             // helper "comando IA" en las terminales (opt-in)
-    notifs: [],                  // centro de notificaciones (nuevas versiones, …)
-    notifSeen: [],               // ids ya vistos (badge)
+    notifs: [],                  // centro de notificaciones (nuevas versiones, …) — persiste en notifications.json
     notifOpen: false,
+    notifHistoryOpen: false,     // overlay "ver todas"
     changelogOpen: false,
   };
 
@@ -385,33 +385,52 @@
   /* ════════ NOTIFICACIONES (centro + changelog de la versión) ════════
      Módulo simple: avisa nuevas versiones; al click → modal con el changelog
      (release notes del repo, render markdown SEGURO). Extensible a futuro. */
-  function loadNotifSeen() { try { return JSON.parse(localStorage.getItem('consomni.notif.seen') || '[]'); } catch (e) { return []; } }
-  function saveNotifSeen(arr) { try { localStorage.setItem('consomni.notif.seen', JSON.stringify(arr.slice(-50))); } catch (e) {} }
+  // Persistencia: la LISTA vive en ~/.consomni/notifications.json (localStorage no es confiable bajo file://).
+  // Cada notif tiene `read`; el badge cuenta las NO leídas. Sobreviven reinicios/updates → solo se van al "limpiar".
+  var notifPersistTimer = null;
+  function persistNotifs() {
+    if (notifPersistTimer) clearTimeout(notifPersistTimer);
+    notifPersistTimer = setTimeout(function () {
+      try { if (api && api.saveNotifications) api.saveNotifications({ notifs: state.notifs.slice(0, 60) }); } catch (e) {}
+    }, 300);
+  }
   function addNotif(n) {
     if (!n || !n.id) return;
-    for (var i = 0; i < state.notifs.length; i++) if (state.notifs[i].id === n.id) { state.notifs[i] = Object.assign(state.notifs[i], n); applyNotifBadge(); return; }
+    for (var i = 0; i < state.notifs.length; i++) if (state.notifs[i].id === n.id) {
+      var wasRead = state.notifs[i].read;
+      state.notifs[i] = Object.assign(state.notifs[i], n);
+      state.notifs[i].read = wasRead;                 // dedupe NO la resucita como no-leída
+      applyNotifBadge(); persistNotifs(); return;
+    }
     n.ts = n.ts || Date.now();
+    if (n.read == null) n.read = false;
     state.notifs.unshift(n);
-    if (state.notifs.length > 40) state.notifs.length = 40;
-    applyNotifBadge();
+    if (state.notifs.length > 60) state.notifs.length = 60;
+    applyNotifBadge(); persistNotifs();
   }
   function addUpdateNotif(data) {
     if (!data || !data.latest) return;
     addNotif({ id: 'update-' + data.latest, kind: 'update', title: 'Nueva versión ' + (data.name ? data.name : 'v' + data.latest), body: 'Tocá para ver las novedades de esta versión.', data: data });
   }
-  function unseenCount() { var seen = state.notifSeen || []; return state.notifs.filter(function (n) { return seen.indexOf(n.id) < 0; }).length; }
+  function unreadCount() { return state.notifs.filter(function (n) { return n.read !== true; }).length; }
   function applyNotifBadge() {
     var b = document.querySelector('.notif-badge'); if (!b) return;
-    var c = unseenCount();
+    var c = unreadCount();
     if (c > 0) { b.hidden = false; b.textContent = c > 9 ? '9+' : String(c); } else { b.hidden = true; }
   }
-  function markAllSeen() {
-    var seen = (state.notifSeen || []).slice();
-    state.notifs.forEach(function (n) { if (seen.indexOf(n.id) < 0) seen.push(n.id); });
-    state.notifSeen = seen; saveNotifSeen(seen); applyNotifBadge();
-  }
+  // abrir el panel / historial = "leídas" → limpia el badge, pero NO las saca del historial (solo el "limpiar" lo hace)
+  function markAllSeen() { state.notifs.forEach(function (n) { n.read = true; }); applyNotifBadge(); persistNotifs(); }
   function closeNotifPanel() { state.notifOpen = false; var p = document.getElementById('notifPanel'); if (p) p.remove(); }
   function notifById(id) { for (var i = 0; i < state.notifs.length; i++) if (state.notifs[i].id === id) return state.notifs[i]; return null; }
+  function notifRowHtml(n) {
+    var unseen = n.read !== true;
+    var ic = n.kind === 'update' ? 'download' : 'bell';
+    return '<div class="ntf-row' + (unseen ? ' unseen' : '') + (n.kind === 'update' ? ' clickable' : '') + '" data-notif="' + esc(n.id) + '">' +
+      '<span class="ntf-ic">' + C.svg(ic, 15, 1.8) + '</span>' +
+      '<span class="ntf-bd"><span class="ntf-ttl">' + esc(n.title) + '</span><span class="ntf-tx">' + esc(n.body || '') + '</span><span class="ntf-ts">' + relTime(n.ts) + '</span></span>' +
+      (n.kind === 'update' ? '<span class="ntf-go">' + C.svg('chevR', 13, 2.2) + '</span>' : '') +
+    '</div>';
+  }
   function openNotifPanel() {
     closeNotifPanel(); closeSortMenu();
     state.notifOpen = true;
@@ -420,22 +439,34 @@
     var p = document.createElement('div');
     p.id = 'notifPanel'; p.className = 'notif-panel';
     p.style.top = (r.bottom + 7) + 'px';
-    var seen = state.notifSeen || [];
-    var rows = state.notifs.length ? state.notifs.map(function (n) {
-      var unseen = seen.indexOf(n.id) < 0;
-      var ic = n.kind === 'update' ? 'download' : 'bell';
-      return '<div class="ntf-row' + (unseen ? ' unseen' : '') + (n.kind === 'update' ? ' clickable' : '') + '" data-notif="' + esc(n.id) + '">' +
-        '<span class="ntf-ic">' + C.svg(ic, 15, 1.8) + '</span>' +
-        '<span class="ntf-bd"><span class="ntf-ttl">' + esc(n.title) + '</span><span class="ntf-tx">' + esc(n.body || '') + '</span><span class="ntf-ts">' + relTime(n.ts) + '</span></span>' +
-        (n.kind === 'update' ? '<span class="ntf-go">' + C.svg('chevR', 13, 2.2) + '</span>' : '') +
-      '</div>';
-    }).join('') : '<div class="ntf-empty">' + C.svg('check', 16, 2) + ' estás al día · sin novedades</div>';
+    var recent = state.notifs.slice(0, 6);
+    var rows = recent.length ? recent.map(notifRowHtml).join('') : '<div class="ntf-empty">' + C.svg('check', 16, 2) + ' estás al día · sin novedades</div>';
     p.innerHTML = '<div class="ntf-head"><span class="ntf-h-ttl">NOTIFICACIONES</span>' +
       (state.notifs.length ? '<button class="ntf-clear" data-act="notif-clear">limpiar</button>' : '') + '</div>' +
-      '<div class="ntf-list">' + rows + '</div>';
+      '<div class="ntf-list">' + rows + '</div>' +
+      (state.notifs.length ? '<div class="ntf-foot"><button class="ntf-all" data-act="notif-all">ver todas (' + state.notifs.length + ')</button></div>' : '');
     document.body.appendChild(p);
     markAllSeen();
   }
+  // historial completo (apartado de notificaciones): overlay on-brand reusando las clases del changelog
+  function openNotifHistory() {
+    closeNotifPanel();
+    state.notifHistoryOpen = true;
+    var rows = state.notifs.length ? state.notifs.map(notifRowHtml).join('') : '<div class="ntf-empty">' + C.svg('check', 16, 2) + ' sin notificaciones todavía</div>';
+    var html = '<div class="cl-scrim" data-act="close-notif-history"><div class="cl-card" role="dialog" aria-modal="true">' +
+      '<div class="cl-head"><span class="cl-eye">' + C.svg('bell', 18, 1.8) + '</span>' +
+        '<div class="cl-hh"><span class="cl-ttl">Notificaciones</span><span class="cl-sub">todas tus novedades</span></div>' +
+        '<button class="iconbtn" style="width:28px;height:28px" data-act="close-notif-history">' + C.svg('x', 14, 2) + '</button></div>' +
+      '<div class="cl-body">' + rows + '</div>' +
+      '<div class="cl-foot">' +
+        (state.notifs.length ? '<button class="btn btn--ghost btn--sm" data-act="notif-clear">' + C.svg('x', 12, 2) + ' limpiar</button>' : '') +
+        '<span style="flex:1"></span>' +
+        '<button class="btn btn--sm" data-act="close-notif-history">cerrar</button>' +
+      '</div></div></div>';
+    setOverlay(html);
+    markAllSeen();
+  }
+  function closeNotifHistory() { state.notifHistoryOpen = false; setOverlay(''); }
 
   function openChangelog(data) {
     if (!data) return;
@@ -1662,11 +1693,12 @@
   }
 
   /* ── overlay host ── */
-  function setOverlay(html) { var o = document.getElementById('overlays'); if (o) o.innerHTML = html; if (!html) { state.helpOpen = false; state.settingsOpen = false; state.changelogOpen = false; state.libEditOpen = false; } }
-  function anyOverlayOpen() { return state.paletteOpen || !!state.detailId || state.helpOpen || state.settingsOpen || state.changelogOpen || state.libEditOpen; }
+  function setOverlay(html) { var o = document.getElementById('overlays'); if (o) o.innerHTML = html; if (!html) { state.helpOpen = false; state.settingsOpen = false; state.changelogOpen = false; state.libEditOpen = false; state.notifHistoryOpen = false; } }
+  function anyOverlayOpen() { return state.paletteOpen || !!state.detailId || state.helpOpen || state.settingsOpen || state.changelogOpen || state.libEditOpen || state.notifHistoryOpen; }
   function closeOverlays() {
     if (state.libEditOpen) { closeLibEdit(); return; }
     if (state.paletteOpen) { closePalette(); return; }
+    if (state.notifHistoryOpen) { closeNotifHistory(); return; }
     if (state.changelogOpen) { closeChangelog(); return; }
     if (state.detailId) { closeDetail(); return; }
     if (state.settingsOpen) { closeSettings(); return; }
@@ -1692,9 +1724,9 @@
     // ── tutorial (coachmark): botones siguiente / anterior / saltar ──
     var tourBtn = t.closest && t.closest('[data-tour]');
     if (tourBtn) { e.preventDefault(); e.stopPropagation(); var ta = tourBtn.getAttribute('data-tour'); if (ta === 'next') tourNext(); else if (ta === 'prev') tourPrev(); else endTour(true); return; }
-    // ── fila de notificación → changelog ──
+    // ── fila de notificación → changelog (desde el panel o el historial) ──
     var nrow = t.closest && t.closest('.ntf-row[data-notif]');
-    if (nrow) { e.stopPropagation(); var nn = notifById(nrow.getAttribute('data-notif')); closeNotifPanel(); if (nn && nn.kind === 'update') openChangelog(nn.data); return; }
+    if (nrow) { e.stopPropagation(); var nn = notifById(nrow.getAttribute('data-notif')); closeNotifPanel(); state.notifHistoryOpen = false; if (nn && nn.kind === 'update') openChangelog(nn.data); return; }
 
     // links externos (autor / github / releases) → navegador del SO
     var href = t.closest && t.closest('[data-href]');
@@ -1739,7 +1771,9 @@
       if (act === 'lib-export') { e.stopPropagation(); doExportLibrary(); return; }
       // ── notificaciones + changelog ──
       if (act === 'notifs') { e.stopPropagation(); state.notifOpen ? closeNotifPanel() : openNotifPanel(); return; }
-      if (act === 'notif-clear') { e.stopPropagation(); state.notifs = []; markAllSeen(); closeNotifPanel(); applyNotifBadge(); return; }
+      if (act === 'notif-all') { e.stopPropagation(); closeNotifPanel(); openNotifHistory(); return; }
+      if (act === 'close-notif-history') { if (t.classList.contains('cl-scrim') || actEl.tagName === 'BUTTON') closeNotifHistory(); return; }
+      if (act === 'notif-clear') { e.stopPropagation(); state.notifs = []; applyNotifBadge(); persistNotifs(); closeNotifPanel(); if (state.notifHistoryOpen) closeNotifHistory(); return; }
       if (act === 'close-changelog') { if (t.classList.contains('cl-scrim') || actEl.tagName === 'BUTTON') closeChangelog(); return; }
       if (act === 'changelog-update') { e.stopPropagation(); closeChangelog(); startUpdateDownload(); return; }
       if (act === 'settings') { openSettings(); return; }
@@ -2000,7 +2034,6 @@
     try { window.ConsomniTerms.restoreSession(); } catch (e) {}
   }
   state.userCollapsed = null;
-  state.notifSeen = loadNotifSeen();
   state.collapsed = window.innerWidth < BREAKPOINT;
   if (api) {
     api.getSnapshot().then(setSnapshot).catch(function () { render(); });
@@ -2014,6 +2047,14 @@
         state.quickTermKind = cfg.quickTermKind || 'claude-skip';
       }
       render();
+    }).catch(function () {});
+    // centro de notificaciones (store dedicado): cargar las persistidas → sobreviven reinicios/updates
+    if (api.getNotifications) api.getNotifications().then(function (d) {
+      var list = (d && Array.isArray(d.notifs)) ? d.notifs : [];
+      list.forEach(function (n) { if (n && n.id && !notifById(n.id)) state.notifs.push(n); });
+      state.notifs.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
+      if (state.notifs.length > 60) state.notifs.length = 60;
+      applyNotifBadge();
     }).catch(function () {});
     // biblioteca (store dedicado): cargar + sembrar ejemplos la 1ª vez
     if (api.getLibrary) api.getLibrary().then(function (lib) {
@@ -2036,7 +2077,7 @@
     openPalette: openPalette, openDetail: openDetail, openHelp: openHelp, openSettings: openSettings,
     openPlans: openPlans, closePlans: closePlans,
     openLibrary: openLibrary, closeLibrary: closeLibrary, openLibEdit: openLibEdit, startLibraryTour: startLibraryTour,
-    startTutorial: startPlanTour, openNotifs: openNotifPanel, openChangelog: openChangelog,
+    startTutorial: startPlanTour, openNotifs: openNotifPanel, openNotifHistory: openNotifHistory, openChangelog: openChangelog,
     setActiveProject: setActiveProject, activateSearch: activateSearch,
     toggleDensity: toggleDensity, showOnboarding: showOnboarding,
     enterSplit: enterSplit, exitSplit: exitSplit, dispatchAction: dispatchAction,
