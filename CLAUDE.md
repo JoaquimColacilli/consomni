@@ -589,6 +589,41 @@ bloqueada (CSP `connect-src 'self'`) → `navigator.clipboard` NO sirve; todo va
 
 ---
 
+## v1.6.0 — Modo claro + fixes (centrado de versión, modal de novedades)
+> Feature grande (modo claro) + dos fixes (feedback del usuario). Bump **1.5.2 → 1.6.0** (`package.json` +
+> fallbacks `brand-ver`/`.ver` en `chrome.js`). Verificado en vivo por screenshot en 7 pantallas (board, dock,
+> settings, changelog, palette, detalle E2, biblioteca). Aditivo, respeta las 3 Hard Rules.
+
+### MODO CLARO (opt-in; el default sigue siendo oscuro)
+- **Arquitectura (en `app.css`, aditiva — `tokens.css` queda VERBATIM):**
+  1. `body.light{ … }` REESCRIBE las variables a una paleta clara (bg `#f3f3f5`, surfaces blancas, texto
+     `#1a1a1f`, bordes dark-alpha, acentos un toque más profundos para rendir como TEXTO sobre claro:
+     `--green:#16a34a`, `--amber:#d97706`, etc.). Todo lo que usa `var(--token)` flipea solo.
+  2. **`body.light #terminals{ … }` REDECLARA los tokens OSCUROS** → el dock/terminales quedan OSCUROS en
+     modo claro (xterm y la TUI de claude están pensados para fondo oscuro; patrón "IDE claro + terminal
+     oscura"). UN bloque en vez de decenas de overrides.
+  3. Overrides puntuales para los pocos colores **hardcodeados** fuera del dock (hex oscuros `#0e0e12`/`#101014`
+     en `.panel`/`.palette`/etc. → claros; grises claros `#cfcfd4`/`#ededed` → oscuros; white-alpha literales
+     → `var(--border)`; scrims/sombras/CRT/vignette suavizados; `::selection`/scrollbar; texto ámbar de
+     atención → ámbar profundo; re-aseguro de `.btn--green/red/amber` que la regla genérica `.btn` pisaría).
+- **Toggle + persistencia:** botón sol/luna del footer del sidebar (`data-act="theme"`, ícono `sun` nuevo en
+  `chrome.js`; muestra el tema DESTINO). `app.js`: `toggleTheme()`/`applyTheme()` (togglea `body.light` + persiste
+  `config.theme`), `state.theme` (default `'dark'`), se aplica al cargar desde `config.theme`. `o.light` se pasa
+  al chrome para el ícono. `config.ts`: campo `theme:'dark'|'light'` (default `'dark'`).
+
+### Fixes
+- **Versión centrada sobre "Changelog":** `.brand-meta{align-items:center}` (estaba `flex-start`).
+- **Modal de novedades sin etiquetas HTML literales:** `notesToHtml()` en `app.js` detecta si las release notes
+  vienen en HTML (electron-updater suele entregar `releaseNotes` ya renderizado) y las convierte a markdown-ish
+  ANTES de `renderNotes` (que escapa todo). Sin XSS: se quitan TODOS los tags antes de renderizar. `openChangelog`
+  usa `notesToHtml(data.notes)`. Verificado por unit test de Node.
+
+### Regla de proceso (actualizada)
+- Los commits/PR/changelogs **NO** llevan atribución a Claude (ni `Co-Authored-By`, ni "Generated with…").
+  De ahora en más, cero referencias a que se hizo con asistencia de IA.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

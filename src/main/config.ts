@@ -24,6 +24,7 @@ export interface AppConfig {
   nlHelper: boolean;           // helper de comando por lenguaje natural en las terminales (claude local; opt-in, default off)
   nlModel: string;             // modelo para el helper NL ('haiku' por costo/latencia)
   quickTermKind: 'shell' | 'claude' | 'claude-skip'; // qué abre CTRL+ESPACIO (terminal shell / claude / claude --dangerously-skip-permissions)
+  theme: 'dark' | 'light';     // tema de la app (default oscuro)
   frentes: Record<string, FrenteMeta>; // estado MANUAL de cada frente (proyecto) — privado, local. key = projKey
 }
 
@@ -63,6 +64,7 @@ const DEFAULTS: AppConfig = {
   nlHelper: false,
   nlModel: 'haiku',
   quickTermKind: 'claude-skip',
+  theme: 'dark',
   frentes: {},
 };
 

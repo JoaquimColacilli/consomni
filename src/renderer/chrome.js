@@ -30,6 +30,7 @@
     bell:   '<path d="M18 8a6 6 0 0 0-12 0c0 7-3 9-3 9h18s-3-2-3-9"/><path d="M13.7 21a2 2 0 0 1-3.4 0"/>',
     gear:   '<circle cx="12" cy="12" r="3"/><path d="M19 12a7 7 0 0 0-.1-1.3l2-1.5-2-3.4-2.3 1a7 7 0 0 0-2.2-1.3L14 2h-4l-.4 2.5a7 7 0 0 0-2.2 1.3l-2.3-1-2 3.4 2 1.5A7 7 0 0 0 5 12c0 .4 0 .9.1 1.3l-2 1.5 2 3.4 2.3-1a7 7 0 0 0 2.2 1.3L10 22h4l.4-2.5a7 7 0 0 0 2.2-1.3l2.3 1 2-3.4-2-1.5c.1-.4.1-.9.1-1.3z"/>',
     moon:   '<path d="M21 12.8A8 8 0 1 1 11.2 3 6 6 0 0 0 21 12.8z"/>',
+    sun:    '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
     sliders:'<line x1="4" y1="8" x2="20" y2="8"/><circle cx="9" cy="8" r="2.3" fill="var(--surface-sidebar)"/><line x1="4" y1="16" x2="20" y2="16"/><circle cx="15" cy="16" r="2.3" fill="var(--surface-sidebar)"/>',
     archive:'<rect x="3" y="4" width="18" height="4" rx="1"/><path d="M5 8v11a1 1 0 0 0 1 1h12a1 1 0 0 0 1-1V8"/><line x1="10" y1="12" x2="14" y2="12"/>',
     ext:    '<path d="M14 4h6v6"/><path d="M20 4l-8 8"/><path d="M19 13v5a2 2 0 0 1-2 2H6a2 2 0 0 1-2-2V7a2 2 0 0 1 2-2h5"/>',
@@ -178,7 +179,7 @@
 
     return '<header class="topbar">' +
       '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span>' +
-        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.5.2') + '</span>' +
+        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.6.0') + '</span>' +
         '<button class="brand-changelog" data-act="changelog-all" title="ver todas las novedades">' + svg('sparkles', 10, 1.7) + '<span>Changelog</span></button></span></div>' +
       '<div class="divider-v"></div>' +
       '<div class="counters">' +
@@ -272,7 +273,7 @@
           '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
           '<a class="sbtn" data-href="https://github.com/JoaquimColacilli" title="by Joaquim Colacilli · github.com/JoaquimColacilli">' + gh(15) + '</a>' +
           '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
-          '<button class="sbtn" data-act="theme">' + svg('moon', 14, 1.7) + '</button></div>' +
+          '<button class="sbtn" data-act="theme" title="' + (o.light ? 'modo oscuro' : 'modo claro') + '">' + svg(o.light ? 'moon' : 'sun', 14, 1.7) + '</button></div>' +
       '</aside>';
     }
 
@@ -315,8 +316,8 @@
         '<button class="sbtn sb-toggle" data-act="sbtoggle" title="colapsar / expandir sidebar">' + svg('chevR', 15, 2.4) + '</button>' +
         '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
-        '<button class="sbtn" data-act="theme">' + svg('moon', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v1.5.2') + '</span></div>' +
+        '<button class="sbtn" data-act="theme" title="' + (o.light ? 'modo oscuro' : 'modo claro') + '">' + svg(o.light ? 'moon' : 'sun', 14, 1.7) + '</button>' +
+        '<span class="ver">' + esc(o.version || 'v1.6.0') + '</span></div>' +
     '</aside>';
   }
 

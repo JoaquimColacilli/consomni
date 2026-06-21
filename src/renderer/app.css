@@ -341,7 +341,7 @@ body.dk-dragging,body.dk-dragging *{cursor:grabbing !important;user-select:none 
 .sb-toggle svg{transition:transform .18s;}
 .sidebar:not(.collapsed) .sb-toggle svg{transform:rotate(180deg);}
 /* versión + botón "Changelog" al lado del wordmark (columna: versión arriba, botón abajo) */
-.brand-meta{display:flex;flex-direction:column;align-items:flex-start;gap:2px;align-self:flex-start;margin-top:3px;margin-left:2px;}
+.brand-meta{display:flex;flex-direction:column;align-items:center;gap:2px;align-self:flex-start;margin-top:3px;margin-left:2px;}
 .brand-ver{font-size:9px;line-height:1;color:var(--text-4);letter-spacing:.4px;}
 .brand-changelog{display:inline-flex;align-items:center;gap:3px;padding:0;background:transparent;border:none;cursor:pointer;font-family:inherit;font-size:8.5px;line-height:1;letter-spacing:.3px;color:var(--text-3);transition:color .14s;}
 .brand-changelog svg{width:10px;height:10px;color:var(--text-4);transition:color .14s;}
@@ -737,3 +737,177 @@ body.dk-dragging,body.dk-dragging *{cursor:grabbing !important;user-select:none 
   .lib-search-wrap{flex:1 1 100%;max-width:none;}
   .lib-card{flex:1 1 100%;max-width:none;}
 }
+
+/* ════════════════════════════════════════════════════════════════
+   MODO CLARO (opt-in; el DEFAULT sigue siendo oscuro).
+   Aditivo: NO toca el tema oscuro (las reglas base de tokens.css quedan
+   verbatim; sólo se REESCRIBEN variables + los pocos literales hardcodeados
+   bajo body.light). Estrategia:
+   1) body.light → paleta clara (todo lo que usa var(--token) flipea).
+   2) body.light #terminals → REDECLARA los tokens OSCUROS → el dock/terminales
+      quedan oscuros (xterm y la TUI de claude están pensados para fondo oscuro).
+   3) overrides puntuales para los colores HARDCODEADOS fuera del dock.
+   ════════════════════════════════════════════════════════════════ */
+body.light{
+  --bg:#f3f3f5;
+  --bg-chrome:#fbfbfc;
+  --surface-sidebar:#eeeef1;
+  --surface-card:#ffffff;
+  --surface-card-active:#ffffff;
+  --surface-input:#f1f1f4;
+  --surface-raised:#ffffff;
+  --overlay:rgba(28,28,34,.30);
+  --border:rgba(18,18,26,.10);
+  --border-soft:rgba(18,18,26,.07);
+  --border-hover:rgba(18,18,26,.22);
+  --border-strong:rgba(18,18,26,.30);
+  --text-1:#1a1a1f;
+  --text-2:#55555e;
+  --text-3:#83838c;
+  --text-4:#a6a6ae;
+  --text-faint:#bcbcc4;
+  /* acentos: un poco más profundos para que rindan como TEXTO sobre claro (siguen siendo el mismo color) */
+  --green:#16a34a; --green-2:#15803d; --green-deep:#15803d;
+  --amber:#d97706; --amber-2:#b45309;
+  --blue-2:#2563eb; --violet:#7c3aed; --error:#e11d48;
+  --glow-green:0 0 0 1px rgba(22,163,74,.26), 0 0 14px -4px rgba(22,163,74,.16);
+  --glow-amber:0 0 0 1px rgba(217,119,6,.30), 0 0 14px -4px rgba(217,119,6,.16);
+}
+/* el DOCK de terminales queda OSCURO en modo claro: redeclaramos los tokens del reference
+   sólo dentro de #terminals (la TUI de claude y xterm rinden mejor sobre oscuro). */
+body.light #terminals{
+  --bg:#0a0a0b; --bg-chrome:#0c0c0f; --surface-sidebar:#0d0d10;
+  --surface-card:#111114; --surface-card-active:#121216; --surface-input:#141418; --surface-raised:#16161a;
+  --border:rgba(255,255,255,.06); --border-soft:rgba(255,255,255,.05);
+  --border-hover:rgba(255,255,255,.16); --border-strong:rgba(255,255,255,.22);
+  --text-1:#e6e6e6; --text-2:#8a8a90; --text-3:#5a5a60; --text-4:#46464c; --text-faint:#3a3a40;
+  --green:#4ade80; --green-2:#34d399; --green-deep:#3a7a52; --amber:#f59e0b; --amber-2:#f0b860;
+  --blue-2:#60a5fa; --violet:#a78bfa; --error:#fb7185;
+}
+
+/* ── superficies hardcodeadas (hex oscuro) → claras ── */
+body.light .panel,
+body.light .meta-cell,
+body.light .cfm-card,
+body.light .palette,
+body.light .pane,
+body.light .pane-head{background:var(--surface-card);}
+body.light .actionbar,
+body.light .pal-foot,
+body.light .pane-foot,
+body.light .qreply{background:#f6f6f8;}
+/* ── texto gris-claro hardcodeado → oscuro ── */
+body.light .wordmark{color:#1a1a1f;text-shadow:none;}
+body.light .counters b,
+body.light .tbtn b,
+body.light .seg span.on,
+body.light .col-title .nm,
+body.light .pane-head .nm,
+body.light .meta-cell .v,
+body.light .sum-v,
+body.light .file-row,
+body.light .tree-row,
+body.light .pal-row .tx,
+body.light .btn{color:var(--text-1);}
+body.light .counters,
+body.light .seg span,
+body.light .sb-head .lbl,
+body.light .sb-item .nm,
+body.light .card-metrics,
+body.light .act,
+body.light .ln .bd,
+body.light .ctx-pct{color:var(--text-2);}
+body.light .kbd,
+body.light .tbtn,
+body.light .sb-add,
+body.light .sbtn,
+body.light .statusbar b,
+body.light .qa-btn,
+body.light .card--idle .card-title,
+body.light .card--standby .card-title{color:var(--text-3);}
+body.light .qa-btn:hover{color:#000;}
+/* placeholders (eran #56565c / #4a4a50) */
+body.light input::placeholder,
+body.light textarea::placeholder,
+body.light .search,
+body.light .lib-search-wrap{color:var(--text-3);}
+/* ── bordes white-alpha LITERALES (fuera del dock) → token --border (dark-alpha en claro) ── */
+body.light .search,
+body.light .fpill,
+body.light .tbtn,
+body.light .seg,
+body.light .iconbtn,
+body.light .cmdk,
+body.light .sb-add,
+body.light .sbtn,
+body.light .btn,
+body.light .act,
+body.light .qa-btn,
+body.light .closed-toggle,
+body.light .set-inp,
+body.light .frente-note,
+body.light .pc-act,
+body.light .lib-search-wrap,
+body.light .lib-chip,
+body.light .lib-act,
+body.light .lib-kopt,
+body.light .lib-ta,
+body.light .palette{border-color:var(--border);}
+body.light .kbd{background:rgba(18,18,26,.05);border-color:rgba(18,18,26,.12);}
+/* fondos white-alpha sutiles → dark-alpha (si no, son invisibles sobre claro) */
+body.light .sb-item:hover,
+body.light .ntf-row.clickable:hover,
+body.light .pal-row.sel,
+body.light .lib-clear:hover{background:rgba(18,18,26,.05);}
+body.light .sb-item.active,
+body.light .seg span.on{background:rgba(18,18,26,.06);}
+body.light .sidebar.collapsed .ci:hover{background:rgba(18,18,26,.05);}
+body.light .sidebar.collapsed .ci.active{background:rgba(18,18,26,.07);}
+body.light .fpill,
+body.light .pane-sub,
+body.light .plans-intro,
+body.light .lib-intro{background:rgba(18,18,26,.02);}
+body.light .qa-btn{background:rgba(255,255,255,.9);}
+body.light .card-sel{background:rgba(255,255,255,.85);}
+/* re-aseguramos los botones de acento (la regla genérica .btn los pisaría) */
+body.light .btn--ghost{background:transparent;color:var(--text-2);border-color:transparent;}
+body.light .btn--green{color:var(--green);border-color:rgba(22,163,74,.4);}
+body.light .btn--red{color:var(--error);border-color:rgba(225,29,72,.4);}
+body.light .btn--amber{color:var(--amber);border-color:rgba(217,119,6,.4);}
+/* atención / permiso: texto ámbar hardcodeado → ámbar profundo legible */
+body.light .attn-banner .txt,
+body.light .perm .q{color:#b45309;}
+body.light .perm .cmd{color:#92400e;background:rgba(217,119,6,.07);border-color:rgba(217,119,6,.25);}
+body.light .fpill.on{color:#dc2626;}
+/* ── scrims oscuros hardcodeados → dim suave ── */
+body.light .scrim,
+body.light .cmd-scrim,
+body.light .cfm-scrim{background:rgba(28,28,34,.34);}
+/* ── sombras fuertes → suaves sobre claro ── */
+body.light .panel{box-shadow:-26px 0 60px -24px rgba(18,18,26,.16);}
+body.light .palette,
+body.light .cl-card,
+body.light .set-card,
+body.light .help-card,
+body.light .onb-card,
+body.light .cfm-card,
+body.light .tour-pop,
+body.light .notif-panel,
+body.light .dk-ctx,
+body.light .cns-toast,
+body.light .lib-edit-card{box-shadow:0 22px 54px -24px rgba(18,18,26,.22);}
+/* ── footers/tops que asumían oscuro ── */
+body.light .cl-foot{background:rgba(18,18,26,.03);}
+body.light .chl-top{background:rgba(251,251,252,.72);}
+/* ── CRT: en oscuro oscurece esquinas; en claro lo volvemos un velo MUY sutil ── */
+body.light .crt-vignette{background:radial-gradient(125% 125% at 50% 38%, transparent 64%, rgba(18,18,26,.05) 100%);}
+body.light .crt-scan{background:repeating-linear-gradient(to bottom, rgba(18,18,26,.013) 0 1px, transparent 1px 3px);}
+/* ── tutorial spotlight: el "9999px" debe ser claro en modo claro ── */
+body.light .tour.tour-centered .tour-block{background:rgba(28,28,34,.30);}
+body.light .tour-spot{box-shadow:0 0 0 9999px rgba(28,28,34,.26),0 0 0 1.5px var(--green),0 0 22px 3px rgba(22,163,74,.30);}
+/* ── scrollbar + selección (tokens.css es verbatim → override aditivo) ── */
+body.light ::-webkit-scrollbar-thumb{background:rgba(18,18,26,.18);}
+body.light ::-webkit-scrollbar-thumb:hover{background:rgba(18,18,26,.28);}
+body.light ::selection{background:rgba(239,68,68,.20);color:#1a1a1f;}
+/* botón "Actualizar" (verde) sobre claro: el fondo bright-green tint sigue ok; aseguramos borde */
+body.light .upbtn{border-color:rgba(22,163,74,.45);}

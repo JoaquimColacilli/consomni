@@ -28,6 +28,7 @@
     modeFilter: {},        // {ask:true,...} — vacío = sin filtro
     sort: 'prioridad',
     density: 'comodo',
+    theme: 'dark',
     search: '',
     searchActive: false,
     selected: {},          // sid → true (multi-select)
@@ -260,8 +261,8 @@
     var mf = activeModes().length ? state.modeFilter : null;
     var ver = (state.snapshot && state.snapshot.appVersion) ? 'v' + state.snapshot.appVersion : undefined;
     var o = view
-      ? { counts: view.counts, tree: view.tree, status: view.status, modeFilter: mf, density: state.density, sortLabel: curSort().label, searchValue: (state.searchActive || state.search) ? state.search : '', version: ver }
-      : { alert: true };
+      ? { counts: view.counts, tree: view.tree, status: view.status, modeFilter: mf, density: state.density, sortLabel: curSort().label, searchValue: (state.searchActive || state.search) ? state.search : '', version: ver, light: state.theme === 'light' }
+      : { alert: true, light: state.theme === 'light' };
     if (state.libraryOpen) return buildLibrary(o);
     if (state.plansOpen) return buildPlans(o);
     var sidebar = state.collapsed ? C.sidebar(Object.assign({}, o, { collapsed: true })) : C.sidebar(o);
@@ -473,7 +474,7 @@
     if (!data) return;
     state.changelogOpen = true;
     var ver = data.latest ? ('v' + data.latest) : '';
-    var notes = data.notes ? renderNotes(data.notes) : '<p class="cl-p cl-empty">Sin notas de versión publicadas todavía. Mirá el detalle en GitHub.</p>';
+    var notes = data.notes ? notesToHtml(data.notes) : '<p class="cl-p cl-empty">Sin notas de versión publicadas todavía. Mirá el detalle en GitHub.</p>';
     var canDownload = !!(api && api.updateDownload) && state.upd && (state.upd.mode === 'show' || state.upd.mode === 'downloading');
     var html = '<div class="cl-scrim" data-act="close-changelog"><div class="cl-card" role="dialog" aria-modal="true">' +
       '<div class="cl-head"><span class="cl-eye">' + C.eye(22, false) + '</span>' +
@@ -494,6 +495,12 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.6.0', date: '21 jun 2026', title: 'Modo claro', items: [
+      'Nuevo modo claro para toda la app (el modo oscuro sigue siendo el de fábrica). Cambialo con el botón de sol/luna, abajo a la izquierda.',
+      'Las terminales se mantienen en oscuro incluso en modo claro, para que la interfaz de Claude se siga leyendo cómoda.',
+      'La versión quedó centrada sobre el botón "Changelog".',
+      'El modal de novedades ahora muestra el formato correcto (antes podían aparecer etiquetas sueltas).',
+    ] },
     { v: '1.5.2', date: '21 jun 2026', title: 'Historial de novedades', items: [
       'Nueva pantalla de Changelog: un registro completo de todo lo que cambió en Consomni, versión por versión, accesible desde el número de versión.',
     ] },
@@ -591,6 +598,30 @@
     e = e.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
     e = e.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<span class="cl-link" data-href="$2">$1</span>');
     return e;
+  }
+  // Las release notes pueden llegar en MARKDOWN (chequeo manual → json.body) o en HTML (electron-updater
+  // suele entregar `releaseNotes` ya renderizado como HTML). Si es HTML lo convertimos a markdown-ish ANTES
+  // de renderNotes (que escapa todo) → así no se ven las etiquetas literales `<p>`/`<br>`/`<li>`. Seguro:
+  // se quitan TODOS los tags antes de renderNotes, que re-escapa el texto restante (sin XSS).
+  function notesToHtml(raw) {
+    var s = String(raw == null ? '' : raw);
+    if (/<(p|br|ul|ol|li|h[1-6]|strong|em|code|pre|blockquote|div|span|a)[\s>\/]/i.test(s)) {
+      s = s
+        .replace(/<\s*br\s*\/?\s*>/gi, '\n')
+        .replace(/<\s*h([1-6])[^>]*>/gi, function (_m, n) { return '\n' + new Array(Math.min(+n, 4) + 1).join('#') + ' '; })
+        .replace(/<\s*li[^>]*>/gi, '\n- ')
+        .replace(/<\s*\/\s*(p|h[1-6]|ul|ol|div|blockquote|tr)\s*>/gi, '\n')   // OJO: sin 'li' (el <li> ya abrió línea)
+        .replace(/<\s*(strong|b)\s*>/gi, '**').replace(/<\s*\/\s*(strong|b)\s*>/gi, '**')
+        .replace(/<\s*(em|i)\s*>/gi, '*').replace(/<\s*\/\s*(em|i)\s*>/gi, '*')
+        .replace(/<\s*code\s*>/gi, '`').replace(/<\s*\/\s*code\s*>/gi, '`')
+        .replace(/<[^>]+>/g, '')                                  // sacar cualquier tag restante
+        .replace(/&nbsp;/gi, ' ').replace(/&amp;/gi, '&').replace(/&lt;/gi, '<')
+        .replace(/&gt;/gi, '>').replace(/&quot;/gi, '"').replace(/&#0?39;/gi, "'").replace(/&#x?2f;/gi, '/')
+        .replace(/[ \t]+\n/g, '\n')                               // sin espacios colgando por línea
+        .replace(/\n\s*\n(?=\s*-\s)/g, '\n')                      // sin línea en blanco antes de un bullet → un solo <ul>
+        .replace(/\n{3,}/g, '\n\n').replace(/^\s+|\s+$/g, '');
+    }
+    return renderNotes(s);
   }
 
   /* ════════ TUTORIAL (coachmark spotlight) ════════
@@ -1393,6 +1424,15 @@
   function cycleSort() { var i = SORTS.findIndex(function (s) { return s.key === state.sort; }); state.sort = SORTS[(i + 1) % SORTS.length].key; render(); toast('orden: ' + curSort().label); }
   function setDensity(d) { state.density = d; render(); }
   function toggleDensity() { state.density = state.density === 'comodo' ? 'compacto' : 'comodo'; render(); }
+  // modo claro / oscuro (default oscuro). Sólo togglea la clase body.light (el CSS hace el resto) + persiste.
+  function applyTheme() { document.body.classList.toggle('light', state.theme === 'light'); }
+  function toggleTheme() {
+    state.theme = state.theme === 'light' ? 'dark' : 'light';
+    applyTheme();
+    if (api && api.saveConfig) api.saveConfig({ theme: state.theme });
+    render();   // refresca el ícono del botón (sol/luna)
+    toast(state.theme === 'light' ? 'modo claro' : 'modo oscuro');
+  }
 
   /* ── sort dropdown (popover) ── */
   function closeSortMenu() { var m = document.getElementById('sortMenu'); if (m) m.remove(); }
@@ -1858,7 +1898,7 @@
       if (act === 'changelog-update') { e.stopPropagation(); closeChangelog(); startUpdateDownload(); return; }
       if (act === 'settings') { openSettings(); return; }
       if (act === 'terminals') { if (window.ConsomniTerms) window.ConsomniTerms.toggle(); return; }
-      if (act === 'theme') { toast('tema oscuro (único por ahora)', 'warn'); return; }
+      if (act === 'theme') { toggleTheme(); return; }
       if (act === 'go-attn') { goToAttention(); return; }
       if (act === 'exit-split') { exitSplit(); return; }
       if (act === 'update') { if (!actEl.classList.contains('downloading') && !actEl.classList.contains('installing')) startUpdateDownload(); return; }
@@ -2125,6 +2165,8 @@
         state.confirmCloseTerminal = cfg.confirmCloseTerminal !== false;
         state.frentes = (cfg.frentes && typeof cfg.frentes === 'object') ? cfg.frentes : {};
         state.quickTermKind = cfg.quickTermKind || 'claude-skip';
+        state.theme = (cfg.theme === 'light') ? 'light' : 'dark';
+        applyTheme();
       }
       render();
     }).catch(function () {});
