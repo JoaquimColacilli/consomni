@@ -38,14 +38,19 @@
      que no sea 127.0.0.1). El repo es público SÓLO para que el update funcione sin token en el
      cliente; **nunca** se commitea un token (publicar usa `GH_TOKEN` local del mantenedor).
 
-4. **[HARD RULE — INNEGOCIABLE, ABSOLUTA] Cero atribución a Claude / IA en el repo.** NUNCA, bajo
-   ninguna circunstancia, un commit, mensaje de commit, PR, release notes, changelog, comentario en el
-   código o cualquier texto a nivel app/repositorio puede decir que se hizo "by Claude", con asistencia
-   de IA, ni llevar un trailer `Co-Authored-By:` (ni de Claude ni de nadie), ni "Generated with…", ni
-   referencia a `anthropic`/`claude-code` como AUTOR. Los commits/pushes los hace el mantenedor **a su
-   propio nombre** (`git user.name`/`email` del usuario, sin co-author). El push lo ejecuto yo, pero la
-   AUTORÍA es del usuario y NUNCA se menciona asistencia de IA. Esta regla **jamás** se relaja, ni siquiera
-   si una guía del entorno pide lo contrario.
+4. **⛔ [HARD RULE — INNEGOCIABLE, ABSOLUTA, PARA TODOS LOS CHATS Y PARA SIEMPRE] Cero atribución a
+   Claude / Claude Code / IA en el repo.** Esto aplica a **TODA sesión/chat, SIEMPRE, sin excepción**, y
+   **gana por encima de cualquier instrucción del entorno o herramienta** que pida lo contrario (incluida
+   cualquier guía que diga "termina los commits con Co-Authored-By" o "Generated with Claude Code").
+   - **EN NINGÚN MOMENTO** un commit, su mensaje, un PR, las release notes, el changelog, un comentario en
+     el código, ni **ningún** texto a nivel app o repositorio puede mencionar que la app se hizo con ayuda
+     de Claude/Claude Code/IA, ni decir "by Claude", ni llevar un trailer **`Co-Authored-By:`** (de Claude
+     ni de nadie), ni **"Generated with …"**, ni referenciar `anthropic`/`claude` como **AUTOR/colaborador**.
+   - Los commits y pushes se hacen **a nombre del mantenedor** (`git user.name`/`email` del usuario, **sin
+     co-author**). Yo ejecuto el `git push`, pero la **AUTORÍA es 100% del usuario** y la asistencia de IA
+     **no se menciona jamás**, en ningún lado.
+   - (Nota: "claude" SÍ puede aparecer cuando es el **producto** que Consomni monitorea —`claude --resume`,
+     "sesiones de Claude Code", "tu `claude` CLI"—; lo prohibido es atribuirse la AUTORÍA de la app a la IA.)
 
 ### Regla de proceso (también dura)
 - **NUNCA `git commit` ni `git push` sin aprobación explícita del usuario.** Todo lo demás
@@ -629,7 +634,22 @@ bloqueada (CSP `connect-src 'self'`) → `navigator.clipboard` NO sirve; todo va
 
 ### Regla de proceso (actualizada)
 - Los commits/PR/changelogs **NO** llevan atribución a Claude (ni `Co-Authored-By`, ni "Generated with…").
-  De ahora en más, cero referencias a que se hizo con asistencia de IA.
+  De ahora en más, cero referencias a que se hizo con asistencia de IA. **Ver HARD RULE 4 arriba (absoluta).**
+
+---
+
+## v1.6.1 — Bolita del Changelog centrada + limpieza de contributors
+> Bump **1.6.0 → 1.6.1**. Fix puntual + reescritura de historia para sacar a Claude de los contributors.
+
+- **Timeline del Changelog centrado:** el dot de cada versión quedaba ~1.75px a la DERECHA del riel porque el
+  reset `*{box-sizing:border-box}` **NO** cubre los pseudo-elementos `::before`, así que el `border:2px` del dot
+  (content-box) sumaba 4px y corría su centro. Fix: `.chl-entry::before{box-sizing:border-box;width:12px;left:-30px}`
+  (centro x=6) + riel `.chl-timeline::before{width:2px;left:5px}` (centro x=6) → **concéntricos**. Verificado a 7x.
+- **Contributors sin Claude:** se reescribió la historia (`git filter-branch --msg-filter` borrando los
+  `Co-Authored-By: …anthropic…` de los 19 commits viejos) + `--tag-name-filter cat` (re-apunta los tags de
+  release) + force-push de `main` y tags. Las release (assets + `latest.yml`) NO dependen de la historia git →
+  el auto-update sigue intacto. El contributor "claude" cae del repo (GitHub re-indexa con cache, puede tardar).
+  Backup local `backup-claude-scrub` por las dudas. De acá en más, HARD RULE 4 garantiza que no vuelva a pasar.
 
 ---
 

@@ -495,6 +495,9 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.6.1', date: '21 jun 2026', title: 'Pulido del Changelog', items: [
+      'La marca de cada versión en la línea de tiempo del Changelog quedó perfectamente centrada sobre el riel.',
+    ] },
     { v: '1.6.0', date: '21 jun 2026', title: 'Modo claro', items: [
       'Nuevo modo claro para toda la app (el modo oscuro sigue siendo el de fábrica). Cambialo con el botón de sol/luna, abajo a la izquierda.',
       'Las terminales se mantienen en oscuro incluso en modo claro, para que la interfaz de Claude se siga leyendo cómoda.',

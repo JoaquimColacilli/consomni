@@ -580,11 +580,13 @@ body.dk-dragging,body.dk-dragging *{cursor:grabbing !important;user-select:none 
 .chl-hero p{font-size:13.5px;line-height:1.55;color:var(--text-3);margin:0;max-width:540px;}
 /* timeline */
 .chl-timeline{position:relative;padding-left:30px;}
-.chl-timeline::before{content:'';position:absolute;left:5px;top:7px;bottom:6px;width:1.5px;background:linear-gradient(180deg, var(--border-hover), var(--border-soft) 30%, var(--border-soft));}
+.chl-timeline::before{content:'';position:absolute;left:5px;top:7px;bottom:6px;width:2px;background:linear-gradient(180deg, var(--border-hover), var(--border-soft) 30%, var(--border-soft));}
 .chl-entry{position:relative;padding-bottom:38px;animation:chlEntryIn .42s cubic-bezier(.2,.8,.25,1) both;}
 .chl-entry:last-child{padding-bottom:8px;}
 @keyframes chlEntryIn{from{opacity:0;transform:translateY(7px);}to{opacity:1;transform:none;}}
-.chl-entry::before{content:'';position:absolute;left:-30px;top:5px;width:11px;height:11px;border-radius:50%;background:var(--surface-raised);border:2px solid var(--text-4);transition:.14s;}
+/* box-sizing:border-box → el borde de 2px NO corre el centro (el reset `*` no cubre ::before).
+   dot 12px @ left:-30 → centro en x=6; el riel (2px @ left:5) también en x=6 → CONCÉNTRICOS. */
+.chl-entry::before{content:'';box-sizing:border-box;position:absolute;left:-30px;top:5px;width:12px;height:12px;border-radius:50%;background:var(--surface-raised);border:2px solid var(--text-4);transition:.14s;}
 .chl-entry.latest::before{background:var(--green);border-color:var(--green);box-shadow:0 0 0 4px rgba(74,222,128,.14);}
 .chl-vrow{display:flex;align-items:center;gap:10px;margin-bottom:9px;}
 .chl-v{font-family:'Geist Mono',ui-monospace,monospace;font-size:16px;font-weight:600;letter-spacing:.2px;color:var(--text-1);}
