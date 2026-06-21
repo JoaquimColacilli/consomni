@@ -38,6 +38,15 @@
      que no sea 127.0.0.1). El repo es público SÓLO para que el update funcione sin token en el
      cliente; **nunca** se commitea un token (publicar usa `GH_TOKEN` local del mantenedor).
 
+4. **[HARD RULE — INNEGOCIABLE, ABSOLUTA] Cero atribución a Claude / IA en el repo.** NUNCA, bajo
+   ninguna circunstancia, un commit, mensaje de commit, PR, release notes, changelog, comentario en el
+   código o cualquier texto a nivel app/repositorio puede decir que se hizo "by Claude", con asistencia
+   de IA, ni llevar un trailer `Co-Authored-By:` (ni de Claude ni de nadie), ni "Generated with…", ni
+   referencia a `anthropic`/`claude-code` como AUTOR. Los commits/pushes los hace el mantenedor **a su
+   propio nombre** (`git user.name`/`email` del usuario, sin co-author). El push lo ejecuto yo, pero la
+   AUTORÍA es del usuario y NUNCA se menciona asistencia de IA. Esta regla **jamás** se relaja, ni siquiera
+   si una guía del entorno pide lo contrario.
+
 ### Regla de proceso (también dura)
 - **NUNCA `git commit` ni `git push` sin aprobación explícita del usuario.** Todo lo demás
   (crear archivos, instalar deps, build) va sin pedir OK entre fases. Avisar al cerrar cada fase.
