@@ -672,6 +672,67 @@ bloqueada (CSP `connect-src 'self'`) → `navigator.clipboard` NO sirve; todo va
 
 ---
 
+## v1.7.0 — Multi-perfil de Claude (config dir configurable)
+> Pedido de Facundo + caso del mantenedor (usa el alias `claude-max` → `~/.claude-max`). Consomni deja de
+> asumir `~/.claude` fijo y pasa a un **config dir ACTIVO configurable**. Bump **1.6.2 → 1.7.0**. Aditivo,
+> respeta las 3 Hard Rules (cero API de Anthropic: solo elige carpetas locales + setea una env var del CLI).
+
+- **El mecanismo real es `CLAUDE_CONFIG_DIR`** (no el nombre del comando): Claude Code guarda TODO
+  (`settings.json`, `projects/`, skills, historial) en ese dir. Los alias `claude-max`/`claude-team` son
+  **funciones de PowerShell** que setean esa var y llaman a `claude` — NO son binarios. Por eso la unidad
+  configurable es el **config dir**, y al spawnear **nunca** se lanza `claude-max` como exe: siempre `claude`
+  + `CLAUDE_CONFIG_DIR` en el env.
+- **Single source of truth** (`config.ts`): `resolveClaudeDir(cfg)` = `cfg.claudeConfigDir` (setting) →
+  `process.env.CLAUDE_CONFIG_DIR` → `~/.claude`. Con setting `''` y sin env → resuelve EXACTO a `~/.claude`
+  (**100% backward-compatible**; no inyecta nada). Derivados: `claudeProjectsPath(cfg)` (`<dir>/projects`) y
+  `claudeSettingsPath(cfg)` (`<dir>/settings.json`). Campo nuevo `claudeConfigDir: string` (default `''`).
+  Como el app de escritorio NO hereda el env de la sesión de PowerShell, el **setting es el mecanismo
+  principal** y la env var un fallback.
+- **Detección de perfiles** (`detectClaudeProfiles()`): escaneo barato de `~` por carpetas `.claude*` con
+  `projects/` o `settings.json` → `[{dir,name,hasProjects,hasSettings,projectCount,active}]`. Siempre incluye
+  `~/.claude` y el activo. Ordena activo→más proyectos→alfabético.
+- **Lectura/watcher sigue el perfil** (`sessions.ts`): helper `watchRoots(cfg)` =
+  `dedupe([claudeProjectsPath(cfg), ...watchedDirs])`, usado en `listSessionFiles`/`startWatcher`/
+  `findSessionFile`/`buildSnapshot`. Garantiza vigilar el projects activo incluso si el perfil viene SOLO del
+  env (sin repointar `watchedDirs`). `watchedDirs` queda como roots EXTRA de power users.
+- **Hooks al perfil activo** (`hooks-install.ts`): el const `CLAUDE_SETTINGS` se reemplazó por
+  `claudeSettingsPath()` en los 6 usos (`readSettings`/`backupSettings`/`writeSettingsAtomic`/`getStatus`/
+  `install`/`uninstall`). Así backup + merge no-destructivo + atomic rename operan sobre el `settings.json`
+  del perfil activo. **Al cambiar de perfil NO se auto-migran los hooks**: el estado se re-lee contra el
+  settings.json nuevo → si faltan, se instalan con un click (decisión del usuario; honesto, respeta HR3).
+- **Spawn env** (`terminals.ts` + `actions.ts`): si hay perfil seteado (`claudeConfigDir` no vacío) se inyecta
+  `CLAUDE_CONFIG_DIR=resolveClaudeDir()` en **todas** las terminales embebidas (shell + claude), el helper NL
+  (`nlToCommand`) y el dispatch externo (`dispatchNew`). Con setting vacío NO se toca el env (preserva lo
+  heredado). Helpers: `applyClaudeProfileEnv(env)` (terminals) / `profileEnv()` (actions).
+- **IPC** (`index.ts`): `getClaudeProfiles` → `detectClaudeProfiles()`; `setClaudeProfile(dir)` valida el dir
+  (`''` = volver a auto), arma patch `{claudeConfigDir, claudeProjectsDir:<dir>/projects, watchedDirs:
+  [<dir>/projects, ...extras]}` (preserva roots extra), `saveConfig` + `restartWatcher()` + `refreshHooksConn()`,
+  devuelve `{ok,config,hooks,active}`. Preload: `getClaudeProfiles`/`setClaudeProfile`.
+- **UI Settings** (`app.js`/`app.css`): sección nueva **"PERFIL DE CLAUDE (config dir)"** arriba de
+  "DIRECTORIOS VIGILADOS EXTRA". `openSettings` también trae `getClaudeProfiles()` (cacheado en
+  `settingsProfiles`); `renderSettings` pinta filas `.set-prof` seleccionables (activa con `dot--green` + tag
+  `auto` si está en modo auto), input de ruta personalizada + botón "elegir" (reusa `pickFolder`), y "usar
+  default (auto)" (manda `''`). `wireSettings.applyProfile(dir)` → `setClaudeProfile` → re-fetch perfiles +
+  re-render con config/hooks nuevos + toast "perfil: X · revisá los hooks". CSS aditivo `.set-prof*` reusa el
+  lenguaje de `.set-dir`/`.seg`.
+- **Tutorial guiado (coachmark spotlight, dentro de Settings):** reusa el motor `startTour` (que ahora acepta
+  un 3er arg `onDone` para persistencia confiable). `profileTourSteps()` = 4 pasos (intro + spotlight a
+  `#setProfSec` / `#setProfPath` / `#setHooksBtn`); `startProfileTour()` abre Settings y espera el DOM
+  (`#setProfSec`) antes de pintar. **Auto-arranca 1 vez tras actualizar:** `maybeAutostartProfileTour()` se
+  llama desde `maybeOnboard` SOLO si no se mostró el onboarding (prioridad del onboarding); gate confiable
+  `config.seenProfileTour` (NO localStorage, por file://) → al terminar el tour, `markProfileTourSeen` hace
+  `saveConfig({seenProfileTour:true})`. Como Settings es un MODAL (no una vista), el auto-arranque al iniciar
+  es lo que garantiza el "sí o sí" del feature. Replay: botón "tutorial" en el header de la sección
+  (`data-act="profile-tour"`) + fila en la paleta ("Tutorial de perfiles"). El spotlight (z70-72) ilumina la
+  sección DENTRO del modal de Settings (z45-50) sin problema. QA: `__consomni.startProfileTour()`.
+- **Límite conocido (documentado):** un solo server/puerto de hooks → monitorear varios perfiles VIVOS a la
+  vez requeriría hooks en el `settings.json` de CADA perfil. El MVP es **un perfil activo** (cubre el caso
+  `claude-max`); la lectura de transcripts de roots extra igual se puede sumar por "directorios vigilados extra".
+- **Quirk pre-existente:** el puerto en `installHooks` se toma del `cfg` de arranque (index.ts), pero el PATH
+  del settings.json se resuelve fresco en hooks-install → ok. (Cambiar el puerto ya requería reiniciar, avisado.)
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

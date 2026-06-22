@@ -1,0 +1,480 @@
+<title>Claude Multi-Perfil Setup</title>
+<style>
+*, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+:root {
+  --ground:  #0B0E16;
+  --surface: #161923;
+  --lift:    #1F2535;
+  --text:    #DDD8C8;
+  --muted:   #6B6760;
+  --accent:  #E89820;
+  --teal:    #3EC8BE;
+  --lilac:   #A78BFA;
+  --green:   #86EFAC;
+  --mono: 'Cascadia Code', 'Fira Code', 'Consolas', 'Courier New', monospace;
+  --body: 'Segoe UI', system-ui, -apple-system, sans-serif;
+}
+
+body {
+  background: var(--ground);
+  color: var(--text);
+  font-family: var(--body);
+  line-height: 1.6;
+  font-size: 15px;
+}
+
+.page {
+  max-width: 720px;
+  margin: 0 auto;
+  padding: 4rem 1.5rem 8rem;
+}
+
+/* ── Hero ── */
+.hero { margin-bottom: 3.5rem; }
+
+.hero-eyebrow {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--accent);
+  margin-bottom: 0.8rem;
+}
+
+.hero-title {
+  font-family: var(--mono);
+  font-size: clamp(1.6rem, 4.5vw, 2.75rem);
+  font-weight: 700;
+  color: var(--text);
+  line-height: 1.1;
+  margin-bottom: 0.65rem;
+}
+
+.hero-title em {
+  color: var(--accent);
+  font-style: normal;
+}
+
+.hero-sub {
+  font-family: var(--mono);
+  font-size: 0.85rem;
+  color: var(--muted);
+  margin-bottom: 2.75rem;
+}
+
+/* ── Tree ── */
+.tree-wrap {
+  background: var(--surface);
+  border: 1px solid var(--lift);
+  border-radius: 10px;
+  overflow: hidden;
+  margin-bottom: 2.5rem;
+}
+
+.tree-bar {
+  background: var(--lift);
+  padding: 0.6rem 1rem;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.dot { width: 11px; height: 11px; border-radius: 50%; flex-shrink: 0; }
+.dot-r { background: #FF5F57; }
+.dot-y { background: #FFBD2E; }
+.dot-g { background: #28C840; }
+
+.tree-bar-path {
+  font-family: var(--mono);
+  font-size: 0.7rem;
+  color: var(--muted);
+  margin-left: auto;
+}
+
+.tree-body {
+  padding: 1.5rem 1.5rem 1.5rem 1.75rem;
+  font-family: var(--mono);
+  font-size: 0.84rem;
+  line-height: 2;
+}
+
+.tl {
+  display: block;
+  opacity: 0;
+  animation: tl-in 0.22s ease forwards;
+}
+
+.tl:nth-child(1)  { animation-delay: 0.08s; }
+.tl:nth-child(2)  { animation-delay: 0.22s; }
+.tl:nth-child(3)  { animation-delay: 0.36s; }
+.tl:nth-child(4)  { animation-delay: 0.50s; }
+.tl:nth-child(5)  { animation-delay: 0.64s; }
+.tl:nth-child(6)  { animation-delay: 0.78s; }
+.tl:nth-child(7)  { animation-delay: 0.92s; }
+.tl:nth-child(8)  { animation-delay: 1.06s; }
+.tl:nth-child(9)  { animation-delay: 1.20s; }
+.tl:nth-child(10) { animation-delay: 1.34s; }
+.tl:nth-child(11) { animation-delay: 1.48s; }
+.tl:nth-child(12) { animation-delay: 1.62s; }
+.tl:nth-child(13) { animation-delay: 1.76s; }
+.tl:nth-child(14) { animation-delay: 1.90s; }
+
+@keyframes tl-in {
+  from { opacity: 0; transform: translateX(-8px); }
+  to   { opacity: 1; transform: translateX(0); }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .tl { animation: none !important; opacity: 1 !important; }
+}
+
+.cd  { color: var(--teal); }
+.ct  { color: var(--muted); }
+.cf  { color: var(--text); opacity: 0.6; }
+
+.badge {
+  display: inline-block;
+  font-size: 0.65rem;
+  padding: 0.05em 0.45em;
+  border-radius: 3px;
+  margin-left: 0.6rem;
+  vertical-align: middle;
+  letter-spacing: 0.04em;
+  background: var(--lift);
+}
+.badge-a { color: var(--accent); }
+.badge-t { color: var(--teal); }
+.badge-l { color: var(--lilac); }
+
+/* ── Concept ── */
+.concept {
+  border-left: 3px solid var(--accent);
+  background: var(--surface);
+  padding: 1rem 1.25rem;
+  border-radius: 0 6px 6px 0;
+  font-size: 0.88rem;
+  line-height: 1.75;
+  margin-bottom: 3.5rem;
+}
+
+.concept strong { color: var(--accent); font-weight: 600; }
+
+code {
+  font-family: var(--mono);
+  font-size: 0.85em;
+  background: var(--lift);
+  padding: 0.1em 0.3em;
+  border-radius: 3px;
+  color: var(--teal);
+}
+
+/* ── Section label ── */
+.section-label {
+  font-family: var(--mono);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+  letter-spacing: 0.2em;
+  color: var(--muted);
+  padding-bottom: 0.6rem;
+  border-bottom: 1px solid var(--lift);
+  margin-bottom: 2.25rem;
+}
+
+/* ── Steps ── */
+.steps { display: flex; flex-direction: column; gap: 2.5rem; }
+
+.step {
+  display: grid;
+  grid-template-columns: 2.5rem 1fr;
+  gap: 1.25rem;
+  align-items: start;
+}
+
+.step-n {
+  font-family: var(--mono);
+  font-size: 0.68rem;
+  font-weight: 700;
+  color: var(--accent);
+  letter-spacing: 0.05em;
+  padding-top: 0.2rem;
+  text-align: right;
+}
+
+.step-title {
+  font-family: var(--mono);
+  font-size: 1.05rem;
+  font-weight: 600;
+  color: var(--text);
+  margin-bottom: 0.4rem;
+}
+
+.step-desc {
+  font-size: 0.87rem;
+  color: var(--muted);
+  margin-bottom: 0.9rem;
+  line-height: 1.65;
+}
+
+/* ── Terminal blocks ── */
+.term {
+  background: var(--surface);
+  border: 1px solid var(--lift);
+  border-radius: 8px;
+  overflow: hidden;
+}
+
+.term-bar {
+  background: var(--lift);
+  padding: 0.5rem 0.9rem;
+  display: flex;
+  align-items: center;
+  gap: 0.45rem;
+}
+
+.term-label {
+  font-family: var(--mono);
+  font-size: 0.67rem;
+  color: var(--muted);
+  margin-left: 0.35rem;
+}
+
+.term-code {
+  padding: 1.1rem 1.25rem;
+  font-family: var(--mono);
+  font-size: 0.82rem;
+  line-height: 1.9;
+  overflow-x: auto;
+}
+
+.ps  { color: var(--teal); user-select: none; }
+.cmd { color: var(--text); }
+.str { color: var(--green); }
+.cmt { color: var(--muted); font-style: italic; }
+.kw  { color: var(--lilac); }
+.fn  { color: var(--accent); }
+.sep { color: var(--muted); }
+
+/* ── Divider ── */
+.hr {
+  border: none;
+  border-top: 1px solid var(--lift);
+  margin: 3.5rem 0;
+}
+
+/* ── Note ── */
+.note {
+  background: var(--surface);
+  border: 1px solid var(--lift);
+  border-radius: 8px;
+  padding: 1.1rem 1.25rem;
+  font-size: 0.86rem;
+  line-height: 1.75;
+}
+
+.note-label {
+  font-family: var(--mono);
+  font-size: 0.63rem;
+  text-transform: uppercase;
+  letter-spacing: 0.18em;
+  color: var(--teal);
+  margin-bottom: 0.5rem;
+}
+
+@media (max-width: 520px) {
+  .step { grid-template-columns: 2rem 1fr; gap: 0.75rem; }
+  .tree-body { font-size: 0.75rem; }
+  .hero-sub { font-size: 0.8rem; }
+}
+</style>
+
+<div class="page">
+
+  <!-- Hero -->
+  <header class="hero">
+    <p class="hero-eyebrow">Claude Code · Windows</p>
+    <h1 class="hero-title">Múltiples perfiles<br>con <em>un solo CLI</em></h1>
+    <p class="hero-sub">Un ejecutable. Tres carpetas de config. Cero interferencia.</p>
+  </header>
+
+  <!-- Folder tree visualization -->
+  <div class="tree-wrap" role="img" aria-label="Árbol de carpetas: .claude, .claude-max, .claude-team">
+    <div class="tree-bar">
+      <span class="dot dot-r"></span>
+      <span class="dot dot-y"></span>
+      <span class="dot dot-g"></span>
+      <span class="tree-bar-path">C:\Users\TuNombre\</span>
+    </div>
+    <div class="tree-body">
+      <span class="tl"><span class="cd">.claude\</span><span class="badge badge-a">claude</span></span>
+      <span class="tl"><span class="ct">│  </span><span class="cf">settings.json</span></span>
+      <span class="tl"><span class="ct">│  </span><span class="cd">skills\</span></span>
+      <span class="tl"><span class="ct">│  </span><span class="cd">projects\</span></span>
+      <span class="tl"><span class="ct">│</span></span>
+      <span class="tl"><span class="cd">.claude-max\</span><span class="badge badge-t">claude-max</span></span>
+      <span class="tl"><span class="ct">│  </span><span class="cf">settings.json</span></span>
+      <span class="tl"><span class="ct">│  </span><span class="cd">skills\</span></span>
+      <span class="tl"><span class="ct">│  </span><span class="cd">projects\</span></span>
+      <span class="tl"><span class="ct">│</span></span>
+      <span class="tl"><span class="cd">.claude-team\</span><span class="badge badge-l">claude-team</span></span>
+      <span class="tl"><span class="ct">   </span><span class="cf">settings.json</span></span>
+      <span class="tl"><span class="ct">   </span><span class="cd">skills\</span></span>
+      <span class="tl"><span class="ct">   </span><span class="cd">projects\</span></span>
+    </div>
+  </div>
+
+  <!-- Concept -->
+  <div class="concept">
+    La variable de entorno <strong>CLAUDE_CONFIG_DIR</strong> le dice al ejecutable <code>claude.exe</code>
+    en qué carpeta guardar todo: settings, plugins, skills, memoria de proyectos e historial.
+    Cambiando esa variable antes de ejecutar <code>claude</code>, cada alias opera con su propia
+    configuración aislada — como si fueran instalaciones completamente separadas.
+  </div>
+
+  <!-- Steps -->
+  <p class="section-label">Setup — paso a paso</p>
+
+  <div class="steps">
+
+    <!-- 01 -->
+    <div class="step">
+      <span class="step-n">01</span>
+      <div>
+        <p class="step-title">Crear las carpetas</p>
+        <p class="step-desc">
+          Una carpeta por perfil. Si ya tenés <code>~/.claude</code> configurado, podés copiar su
+          <code>settings.json</code> como punto de partida. Si no, el CLI las inicializa solo la primera vez.
+        </p>
+        <div class="term">
+          <div class="term-bar">
+            <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
+            <span class="term-label">PowerShell</span>
+          </div>
+          <div class="term-code">
+            <span class="ps">PS&gt; </span><span class="cmd">mkdir </span><span class="str">"$HOME\.claude-max"</span><br>
+            <span class="ps">PS&gt; </span><span class="cmd">mkdir </span><span class="str">"$HOME\.claude-team"</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 02 -->
+    <div class="step">
+      <span class="step-n">02</span>
+      <div>
+        <p class="step-title">Abrir el PowerShell profile</p>
+        <p class="step-desc">
+          El profile es un script que PowerShell ejecuta al arrancar. Ahí van las funciones.
+          La variable <code>$PROFILE</code> ya sabe dónde vive — no hace falta buscar la ruta a mano.
+        </p>
+        <div class="term">
+          <div class="term-bar">
+            <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
+            <span class="term-label">PowerShell</span>
+          </div>
+          <div class="term-code">
+            <span class="cmt"># Crear el profile si no existe</span><br>
+            <span class="ps">PS&gt; </span><span class="kw">if </span><span class="sep">(!(</span><span class="cmd">Test-Path $PROFILE</span><span class="sep">)) {</span><br>
+            <span class="ps">   </span><span class="cmd">  New-Item -Force -Path $PROFILE</span><br>
+            <span class="sep">  }</span><br>
+            <br>
+            <span class="cmt"># Abrirlo en tu editor</span><br>
+            <span class="ps">PS&gt; </span><span class="cmd">notepad </span><span class="cmd">$PROFILE</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 03 -->
+    <div class="step">
+      <span class="step-n">03</span>
+      <div>
+        <p class="step-title">Agregar las funciones</p>
+        <p class="step-desc">
+          Pegá esto al final del archivo. Cada función setea <code>CLAUDE_CONFIG_DIR</code>
+          apuntando a su carpeta y luego invoca al CLI pasándole todos los argumentos con <code>@args</code>.
+        </p>
+        <div class="term">
+          <div class="term-bar">
+            <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
+            <span class="term-label">Microsoft.PowerShell_profile.ps1</span>
+          </div>
+          <div class="term-code">
+            <span class="kw">function </span><span class="fn">claude-max</span><span class="sep"> {</span><br>
+            <span class="cmd">    $env:CLAUDE_CONFIG_DIR = </span><span class="str">"$HOME\.claude-max"</span><br>
+            <span class="cmd">    claude @args</span><br>
+            <span class="sep">}</span><br>
+            <br>
+            <span class="kw">function </span><span class="fn">claude-team</span><span class="sep"> {</span><br>
+            <span class="cmd">    $env:CLAUDE_CONFIG_DIR = </span><span class="str">"$HOME\.claude-team"</span><br>
+            <span class="cmd">    claude @args</span><br>
+            <span class="sep">}</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 04 -->
+    <div class="step">
+      <span class="step-n">04</span>
+      <div>
+        <p class="step-title">Recargar el profile</p>
+        <p class="step-desc">
+          El dot-source (<code>.</code>) ejecuta el profile en la sesión actual sin abrir una terminal nueva.
+          Después de esto, <code>claude-max</code> y <code>claude-team</code> ya están disponibles.
+        </p>
+        <div class="term">
+          <div class="term-bar">
+            <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
+            <span class="term-label">PowerShell</span>
+          </div>
+          <div class="term-code">
+            <span class="ps">PS&gt; </span><span class="cmd">. $PROFILE</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+    <!-- 05 -->
+    <div class="step">
+      <span class="step-n">05</span>
+      <div>
+        <p class="step-title">Verificar</p>
+        <p class="step-desc">
+          Ejecutá cada alias y confirmá que arranca. Si querés ver qué carpeta está usando
+          en ese momento, revisá la variable desde adentro del CLI o desde PowerShell.
+        </p>
+        <div class="term">
+          <div class="term-bar">
+            <span class="dot dot-r"></span><span class="dot dot-y"></span><span class="dot dot-g"></span>
+            <span class="term-label">PowerShell</span>
+          </div>
+          <div class="term-code">
+            <span class="ps">PS&gt; </span><span class="cmd">claude</span><span class="cmt">        # usa ~/.claude</span><br>
+            <span class="ps">PS&gt; </span><span class="cmd">claude-max</span><span class="cmt">    # usa ~/.claude-max</span><br>
+            <span class="ps">PS&gt; </span><span class="cmd">claude-team</span><span class="cmt">   # usa ~/.claude-team</span><br>
+            <br>
+            <span class="cmt"># Ver qué carpeta está activa ahora mismo</span><br>
+            <span class="ps">PS&gt; </span><span class="cmd">$env:CLAUDE_CONFIG_DIR</span>
+          </div>
+        </div>
+      </div>
+    </div>
+
+  </div>
+
+  <hr class="hr">
+
+  <!-- Note -->
+  <div class="note">
+    <p class="note-label">Comportamiento a tener en cuenta</p>
+    <p>
+      Después de llamar <code>claude-max</code>, la variable <code>CLAUDE_CONFIG_DIR</code> queda seteada
+      en esa sesión de PowerShell. Si luego llamás <code>claude</code> directo (sin alias), va a seguir
+      apuntando a <code>.claude-max</code> hasta que cierres la terminal o la limpies manualmente con
+      <code>Remove-Item Env:CLAUDE_CONFIG_DIR</code>. En la práctica no es un problema si siempre
+      usás los alias — pero conviene saberlo.
+    </p>
+  </div>
+
+</div>

@@ -495,6 +495,13 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.7.0', date: '22 jun 2026', title: 'Multi-perfil de Claude', items: [
+      'Consomni ya no asume ~/.claude fijo: en Settings, sección "Perfil de Claude", podés elegir el config dir que querés monitorear (ej ~/.claude-max). Auto-detecta tus perfiles .claude* y también acepta una ruta a mano.',
+      'Al cambiar de perfil, el tablero pasa a mostrar las sesiones de ESE perfil, y los hooks se instalan en su propio settings.json (reinstalalos desde Settings tras cambiar).',
+      'Las terminales que Consomni abre usan el perfil elegido (cualquier `claude` adentro escribe en ese config dir).',
+      'Sin tocar nada queda exactamente como antes (usa ~/.claude o la variable CLAUDE_CONFIG_DIR de tu entorno).',
+      'Tutorial guiado: la primera vez se abre Settings solo y te muestra dónde elegir el perfil. Lo podés repetir desde el botón "tutorial" de la sección o la paleta.',
+    ] },
     { v: '1.6.2', date: '22 jun 2026', title: 'Fix del cartel de atención', items: [
       'Arreglado: el cartel "una sesión necesita tu atención" se quedaba pegado después de loguearte (o ante avisos que no eran un pedido de permiso). Ahora solo se prende ante un pedido de permiso real, y se limpia solo cuando la sesión sigue trabajando.',
     ] },
@@ -634,7 +641,7 @@
      Resalta UN elemento con un recorte EXACTO (box-shadow gigante que opaca el
      resto) y una tarjeta al lado, paso a paso, con "saltar". Responsive: reencuadra
      en resize y en cada re-render. Explica el tablero de Planes (idea de Facundo). */
-  var TOUR = { active: false, steps: [], idx: 0, doneKey: 'consomni.tour.plans' };
+  var TOUR = { active: false, steps: [], idx: 0, doneKey: 'consomni.tour.plans', onDone: null };
   var tourEls = { host: null, spot: null, pop: null };
 
   function openPlansForTour() {
@@ -674,9 +681,10 @@
     if (done || TOUR.active) return;
     startPlanTour();
   }
-  function startTour(steps, doneKey) {
+  function startTour(steps, doneKey, onDone) {
     if (!steps || !steps.length) return;
     TOUR.steps = steps; TOUR.idx = 0; TOUR.active = true; TOUR.doneKey = doneKey || 'consomni.tour.plans';
+    TOUR.onDone = (typeof onDone === 'function') ? onDone : null;
     window.addEventListener('resize', positionTour);
     showTourStep();
   }
@@ -685,7 +693,11 @@
   function endTour(markDone) {
     TOUR.active = false; removeTourDOM();
     window.removeEventListener('resize', positionTour);
-    if (markDone) { try { localStorage.setItem(TOUR.doneKey || 'consomni.tour.plans', '1'); } catch (e) {} }
+    if (markDone) {
+      try { localStorage.setItem(TOUR.doneKey || 'consomni.tour.plans', '1'); } catch (e) {}
+      if (TOUR.onDone) { try { TOUR.onDone(); } catch (e2) {} }   // persistencia confiable adicional (ej config.json)
+    }
+    TOUR.onDone = null;
   }
   function removeTourDOM() { var h = document.getElementById('tour'); if (h) h.remove(); tourEls = { host: null, spot: null, pop: null }; }
   function tourTarget(step) { if (!step.target) return null; return document.querySelector(step.target) || (step.alt ? document.querySelector(step.alt) : null); }
@@ -1403,6 +1415,49 @@
     startLibraryTour();
   }
 
+  /* ── tutorial de CONFIGURACIÓN / multi-perfil (reusa el motor de coachmark, dentro del modal de Settings) ──
+     Apunta a la sección PERFIL DE CLAUDE. Se auto-abre Settings y se ilumina paso a paso. */
+  function openSettingsForTour() { if (!state.settingsOpen) openSettings(); }
+  function markProfileTourSeen() {
+    state.seenProfileTour = true;
+    if (api && api.saveConfig) api.saveConfig({ seenProfileTour: true });
+  }
+  function profileTourSteps() {
+    return [
+      { center: true, icon: 'sparkles', title: 'Novedad: multi-perfil de Claude', before: openSettingsForTour,
+        body: 'Ahora Consomni puede monitorear <b>cualquier perfil</b> de Claude Code, no solo <code>~/.claude</code>. Si usás un alias como <code>claude-max</code> (que apunta a <code>~/.claude-max</code>), podés decirle a Consomni que mire <b>ese</b> perfil. Te muestro dónde, son 10 segundos.' },
+      { target: '#setProfSec', place: 'bottom', icon: 'folder', title: 'Elegí tu perfil', before: openSettingsForTour, pad: 10,
+        body: 'Consomni <b>auto-detecta</b> tus carpetas <code>.claude*</code> y las lista acá. Click en una para que el tablero pase a mostrar las sesiones de <b>ese</b> config dir. La que está activa lleva el punto verde.' },
+      { target: '#setProfPath', alt: '#setProfSec', place: 'bottom', icon: 'folder', title: 'Ruta a mano o volver a auto', before: openSettingsForTour,
+        body: 'Si tu perfil está en otra ruta, pegala o tocá <b>elegir</b> para buscarla. <b>Usar default (auto)</b> vuelve al comportamiento de siempre (la variable <code>CLAUDE_CONFIG_DIR</code> de tu entorno, o <code>~/.claude</code>).' },
+      { target: '#setHooksBtn', alt: '#setHooksSec', place: 'top', icon: 'check', title: 'Reinstalá los hooks al cambiar', before: openSettingsForTour,
+        body: 'Cada perfil tiene su propio <code>settings.json</code>. Cuando cambiás de perfil, <b>reinstalá los hooks acá</b> para que el estado en vivo siga funcionando en el perfil nuevo (con backup automático, como siempre).' }
+    ];
+  }
+  function startProfileTour() {
+    openSettingsForTour();
+    // esperar a que el modal de Settings esté en el DOM antes de pintar el primer recorte
+    var tries = 0;
+    (function wait() {
+      if (document.querySelector('#setProfSec') || tries > 40) {
+        startTour(profileTourSteps(), 'consomni.tour.profile', markProfileTourSeen);
+        return;
+      }
+      tries++; requestAnimationFrame(wait);
+    })();
+  }
+  // Auto-arranque 1 vez tras actualizar: solo si no lo vio, no hay onboarding ni otro overlay abierto.
+  function maybeAutostartProfileTour() {
+    if (TOUR.active || anyOverlayOpen()) return;
+    if (document.querySelector('.onb-scrim')) return;   // onboarding visible → lo dejamos para otro arranque
+    if (!api || !api.getConfig) return;
+    api.getConfig().then(function (cfg) {
+      if (!cfg || cfg.seenProfileTour) { if (cfg) state.seenProfileTour = true; return; }
+      if (TOUR.active || anyOverlayOpen() || document.querySelector('.onb-scrim')) return;
+      startProfileTour();
+    }).catch(function () {});
+  }
+
   /* ════════ FILTROS / ORDEN / DENSIDAD / PROYECTO ════════ */
   function setActiveProject(p) {
     state.activeProject = p; state.focusSid = null; state.plansOpen = false; state.libraryOpen = false;
@@ -1641,6 +1696,7 @@
     rows.push({ group: 'ACCIONES', ic: 'plus', tx: 'Nuevo item en la biblioteca', sub: 'prompt / skill / rule', keys: [], act: 'libnew' });
     rows.push({ group: 'ACCIONES', ic: 'eye', tx: 'Tutorial de Biblioteca', sub: 'tour paso a paso', keys: [], act: 'libtour' });
     rows.push({ group: 'ACCIONES', ic: 'gear', tx: 'Abrir settings', sub: '', keys: [], act: 'settings' });
+    rows.push({ group: 'ACCIONES', ic: 'eye', tx: 'Tutorial de perfiles', sub: 'multi-perfil de Claude · tour', keys: [], act: 'proftour' });
     return rows;
   }
   function fuzzy(rows, q) {
@@ -1693,6 +1749,7 @@
     else if (row.act === 'library') { closePalette(); openLibrary(); maybeStartLibraryTour(); }
     else if (row.act === 'libnew') { closePalette(); openLibrary(); openLibEdit(null); }
     else if (row.act === 'libtour') { closePalette(); openLibrary(); startLibraryTour(); }
+    else if (row.act === 'proftour') { closePalette(); startProfileTour(); }
     else if (row.act && row.act.indexOf('a:') === 0) { closePalette(); dispatchAction(row.act.slice(2), state.focusSid); }
     else closePalette();
   }
@@ -1715,10 +1772,14 @@
   }
 
   /* ════════ SETTINGS ════════ */
+  var settingsProfiles = [];   // perfiles de Claude detectados (para la sección "PERFIL DE CLAUDE")
   function openSettings() {
     if (!api || !api.getConfig) { toast('settings no disponible', 'warn'); return; }
-    Promise.all([api.getConfig(), api.getHooksStatus ? api.getHooksStatus() : Promise.resolve({})])
-      .then(function (a) { renderSettings(a[0], a[1] || {}); });
+    Promise.all([
+      api.getConfig(),
+      api.getHooksStatus ? api.getHooksStatus() : Promise.resolve({}),
+      api.getClaudeProfiles ? api.getClaudeProfiles().catch(function () { return []; }) : Promise.resolve([])
+    ]).then(function (a) { settingsProfiles = Array.isArray(a[2]) ? a[2] : []; renderSettings(a[0], a[1] || {}); });
   }
   function closeSettings() { state.settingsOpen = false; setOverlay(''); }
   function seg2(key, val, opts) {
@@ -1730,6 +1791,19 @@
       return '<div class="set-dir"><span class="p">' + esc(d) + '</span><span class="rm" data-rmdir="' + esc(d) + '" title="quitar">' + C.svg('x', 12, 2) + '</span></div>';
     }).join('');
     var hk = !!(hooks && hooks.installed);
+    // PERFIL DE CLAUDE (config dir) — filas seleccionables + ruta personalizada
+    var curCfgDir = (cfg.claudeConfigDir || '').trim();
+    var profRows = (settingsProfiles || []).map(function (pr) {
+      var on = !!pr.active;
+      return '<div class="set-prof' + (on ? ' on' : '') + '" data-prof="' + esc(pr.dir) + '" title="' + esc(pr.dir) + '">' +
+        '<span class="dot ' + (on ? 'dot--green pulse' : 'dot--idle') + '" style="box-shadow:none"></span>' +
+        '<span class="nm">' + esc(pr.name) + '</span>' +
+        '<span class="p">' + esc(pr.dir) + '</span>' +
+        '<span class="cnt">' + (pr.projectCount || 0) + ' proy' + (pr.hasSettings ? '' : ' · sin settings') + '</span>' +
+        (on && !curCfgDir ? '<span class="set-prof-auto">auto</span>' : '') +
+        '</div>';
+    }).join('');
+    var profHint = curCfgDir ? ('perfil fijado: ' + curCfgDir) : 'auto: env CLAUDE_CONFIG_DIR → ~/.claude';
     var html = '<div class="set-scrim" data-act="close-settings"><div class="set-card">' +
       '<div class="set-head"><span class="ttl">SETTINGS</span><button class="iconbtn" style="width:26px;height:26px" data-act="close-settings">' + C.svg('x', 14, 2) + '</button></div>' +
       '<div class="set-sec"><div class="lbl">EDITOR & TERMINAL</div>' +
@@ -1737,7 +1811,12 @@
         '<div class="set-row"><span class="k">terminal preferida</span>' + seg2('terminal', cfg.terminal, [['wt', 'Win Terminal'], ['powershell', 'PowerShell']]) + '</div>' +
         '<div class="set-row"><span class="k">Ctrl+Espacio abre</span>' + seg2('quickTermKind', cfg.quickTermKind || 'claude-skip', [['shell', 'terminal'], ['claude', 'claude'], ['claude-skip', 'claude ⚡']]) + '</div>' +
       '</div>' +
-      '<div class="set-sec"><div class="lbl">DIRECTORIOS VIGILADOS (read-only)</div>' + dirs +
+      '<div class="set-sec" id="setProfSec"><div class="lbl">PERFIL DE CLAUDE (config dir)<button class="set-tour-link" data-act="profile-tour" title="ver el tutorial">' + C.svg('eye', 11, 1.8) + ' tutorial</button></div>' + profRows +
+        '<div class="set-row" style="margin-top:8px"><input class="set-inp" id="setProfPath" style="flex:1;width:auto" placeholder="ruta personalizada (ej C:\\Users\\vos\\.claude-max)"><button class="btn btn--sm" id="setProfPick">' + C.svg('folder', 12, 2) + ' elegir</button></div>' +
+        '<div class="set-row"><span class="k" id="setProfMsg">' + esc(profHint) + '</span><button class="btn btn--sm" id="setProfAuto">usar default (auto)</button></div>' +
+        '<div style="font-size:10px;color:var(--text-4);margin-top:4px">el projects del perfil activo se vigila solo · los hooks van a SU settings.json (reinstalá si cambiás) · cero API de Anthropic</div>' +
+      '</div>' +
+      '<div class="set-sec"><div class="lbl">DIRECTORIOS VIGILADOS EXTRA (read-only)</div>' + dirs +
         '<div class="set-row" style="margin-top:8px"><input class="set-inp" id="setDirAdd" style="flex:1;width:auto" placeholder="C:\\ruta\\.claude\\projects"><button class="btn btn--sm" id="setDirAddBtn">' + C.svg('plus', 12, 2) + ' agregar</button></div>' +
       '</div>' +
       '<div class="set-sec"><div class="lbl">MONITOREO</div>' +
@@ -1745,7 +1824,7 @@
         '<div class="set-row"><span class="k">refresh del statusbar (s)</span><input class="set-inp" id="setRefresh" type="number" min="1" max="60" value="' + Math.round((cfg.refreshMs || 2000) / 1000) + '"></div>' +
         '<div class="set-row"><span class="k">sonidos / notificaciones</span>' + seg2('sounds', cfg.sounds ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
       '</div>' +
-      '<div class="set-sec"><div class="lbl">HOOKS</div>' +
+      '<div class="set-sec" id="setHooksSec"><div class="lbl">HOOKS</div>' +
         '<div class="set-row"><span class="k">puerto del server</span><input class="set-inp" id="setPort" type="number" min="1024" max="65535" value="' + cfg.port + '"></div>' +
         '<div class="set-row"><span class="k">estado</span><span class="set-hooks"><span class="dot ' + (hk ? 'dot--green pulse' : 'dot--idle') + '" style="box-shadow:none"></span>' + (hk ? 'conectado' : 'desconectado') + '</span>' +
           '<button class="btn btn--sm ' + (hk ? 'btn--red' : 'btn--green') + '" id="setHooksBtn" data-hk="' + (hk ? '1' : '0') + '">' + (hk ? 'desinstalar' : 'instalar') + ' hooks</button></div>' +
@@ -1793,6 +1872,30 @@
         saveSetting({ watchedDirs: d });
       });
     });
+    // ── perfil de Claude (config dir) ──
+    function applyProfile(dir) {
+      if (!api.setClaudeProfile) { toast('no disponible', 'warn'); return; }
+      var msg = card.querySelector('#setProfMsg'); if (msg) msg.textContent = 'cambiando…';
+      api.setClaudeProfile(dir || '').then(function (res) {
+        if (!res || !res.ok) { toast((res && res.error) || 'no se pudo cambiar el perfil', 'err'); if (msg) msg.textContent = (res && res.error) || 'error'; return; }
+        var nm = (res.active || '').split(/[\\/]/).filter(Boolean).pop() || 'default';
+        toast('perfil: ' + nm + ' · revisá los hooks', '');
+        (api.getClaudeProfiles ? api.getClaudeProfiles().catch(function () { return settingsProfiles; }) : Promise.resolve(settingsProfiles))
+          .then(function (ps) { settingsProfiles = Array.isArray(ps) ? ps : settingsProfiles; renderSettings(res.config, (res.hooks || {})); });
+      }).catch(function () { toast('error al cambiar el perfil', 'err'); });
+    }
+    Array.prototype.forEach.call(card.querySelectorAll('.set-prof'), function (el) {
+      el.addEventListener('click', function () { applyProfile(el.getAttribute('data-prof')); });
+    });
+    var profPick = card.querySelector('#setProfPick'); if (profPick) profPick.addEventListener('click', function () {
+      var inp = card.querySelector('#setProfPath'); var typed = (inp && inp.value || '').trim();
+      if (typed) { applyProfile(typed); return; }
+      if (api.pickFolder) api.pickFolder().then(function (p) { if (p) applyProfile(p); }); else toast('selector no disponible', 'warn');
+    });
+    var profInp = card.querySelector('#setProfPath'); if (profInp) profInp.addEventListener('keydown', function (e) {
+      if (e.key === 'Enter') { var v = (profInp.value || '').trim(); if (v) applyProfile(v); }
+    });
+    var profAuto = card.querySelector('#setProfAuto'); if (profAuto) profAuto.addEventListener('click', function () { applyProfile(''); });
     var ub = card.querySelector('#setUpdBtn'); if (ub && api.checkUpdate) ub.addEventListener('click', function () {
       var msg = card.querySelector('#setUpdMsg'); ub.disabled = true; if (msg) msg.textContent = 'buscando…';
       api.checkUpdate().then(function (u) {
@@ -1868,6 +1971,7 @@
       if (act === 'close-palette') { if (t.classList.contains('cmd-scrim')) closePalette(); return; }
       if (act === 'close-help') { if (t.classList.contains('help-scrim')) setOverlay(''); return; }
       if (act === 'close-settings') { if (t.classList.contains('set-scrim') || actEl.tagName === 'BUTTON') closeSettings(); return; }
+      if (act === 'profile-tour') { e.stopPropagation(); startProfileTour(); return; }
       if (act === 'cfm-cancel') { if (t.classList.contains('cfm-scrim') || actEl.tagName === 'BUTTON') { pendingClose = null; setOverlay(''); } return; }
       if (act === 'cfm-ok') { var ccd = document.getElementById('cccDont'); if (ccd && ccd.checked) { state.confirmCloseTerminal = false; if (api && api.saveConfig) api.saveConfig({ confirmCloseTerminal: false }); } var fn = pendingClose; pendingClose = null; setOverlay(''); if (fn) fn(); return; }
       // ── tablero de Planes (frentes) ──
@@ -2080,7 +2184,7 @@
       '<div class="onb-scrim"><div class="onb-card">' +
         '<div class="onb-logo"><img id="onbLogoImg" src="assets/logo/cursor-on.png" alt="Consomni" width="138"></div>' +
         '<div class="onb-title">conectá Consomni a tus hooks</div>' +
-        '<div class="onb-desc">Para ver el estado en vivo (working · atención · idle) Consomni instala hooks locales en <b>~/.claude/settings.json</b>. Se hace <b>backup</b> antes de tocar nada. Read-only sobre tus transcripts · sólo 127.0.0.1.</div>' +
+        '<div class="onb-desc">Para ver el estado en vivo (working · atención · idle) Consomni instala hooks locales en el <b>settings.json</b> de tu perfil de Claude activo (por defecto <b>~/.claude</b>). Se hace <b>backup</b> antes de tocar nada. Read-only sobre tus transcripts · sólo 127.0.0.1.</div>' +
         '<div class="onb-btns">' +
           '<button class="btn btn--green" id="onbInstall">' + C.svg('check', 13, 2.4) + ' instalar hooks</button>' +
           '<button class="btn btn--ghost" id="onbSkip">ahora no</button>' +
@@ -2108,9 +2212,12 @@
   }
   function setOnboarded() { try { localStorage.setItem('consomni.onboarded', '1'); } catch (e) {} }
   function maybeOnboard() {
-    if (!api || !api.getHooksStatus) return;
+    if (!api || !api.getHooksStatus) { maybeAutostartProfileTour(); return; }
     var dismissed = false; try { dismissed = localStorage.getItem('consomni.onboarded') === '1'; } catch (e) {}
-    api.getHooksStatus().then(function (st) { if (st && !st.installed && !dismissed) showOnboarding(); }).catch(function () {});
+    api.getHooksStatus().then(function (st) {
+      if (st && !st.installed && !dismissed) { showOnboarding(); return; }   // onboarding tiene prioridad este arranque
+      maybeAutostartProfileTour();   // sin onboarding → considerar el tutorial de multi-perfil (1 vez)
+    }).catch(function () { maybeAutostartProfileTour(); });
   }
 
   /* ── responsive + colapso manual del sidebar ──
@@ -2205,7 +2312,7 @@
     openPalette: openPalette, openDetail: openDetail, openHelp: openHelp, openSettings: openSettings,
     openPlans: openPlans, closePlans: closePlans,
     openLibrary: openLibrary, closeLibrary: closeLibrary, openLibEdit: openLibEdit, startLibraryTour: startLibraryTour,
-    startTutorial: startPlanTour, openNotifs: openNotifPanel, openNotifHistory: openNotifHistory, openChangelog: openChangelog, openChangelogAll: openChangelogAll,
+    startTutorial: startPlanTour, startProfileTour: startProfileTour, openNotifs: openNotifPanel, openNotifHistory: openNotifHistory, openChangelog: openChangelog, openChangelogAll: openChangelogAll,
     setActiveProject: setActiveProject, activateSearch: activateSearch,
     toggleDensity: toggleDensity, showOnboarding: showOnboarding,
     enterSplit: enterSplit, exitSplit: exitSplit, dispatchAction: dispatchAction,

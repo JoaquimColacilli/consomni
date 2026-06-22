@@ -9,8 +9,21 @@ import * as path from 'path';
 import { app } from 'electron';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { parseSessionFile, parseSessionDetail, type SessionDetail } from './jsonl';
-import { loadConfig, loadLocalState } from './config';
+import { loadConfig, loadLocalState, claudeProjectsPath, type AppConfig } from './config';
 import type { Session, Snapshot, SessionState, SessionMode, SubagentInfo, PlanDoc } from './types';
+
+/** Raíces a vigilar: el projects del perfil ACTIVO + los dirs extra de watchedDirs (dedupe).
+    Garantiza vigilar el perfil aunque venga solo del env (sin haber repointado watchedDirs). */
+function watchRoots(cfg: AppConfig): string[] {
+  const roots = [claudeProjectsPath(cfg), ...(Array.isArray(cfg.watchedDirs) ? cfg.watchedDirs : [])];
+  const seen = new Set<string>();
+  const out: string[] = [];
+  for (const r of roots) {
+    const k = path.resolve(String(r || ''));
+    if (k && !seen.has(k)) { seen.add(k); out.push(r); }
+  }
+  return out;
+}
 
 let watcher: FSWatcher | null = null;
 let onUpdateCb: ((s: Snapshot) => void) | null = null;
@@ -186,7 +199,7 @@ function mergeOverlay(sessions: Session[]): Session[] {
 function listSessionFiles(): string[] {
   const cfg = loadConfig();
   const files: string[] = [];
-  for (const root of cfg.watchedDirs) {
+  for (const root of watchRoots(cfg)) {
     let projDirs: string[] = [];
     try {
       projDirs = fs.readdirSync(root, { withFileTypes: true })
@@ -233,7 +246,7 @@ export function buildSnapshot(): Snapshot {
     hooksConnected,
     tokensToday,
     generatedAt: Date.now(),
-    watchedRoots: cfg.watchedDirs,
+    watchedRoots: watchRoots(cfg),
     appVersion: app.getVersion(),
   };
 }
@@ -258,7 +271,7 @@ function onFs(p: string): void { if (p.toLowerCase().endsWith('.jsonl')) schedul
 
 function startWatcher(): void {
   const cfg = loadConfig();
-  watcher = chokidar.watch(cfg.watchedDirs, {
+  watcher = chokidar.watch(watchRoots(cfg), {
     ignoreInitial: true,
     depth: 2,
     ignored: /(^|[/\\])subagents([/\\]|$)/,
@@ -294,7 +307,7 @@ export function rescanNow(): Snapshot {
 /* ════════ detalle de una sesión (panel E2) ════════ */
 export function findSessionFile(id: string): string | null {
   const cfg = loadConfig();
-  for (const root of cfg.watchedDirs) {
+  for (const root of watchRoots(cfg)) {
     let dirs: string[] = [];
     try {
       dirs = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => path.join(root, d.name));

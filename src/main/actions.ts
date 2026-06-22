@@ -10,9 +10,18 @@ import { execFile, execFileSync, spawn } from 'child_process';
 import * as fs from 'fs';
 import * as os from 'os';
 import * as path from 'path';
-import { loadConfig } from './config';
+import { loadConfig, resolveClaudeDir } from './config';
 
 export interface ActionResult { ok: boolean; message?: string; error?: string; }
+
+/** Env con CLAUDE_CONFIG_DIR del perfil activo si hay uno seteado; si no, undefined
+    (el spawn hereda process.env tal cual = comportamiento actual). NUNCA spawnea
+    `claude-max` como exe: siempre `claude` + esta env. */
+function profileEnv(): NodeJS.ProcessEnv | undefined {
+  const cfg = loadConfig();
+  if (!(cfg.claudeConfigDir || '').trim()) return undefined;
+  return { ...process.env, CLAUDE_CONFIG_DIR: resolveClaudeDir(cfg) };
+}
 
 /* ── detección de binarios (cacheada) ── */
 const whichCache: Record<string, string | null> = {};
@@ -109,9 +118,10 @@ function openPR(cwd: string): ActionResult {
 /* ── dispatch: NUEVA sesión de Claude Code en cwd (terminal + claude) ── */
 function dispatchNew(cwd: string): ActionResult {
   if (!exists(cwd)) return { ok: false, error: 'la carpeta no existe' };
+  const env = profileEnv();   // perfil activo de Claude Code (multi-perfil), si hay
   const wt = which('wt');
-  if (wt) { spawnDetached(wt, ['-d', cwd, 'claude']); return { ok: true, message: 'dispatch: claude en ' + path.basename(cwd) }; }
-  spawnDetached('cmd.exe', ['/d', '/s', '/c', 'start', '', 'powershell', '-NoExit', '-Command', 'claude'], { cwd });
+  if (wt) { spawnDetached(wt, ['-d', cwd, 'claude'], env ? { env } : {}); return { ok: true, message: 'dispatch: claude en ' + path.basename(cwd) }; }
+  spawnDetached('cmd.exe', ['/d', '/s', '/c', 'start', '', 'powershell', '-NoExit', '-Command', 'claude'], env ? { cwd, env } : { cwd });
   return { ok: true, message: 'dispatch: claude (powershell)' };
 }
 

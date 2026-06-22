@@ -14,7 +14,15 @@ import { execFile, execFileSync } from 'child_process';
 import * as os from 'os';
 import * as fs from 'fs';
 import * as path from 'path';
-import { loadConfig } from './config';
+import { loadConfig, resolveClaudeDir } from './config';
+
+/** Si hay un perfil de Claude seteado (config dir distinto del default vía setting),
+    inyecta CLAUDE_CONFIG_DIR para que cualquier `claude` lanzado adentro use ese perfil.
+    Con setting vacío NO toca el env (preserva lo heredado del shell que lanzó Consomni). */
+function applyClaudeProfileEnv(env: NodeJS.ProcessEnv): void {
+  const cfg = loadConfig();
+  if ((cfg.claudeConfigDir || '').trim()) env.CLAUDE_CONFIG_DIR = resolveClaudeDir(cfg);
+}
 
 // Tipos mínimos (evita acoplar el build al .d.ts del fork).
 interface IPty {
@@ -96,6 +104,8 @@ export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number;
   const env: NodeJS.ProcessEnv = { ...process.env, TERM: 'xterm-256color' };
   // El host del agente (Claude CLI) exporta esto y rompería subprocesos de Node.
   delete env.ELECTRON_RUN_AS_NODE;
+  // Perfil activo de Claude Code (multi-perfil): cualquier `claude` adentro usa este config dir.
+  applyClaudeProfileEnv(env);
 
   // ¿qué comando tipear cuando el shell muestre el prompt?
   // claude normal, o `claude --resume <id>` para CONTINUAR esa conversación (interactiva).
@@ -201,6 +211,7 @@ export function nlToCommand(text: string, cwd?: string): Promise<NlResult> {
     const wd = (cwd && (() => { try { return fs.statSync(cwd).isDirectory(); } catch { return false; } })()) ? cwd : os.homedir();
     const env: NodeJS.ProcessEnv = { ...process.env };
     delete env.ELECTRON_RUN_AS_NODE;     // rompería al CLI si corre bajo el host del agente
+    applyClaudeProfileEnv(env);          // el helper NL traduce con el perfil activo
     const args = [
       '-p', prompt,
       '--model', model,

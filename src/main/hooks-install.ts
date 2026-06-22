@@ -7,7 +7,7 @@
    ════════════════════════════════════════════════════════════════ */
 import * as fs from 'fs';
 import * as path from 'path';
-import { CLAUDE_SETTINGS, BACKUPS_DIR, ensureConsomniDir, logSetup, loadConfig } from './config';
+import { claudeSettingsPath, BACKUPS_DIR, ensureConsomniDir, logSetup, loadConfig } from './config';
 
 /** Eventos que registramos (set estable, confirmado en plugins/.../*). */
 const EVENTS = [
@@ -25,8 +25,9 @@ export interface HooksStatus {
 type Json = any;
 
 function readSettings(): Json {
+  const settingsPath = claudeSettingsPath();
   try {
-    if (fs.existsSync(CLAUDE_SETTINGS)) return JSON.parse(fs.readFileSync(CLAUDE_SETTINGS, 'utf8'));
+    if (fs.existsSync(settingsPath)) return JSON.parse(fs.readFileSync(settingsPath, 'utf8'));
   } catch (e) { logSetup('WARN no se pudo parsear settings.json: ' + String(e)); }
   return {};
 }
@@ -64,25 +65,27 @@ export function isInstalled(): boolean {
 }
 
 export function getStatus(): HooksStatus {
-  return { installed: isInstalled(), settingsPath: CLAUDE_SETTINGS, port: loadConfig().port };
+  return { installed: isInstalled(), settingsPath: claudeSettingsPath(), port: loadConfig().port };
 }
 
 function backupSettings(): string | null {
   ensureConsomniDir();
-  if (!fs.existsSync(CLAUDE_SETTINGS)) return null;
+  const settingsPath = claudeSettingsPath();
+  if (!fs.existsSync(settingsPath)) return null;
   const stamp = new Date().toISOString().replace(/[:.]/g, '-');
   const dest = path.join(BACKUPS_DIR, 'settings.json.' + stamp + '.bak');
-  fs.copyFileSync(CLAUDE_SETTINGS, dest);
+  fs.copyFileSync(settingsPath, dest);
   logSetup('backup settings.json → ' + dest);
   return dest;
 }
 
 function writeSettingsAtomic(obj: Json): void {
-  const tmp = CLAUDE_SETTINGS + '.consomni.tmp';
+  const settingsPath = claudeSettingsPath();
+  const tmp = settingsPath + '.consomni.tmp';
   const data = JSON.stringify(obj, null, 2) + '\n'; // newline final (convención; deja el archivo limpio)
   JSON.parse(data); // validar
   fs.writeFileSync(tmp, data, 'utf8');
-  fs.renameSync(tmp, CLAUDE_SETTINGS);
+  fs.renameSync(tmp, settingsPath);
 }
 
 export interface InstallResult { ok: boolean; backupPath: string | null; error?: string; }

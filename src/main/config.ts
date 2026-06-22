@@ -25,6 +25,8 @@ export interface AppConfig {
   nlModel: string;             // modelo para el helper NL ('haiku' por costo/latencia)
   quickTermKind: 'shell' | 'claude' | 'claude-skip'; // qué abre CTRL+ESPACIO (terminal shell / claude / claude --dangerously-skip-permissions)
   theme: 'dark' | 'light';     // tema de la app (default oscuro)
+  claudeConfigDir: string;     // perfil ACTIVO de Claude Code (config dir). '' = auto (env CLAUDE_CONFIG_DIR → ~/.claude). Multi-perfil (ej ~/.claude-max)
+  seenProfileTour: boolean;    // ¿ya vio el tutorial de multi-perfil? (gate confiable bajo file://, no localStorage). Auto-salta 1 vez al actualizar
   frentes: Record<string, FrenteMeta>; // estado MANUAL de cada frente (proyecto) — privado, local. key = projKey
 }
 
@@ -36,6 +38,7 @@ export interface FrenteMeta {
 }
 
 export const HOME = os.homedir();
+// Default fallback (perfil clásico ~/.claude). El perfil ACTIVO puede ser otro (ver resolveClaudeDir).
 export const CLAUDE_DIR = path.join(HOME, '.claude');
 export const CLAUDE_PROJECTS_DIR = path.join(CLAUDE_DIR, 'projects');
 export const CLAUDE_SETTINGS = path.join(CLAUDE_DIR, 'settings.json');
@@ -65,6 +68,8 @@ const DEFAULTS: AppConfig = {
   nlModel: 'haiku',
   quickTermKind: 'claude-skip',
   theme: 'dark',
+  claudeConfigDir: '',
+  seenProfileTour: false,
   frentes: {},
 };
 
@@ -103,6 +108,76 @@ export function saveConfig(patch: Partial<AppConfig>): AppConfig {
   ensureConsomniDir();
   try { fs.writeFileSync(CONFIG_PATH, JSON.stringify(cfg, null, 2), 'utf8'); } catch { /* noop */ }
   return cfg;
+}
+
+/* ════════ perfil ACTIVO de Claude Code (config dir) ════════
+   Single source of truth: setting del usuario → env CLAUDE_CONFIG_DIR → ~/.claude.
+   Con setting '' y sin env → resuelve EXACTO a ~/.claude (backward-compatible). */
+
+/** Expande un `~` inicial a HOME y normaliza a ruta absoluta. */
+function expandHome(p: string): string {
+  let s = String(p || '').trim();
+  if (!s) return s;
+  if (s === '~') s = HOME;
+  else if (s.startsWith('~/') || s.startsWith('~\\')) s = path.join(HOME, s.slice(2));
+  return path.resolve(s);
+}
+
+/** Config dir ACTIVO de Claude Code (donde vive settings.json + projects del perfil elegido). */
+export function resolveClaudeDir(cfg?: AppConfig): string {
+  const c = cfg || loadConfig();
+  const fromSetting = (c.claudeConfigDir || '').trim();
+  if (fromSetting) return expandHome(fromSetting);
+  const fromEnv = (process.env.CLAUDE_CONFIG_DIR || '').trim();
+  if (fromEnv) return expandHome(fromEnv);
+  return CLAUDE_DIR;
+}
+
+/** Raíz de transcripts del perfil activo (<config-dir>/projects). */
+export function claudeProjectsPath(cfg?: AppConfig): string {
+  return path.join(resolveClaudeDir(cfg), 'projects');
+}
+
+/** settings.json del perfil activo (donde se instalan los hooks). */
+export function claudeSettingsPath(cfg?: AppConfig): string {
+  return path.join(resolveClaudeDir(cfg), 'settings.json');
+}
+
+export interface ClaudeProfile {
+  dir: string;          // ruta absoluta del config dir
+  name: string;         // nombre lindo (basename, ej '.claude' / '.claude-max')
+  hasProjects: boolean; // tiene subcarpeta projects/
+  hasSettings: boolean; // tiene settings.json
+  projectCount: number; // subdirs de projects/ (barato, 0 si no existe)
+  active: boolean;      // es el perfil activo ahora mismo
+}
+
+/** Auto-detecta perfiles: carpetas ~/.claude* con projects/ o settings.json. Incluye siempre ~/.claude. */
+export function detectClaudeProfiles(): ClaudeProfile[] {
+  const active = resolveClaudeDir();
+  const found = new Map<string, ClaudeProfile>();
+  const inspect = (dir: string): void => {
+    const abs = path.resolve(dir);
+    if (found.has(abs)) return;
+    let hasProjects = false; let hasSettings = false; let projectCount = 0;
+    try { hasProjects = fs.statSync(path.join(abs, 'projects')).isDirectory(); } catch { /* noop */ }
+    try { hasSettings = fs.statSync(path.join(abs, 'settings.json')).isFile(); } catch { /* noop */ }
+    if (hasProjects) {
+      try { projectCount = fs.readdirSync(path.join(abs, 'projects'), { withFileTypes: true }).filter((d) => d.isDirectory()).length; } catch { /* noop */ }
+    }
+    found.set(abs, { dir: abs, name: path.basename(abs), hasProjects, hasSettings, projectCount, active: abs === active });
+  };
+  // Escaneo barato de HOME por carpetas .claude*
+  try {
+    for (const d of fs.readdirSync(HOME, { withFileTypes: true })) {
+      if (d.isDirectory() && /^\.claude/i.test(d.name)) inspect(path.join(HOME, d.name));
+    }
+  } catch { /* noop */ }
+  inspect(CLAUDE_DIR);   // ~/.claude siempre presente (aunque no exista)
+  inspect(active);       // el activo siempre presente (ej un perfil custom fuera de HOME)
+  // ordenar: activo primero, luego con más proyectos, luego alfabético
+  return [...found.values()].sort((a, b) =>
+    (Number(b.active) - Number(a.active)) || (b.projectCount - a.projectCount) || a.name.localeCompare(b.name));
 }
 
 /* ── estado local por sesión (pin/fav/archivar) ── */

@@ -172,6 +172,17 @@ body.compacto .board{gap:14px;}
 .set-dir .rm{display:inline-flex;cursor:pointer;color:var(--text-3);}
 .set-dir .rm:hover{color:var(--error);}
 .set-hooks{display:inline-flex;align-items:center;gap:7px;font-size:12px;color:var(--text-2);}
+/* ── selector de perfil de Claude (config dir) — reusa el lenguaje de .set-dir, fila seleccionable ── */
+.set-prof{display:flex;align-items:center;gap:9px;font-size:11px;color:var(--text-2);padding:7px 10px;border:1px solid var(--border-soft);border-radius:7px;margin-bottom:6px;cursor:pointer;transition:border-color .12s,background .12s;}
+.set-prof:hover{border-color:var(--border-hover);background:rgba(255,255,255,.03);}
+.set-prof.on{border-color:rgba(74,222,128,.45);background:rgba(74,222,128,.06);}
+.set-prof .nm{font-family:var(--mono);color:var(--text-1);flex:none;}
+.set-prof .p{flex:1;min-width:0;overflow:hidden;text-overflow:ellipsis;white-space:nowrap;color:var(--text-3);}
+.set-prof .cnt{flex:none;color:var(--text-4);font-size:10px;}
+.set-prof-auto{flex:none;font-size:9px;letter-spacing:.06em;text-transform:uppercase;color:var(--green);border:1px solid rgba(74,222,128,.4);border-radius:5px;padding:1px 5px;}
+/* botón "tutorial" inline en el header de la sección PERFIL DE CLAUDE (replay del coachmark) */
+.set-tour-link{display:inline-flex;align-items:center;gap:4px;margin-left:9px;padding:1px 7px;border:1px solid var(--border-soft);border-radius:6px;background:transparent;color:var(--text-3);font-family:var(--mono);font-size:10px;letter-spacing:.02em;text-transform:none;cursor:pointer;transition:.13s;vertical-align:middle;}
+.set-tour-link:hover{color:var(--green);border-color:rgba(74,222,128,.45);}
 
 /* ── toast (feedback / notificaciones) ── */
 .toastwrap{position:fixed;top:64px;right:18px;z-index:60;display:flex;flex-direction:column;gap:9px;pointer-events:none;}

@@ -10,7 +10,7 @@ import { start as startSessions, stop as stopSessions, buildSnapshot, rescanNow,
 import { runAction, type ActionPayload } from './actions';
 import { startHooksServer, stopHooksServer, isServerListening } from './hooks-server';
 import { install as installHooks, uninstall as uninstallHooks, getStatus as getHooksStatus, isInstalled } from './hooks-install';
-import { loadConfig, saveConfig, setLocalState, loadDock, saveDock, loadLibrary, saveLibrary, loadNotifications, saveNotifications, type AppConfig } from './config';
+import { loadConfig, saveConfig, setLocalState, loadDock, saveDock, loadLibrary, saveLibrary, loadNotifications, saveNotifications, detectClaudeProfiles, claudeProjectsPath, resolveClaudeDir, type AppConfig } from './config';
 import { checkForUpdate, initAutoUpdate, triggerAutoCheck, downloadUpdate } from './updates';
 import { setTerminalWindow, createTerm, writeTerm, resizeTerm, killTerm, listTerms, killAllTerms, terminalsAvailable, nlToCommand } from './terminals';
 import type { Snapshot, LocalSessionState } from './types';
@@ -250,6 +250,29 @@ if (!gotLock) {
       const r = uninstallHooks();
       refreshHooksConn(); rescanNow();
       return { ...r, status: status() };
+    });
+
+    // ── perfil ACTIVO de Claude Code (config dir; multi-perfil) ──
+    ipcMain.handle('consomni:getClaudeProfiles', () => detectClaudeProfiles());
+    ipcMain.handle('consomni:setClaudeProfile', (_e, dirArg: string) => {
+      const dir = String(dirArg || '').trim();   // '' = volver al default (env → ~/.claude)
+      if (dir) {
+        let okDir = false;
+        try { okDir = fs.statSync(dir).isDirectory(); } catch { okDir = false; }
+        if (!okDir) return { ok: false, error: 'la carpeta no existe', config: loadConfig(), hooks: status() };
+      }
+      const before = loadConfig();
+      const oldProjects = path.resolve(claudeProjectsPath(before));
+      const newProjects = claudeProjectsPath({ ...before, claudeConfigDir: dir });
+      // preservar roots extra (los que el usuario agregó), repointando el projects del perfil
+      const extras = (Array.isArray(before.watchedDirs) ? before.watchedDirs : [])
+        .filter((d) => path.resolve(String(d || '')) !== oldProjects);
+      const watchedDirs = [newProjects, ...extras].filter((d, i, a) =>
+        a.findIndex((x) => path.resolve(String(x || '')) === path.resolve(String(d || ''))) === i);
+      const after = saveConfig({ claudeConfigDir: dir, claudeProjectsDir: newProjects, watchedDirs });
+      restartWatcher();      // re-apunta el watcher al projects del perfil nuevo (push de snapshot fresco)
+      refreshHooksConn();    // el estado de hooks ahora se lee contra el settings.json del perfil activo
+      return { ok: true, config: after, hooks: status(), active: resolveClaudeDir(after) };
     });
 
     createWindow();

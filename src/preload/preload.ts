@@ -51,6 +51,12 @@ const api = {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   saveConfig: (patch: any): Promise<Snapshot> => ipcRenderer.invoke('consomni:saveConfig', patch),
 
+  /* ── perfil de Claude Code (config dir; multi-perfil) ── */
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  getClaudeProfiles: (): Promise<any[]> => ipcRenderer.invoke('consomni:getClaudeProfiles'),
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  setClaudeProfile: (dir: string): Promise<any> => ipcRenderer.invoke('consomni:setClaudeProfile', dir),
+
   /* ── biblioteca de prompts/skills/rules (store dedicado, 100% local) ── */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   getLibrary: (): Promise<{ entries: any[]; seeded: boolean }> => ipcRenderer.invoke('consomni:getLibrary'),
