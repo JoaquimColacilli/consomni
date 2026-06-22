@@ -108,4 +108,6 @@ export interface Snapshot {
   generatedAt: number;
   watchedRoots: string[];
   appVersion: string;
+  /** cambios git sin commitear por proyecto. key = cwd normalizado (igual que projKey del renderer). */
+  diffStats?: Record<string, { added: number; removed: number; files: number }>;
 }

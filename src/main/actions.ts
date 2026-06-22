@@ -54,18 +54,38 @@ function resolveEditorExe(editor: string): string | null {
   return exists(exe) ? exe : null;            // si no hallamos el .exe → usar fallback cmd
 }
 
-function openEditor(cwd: string): ActionResult {
-  if (!exists(cwd)) return { ok: false, error: 'la carpeta no existe' };
+function openEditor(cwd: string, file?: string): ActionResult {
+  // si viene un archivo válido, abrimos EL ARCHIVO (code/cursor <file>); si no, la carpeta.
+  const target = file && exists(file) ? file : cwd;
+  if (!exists(target)) return { ok: false, error: 'ruta no encontrada' };
   const editor = loadConfig().editor;
   const cmdName = editor === 'cursor' ? 'cursor' : 'code';
   const exe = resolveEditorExe(editor);
-  if (exe) { spawnDetached(exe, [cwd]); return { ok: true, message: 'abriendo en ' + editor }; }
+  if (exe) { spawnDetached(exe, [target]); return { ok: true, message: 'abriendo en ' + editor }; }
   if (which(cmdName)) {
-    // fallback: el path va por la opción cwd; args fijos → sin inyección
-    spawnDetached('cmd.exe', ['/d', '/s', '/c', cmdName, '.'], { cwd });
+    // fallback: target va como arg FIJO del array (sin shell) → cero inyección
+    spawnDetached('cmd.exe', ['/d', '/s', '/c', cmdName, target], { cwd: cwd || undefined });
     return { ok: true, message: 'abriendo en ' + editor };
   }
   return { ok: false, error: editor + ' no está en PATH' };
+}
+
+/* ── revelar un archivo en el explorador del SO (lo selecciona dentro de su carpeta) ── */
+function revealFile(file: string): ActionResult {
+  if (!exists(file)) return { ok: false, error: 'archivo no encontrado' };
+  const abs = path.resolve(file);
+  if (process.platform === 'win32') {
+    // QUIRK: el path va PEGADO al switch, en el MISMO arg ('/select,<path>'); separarlos falla.
+    spawnDetached('explorer.exe', ['/select,' + abs]);
+    return { ok: true, message: 'archivo revelado' };
+  }
+  if (process.platform === 'darwin') {
+    spawnDetached('open', ['-R', abs]);
+    return { ok: true, message: 'archivo revelado' };
+  }
+  // linux/otros: no hay "select" estándar → abrir la carpeta contenedora
+  void shell.openPath(path.dirname(abs));
+  return { ok: true, message: 'carpeta abierta' };
 }
 
 /* ── terminal (wt → fallback powershell) ── */
@@ -154,9 +174,10 @@ export interface ActionPayload { cwd?: string; branch?: string; id?: string; fil
 export async function runAction(name: string, p: ActionPayload): Promise<ActionResult> {
   const cwd = p.cwd || '';
   switch (name) {
-    case 'ext': return openEditor(cwd);
+    case 'ext': return openEditor(cwd, p.file);
     case 'term': return openTerminal(cwd);
     case 'folder': return openFolder(cwd);
+    case 'revealFile': return revealFile(p.file || '');
     case 'diff': return gitDiff(cwd);
     case 'pr': return openPR(cwd);
     case 'dispatch': return dispatchNew(cwd);

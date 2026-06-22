@@ -733,6 +733,76 @@ bloqueada (CSP `connect-src 'self'`) → `navigator.clipboard` NO sirve; todo va
 
 ---
 
+## v1.7.1 — Cambios sin commitear (+N/−N) + abrir archivos desde el chat/terminal
+> Pedido de Franco + Facundo (sobre Warp). Dos features grandes para el dock + la conversación. Bump
+> **1.7.0 → 1.7.1** (`package.json` + fallbacks `brand-ver`/`.ver` en `chrome.js`). Verificado en vivo por
+> screenshot (badge oscuro/claro + live-update; visor de archivo) y unit test (detección de rutas, 7 casos).
+> Aditivo, respeta las 3 Hard Rules (CSS aditivo con tokens; responsive; **cero API de Anthropic** — sólo
+> `git`/`fs` local). NOTA: la 1.7.0 (multi-perfil) ya estaba publicada → este feature salió como **1.7.1**.
+
+### 1) Indicador de cambios sin commitear (+N / −N) por proyecto — estilo Warp
+- **Cómputo** (`sessions.ts`): `getGit()` cachea el binario (`execFileSync('where','git')`, fallback `'git'`,
+  negative-cache a `null`). `diffKey(cwd)` = MISMA normalización que `projKey` del renderer (lowercase + `/`,
+  sin trailing) para que las keys matcheen. `computeDiffStat(cwd)` async:
+  `execFile(git,['-C',cwd,'diff','--shortstat','HEAD'],{timeout,windowsHide,maxBuffer})` → parsea 3 regex
+  (files/insertions/deletions); error/no-repo/sin-git → **negative-cache en 0** (no re-spawnea cada ciclo); si
+  cambió → `scheduleUpdate()`. `refreshDiffStats(sessions)` (throttle ~3s `DIFF_RECOMPUTE_MS`) dispara cómputo
+  fire-and-forget sobre los cwds ÚNICOS activos (dedupe por `diffKey`). `buildSnapshot()` NO bloquea en git:
+  arma `diffStats` (sólo keys con `added||removed`) desde la cache. `setInterval(scheduleUpdate, 4000)` en
+  `start()` (las ediciones de git NO tocan `.jsonl` → el watcher solo no alcanza). `types.ts Snapshot.diffStats`.
+  **Límite conocido:** `--shortstat HEAD` no cuenta archivos NUEVOS sin trackear (igual que Warp); non-git/sin
+  HEAD → sin badge.
+- **UI board** (`chrome.js column(c)` + `app.js transform`): por grupo, `cwd:g.sessions[0].cwd` +
+  `diff:snap.diffStats[g.id]`. `column()` pinta `<button class="col-diff" data-act="diff-cwd" data-cwd="…">+A −D</button>`
+  (U+2212 para el menos; `.col-diff-add` verde / `.col-diff-del` rojo) DESPUÉS del `.ct`. **data-cwd propio**
+  porque `data-proj` lleva el projKey normalizado, NO un path usable. Handler de click en `app.js` ANTES del
+  fallback `[data-proj]` (con `stopPropagation`) → `api.action('diff',{cwd})`.
+- **UI dock** (`terminals-ui.js`): `var lastSnap` (lo guarda el callback de `bindSnap`, que antes ignoraba el
+  snapshot). `updateDiffBadge()` crea idempotente un `.dk-tb-diff` en `.dk-tb-title` tras `.dk-tb-label`; key =
+  `viewCwd` normalizado; home/sin-diff/cero → `hidden`; click → `api.action('diff',{cwd:viewCwd})`. Se llama en
+  `bindSnap` (cada snapshot) y al final de `showView` (cambio inmediato al entrar a un proyecto).
+
+### 2) Rutas de archivo clickeables (terminal + conversación)
+- **Detección** (`findPathSpans(line)` en `terminals-ui.js`): dos regex con dedupe por solapamiento —
+  Windows-abs `\b[A-Za-z]:[\\/](?![\\/])[^\s:*?"<>|]+` (el `\b` + `(?![\\/])` evita matchear la "s:" de `https:`)
+  y rutas rel/bare que TERMINAN en una extensión conocida (`FILE_EXT`). Guard: salta matches precedidos por
+  `/ \ :` (colas de URL). `resolveFilePath(token,cwd)` = absoluto tal cual; relativo = join manual con cwd (no
+  hay `path` en el renderer). **No pisa URLs** (las maneja el addon web-links). Unit-tested (7 casos).
+- **Terminal** (`mountTerminal`): `term.registerLinkProvider({provideLinks(y,cb)})` — `getLine(y-1)`
+  (provideLinks `y` 1-based; getLine 0-based), spans → `ILink` con `range` 1-based + `end` inclusive,
+  `decorations:{pointerCursor,underline}`, `activate(ev)→onPathActivate(ev,text,pane)` (Ctrl/Cmd → editor; si
+  no → panel). El menú contextual (`showTermCtx`) ahora recibe `ev,pane`: `pathUnderEvent` ubica la celda por
+  geometría de `.xterm-rows` (xterm no expone hit-test) → si hay ruta, **prepend** "Abrir en panel / editor /
+  Revelar ubicación" + separador a Copiar/Pegar/Seleccionar.
+- **Conversación** (`renderSession`/`mountSession`): `linkifyPaths(escapedHtml,cwd)` corre `findPathSpans` sobre
+  el HTML YA escapado (los chars de path sobreviven a `esc`) y envuelve cada span en
+  `<span class="cv-file" data-path="…">`. Handler delegado en `.dk-convo`: click→panel, Ctrl/Cmd→editor,
+  contextmenu→`showFileCtx` (reusa `.dk-ctx`). **Plumbing de cwd**: `openSession(…,cwd)`/`mountSession(…,cwd)` →
+  `pane.dataset.cwd`; el caller en `app.js` pasa `s.cwd`.
+
+### 3) Panel visor de archivo (pane efímero kind `'file'`)
+- `openFilePanel(filePath,cwd)`: reusa el panel si ya está abierto (dedupe por `dataset.fpath`); si no,
+  `makePaneShell('file')` + `placeContent(…,'right')` + `mountFile`. Taguea `proj`/`projname` de la vista
+  (efímero, NO pinned). `mountFile` lee por `api.readFile` → crudo en `<pre>` vía **`textContent`** (seleccionable,
+  sin XSS); botones (idempotentes, antes de la ✕): **copiar todo** (`copyText`), **abrir en editor** (`ext`+file),
+  **revelar** (`revealFile`), y para `.md` un toggle **vista/crudo** (`renderMd`/`fvInline` = mini-markdown SEGURO
+  propio: escapa TODO, después headings/listas/`**bold**`/`` `code` ``/```fences```). **Efímero:** `persist()`
+  filtra `kind!=='file'` (no se serializa ni se restaura); `closePane` sin `tid`/`sid` → cierra directo (sin modal).
+- **IPC `consomni:readFile`** (`index.ts`): `path.resolve` + allowlist = `claudeProjectsPath(cfg)` + `watchedDirs`
+  + los `cwd` de las sesiones (`fp===root || startsWith(root+sep)`); `statSync` (es archivo), cap **1 MB**,
+  detecta binario (NUL en los primeros 4KB) → error. Devuelve `{ok,content,truncated}`. Preload `readFile`.
+- **`actions.ts`**: `openEditor(cwd,file?)` abre el ARCHIVO si `file && exists(file)` (si no, el cwd como hoy);
+  `case 'ext'` pasa `p.file`. `revealFile(file)` nuevo + `case 'revealFile'`: win32
+  `spawnDetached('explorer.exe',['/select,'+abs])` (**quirk: el path va PEGADO al switch, mismo arg, sin
+  espacio**), darwin `open -R`, else `shell.openPath(dirname)`.
+
+### CSS (`app.css`, aditivo)
+`.col-diff`/`.dk-tb-diff` (fondo `var(--surface-input)`, `+A`=`var(--green)`/`−D`=`var(--error)`; flipean solos
+en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`/`.dk-fv-pre` (mono,
+`white-space:pre`, `user-select:text`) + `.dk-fv-md .fv-*` (headings/listas/code/links del render de `.md`).
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

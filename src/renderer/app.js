@@ -208,9 +208,11 @@
       var sorted = g.sessions.slice().sort(cmp);
       var openS = sorted.filter(function (s) { return s.state !== 'closed' && matchesFilter(s); });
       var closedS = sorted.filter(function (s) { return s.state === 'closed' && matchesFilter(s); });
+      var gcwd = (g.sessions[0] && g.sessions[0].cwd) || '';
       return {
         id: g.id, name: g.name, fav: g.fav, count: g.sessions.length,
         meta: colMeta(g.counts), cards: openS.map(toCard),
+        cwd: gcwd, diff: (snap.diffStats && snap.diffStats[g.id]) || null,
         closedCount: closedS.length,
         closed: closedS.map(function (s) { return { id: s.id, name: s.name, tokens: formatTokens(s.tokensTotal) }; }),
         // en la vista de UN proyecto, mostramos sus sesiones finalizadas abiertas (abajo, opacas); en "todos" quedan colapsadas
@@ -495,6 +497,12 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.7.1', date: '22 jun 2026', title: 'Cambios sin commitear (+N/−N) y abrir archivos desde el chat', items: [
+      'Indicador de cambios sin commitear (+N / −N) por proyecto, estilo Warp: aparece en el encabezado de cada columna del tablero y en la cabecera del dock cuando entrás a un proyecto. Se actualiza solo a medida que el agente edita, y al hacerle click abre el git diff.',
+      'Rutas de archivo clickeables en la terminal y en la conversación de las sesiones (además de los links): click abre el archivo en un panel al costado, Ctrl/Cmd+click lo abre en tu editor, y el click derecho ofrece "Abrir en panel / Abrir en editor / Revelar ubicación".',
+      'Visor de archivo embebido: muestra el contenido crudo (monospace, seleccionable) con botones para copiar todo, abrir en el editor o revelar la ubicación. Para archivos .md hay un toggle entre vista renderizada y crudo. Ideal para abrir un .md, copiar el prompt y pegarlo en otro lado.',
+      'Todo 100% local: el indicador usa el git de tu máquina y el visor lee solo archivos dentro de las carpetas que ya monitoreás (sin red, sin subir nada).',
+    ] },
     { v: '1.7.0', date: '22 jun 2026', title: 'Multi-perfil de Claude', items: [
       'Consomni ya no asume ~/.claude fijo: en Settings, sección "Perfil de Claude", podés elegir el config dir que querés monitorear (ej ~/.claude-max). Auto-detecta tus perfiles .claude* y también acepta una ruta a mano.',
       'Al cambiar de perfil, el tablero pasa a mostrar las sesiones de ESE perfil, y los hooks se instalan en su propio settings.json (reinstalalos desde Settings tras cambiar).',
@@ -2044,8 +2052,18 @@
       var sid = card.getAttribute('data-sid');
       state.focusSid = sid;
       var sObj = sessionById(sid);
-      if (window.ConsomniTerms) window.ConsomniTerms.openSession(sid, sObj ? sObj.name : 'sesión', sObj ? projKey(sObj) : '', sObj ? sObj.project : '');
+      if (window.ConsomniTerms) window.ConsomniTerms.openSession(sid, sObj ? sObj.name : 'sesión', sObj ? projKey(sObj) : '', sObj ? sObj.project : '', sObj ? sObj.cwd : '');
       else openDetail(sid);
+      return;
+    }
+    // badge de diff del header de columna → abrir git diff (ANTES del fallback [data-proj], que filtraría el proyecto)
+    var dbtn = t.closest && t.closest('[data-act="diff-cwd"]');
+    if (dbtn) {
+      e.stopPropagation();
+      var dcwd = dbtn.getAttribute('data-cwd');
+      if (dcwd && api && api.action) api.action('diff', { cwd: dcwd })
+        .then(function (r) { toast(r && r.ok ? (r.message || 'diff abierto') : ((r && r.error) || 'no se pudo'), r && r.ok ? '' : 'err'); })
+        .catch(function () { toast('no se pudo abrir el diff', 'err'); });
       return;
     }
     // sidebar / header de columna → filtrar por proyecto (DESPUÉS de las cards)

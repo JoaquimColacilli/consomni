@@ -7,6 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
+import { execFile, execFileSync } from 'child_process';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { parseSessionFile, parseSessionDetail, type SessionDetail } from './jsonl';
 import { loadConfig, loadLocalState, claudeProjectsPath, type AppConfig } from './config';
@@ -28,7 +29,58 @@ function watchRoots(cfg: AppConfig): string[] {
 let watcher: FSWatcher | null = null;
 let onUpdateCb: ((s: Snapshot) => void) | null = null;
 let debounceTimer: NodeJS.Timeout | null = null;
+let diffTimer: NodeJS.Timeout | null = null;
 let hooksConnected = false;
+
+/* ════════ diff stat (+N/−N) por proyecto, estilo Warp ════════
+   git diff --shortstat HEAD por cwd ACTIVO, cacheado y throttled (async, nunca bloquea el snapshot).
+   key = cwd normalizado IGUAL que projKey del renderer (lowercase + forward-slash) para que matcheen.
+   Limitación conocida: --shortstat HEAD NO cuenta archivos nuevos sin trackear (igual que el diff de Warp). */
+interface DiffStat { added: number; removed: number; files: number; ts: number; }
+const diffCache = new Map<string, DiffStat>();
+const DIFF_RECOMPUTE_MS = 3000;
+let diffLastDriver = 0;
+let gitBin: string | null | undefined;
+function getGit(): string | null {
+  if (gitBin !== undefined) return gitBin;
+  try { gitBin = String(execFileSync('where', ['git'], { encoding: 'utf8', windowsHide: true }).split(/\r?\n/)[0] || '').trim() || 'git'; }
+  catch { gitBin = null; }
+  return gitBin;
+}
+function diffKey(cwd: string): string { return String(cwd || '').toLowerCase().replace(/\\/g, '/').replace(/\/+$/, ''); }
+function computeDiffStat(cwd: string): void {
+  const git = getGit();
+  const key = diffKey(cwd);
+  if (!git) { diffCache.set(key, { added: 0, removed: 0, files: 0, ts: Date.now() }); return; }
+  execFile(git, ['-C', cwd, 'diff', '--shortstat', 'HEAD'], { timeout: 5000, windowsHide: true, maxBuffer: 1 << 20 }, (err, stdout) => {
+    let added = 0, removed = 0, files = 0;
+    if (!err) {
+      const out = String(stdout || '');
+      const f = out.match(/(\d+)\s+files?\s+changed/); if (f) files = +f[1];
+      const a = out.match(/(\d+)\s+insertions?\(\+\)/); if (a) added = +a[1];
+      const d = out.match(/(\d+)\s+deletions?\(-\)/); if (d) removed = +d[1];
+    }
+    const prev = diffCache.get(key);
+    diffCache.set(key, { added, removed, files, ts: Date.now() });
+    // si cambió respecto a lo cacheado, empujamos un snapshot fresco (eventual-consistente)
+    if (!prev || prev.added !== added || prev.removed !== removed || prev.files !== files) scheduleUpdate();
+  });
+}
+/** Dispara el recálculo (fire-and-forget) de los cwds ACTIVOS únicos que estén vencidos. Throttled. */
+function refreshDiffStats(sessions: Session[]): void {
+  const now = Date.now();
+  if (now - diffLastDriver < DIFF_RECOMPUTE_MS) return;
+  diffLastDriver = now;
+  const seen = new Set<string>();
+  for (const s of sessions) {
+    if (s.state === 'closed' || !s.cwd) continue;
+    const key = diffKey(s.cwd);
+    if (seen.has(key)) continue;
+    seen.add(key);
+    const c = diffCache.get(key);
+    if (!c || now - c.ts > DIFF_RECOMPUTE_MS) computeDiffStat(s.cwd);
+  }
+}
 
 /* ════════ overlay de estado vivo (eventos de hooks, autoritativo) ════════ */
 interface LiveState {
@@ -241,6 +293,9 @@ export function buildSnapshot(): Snapshot {
   let tokensToday = 0;
   for (const s of sessions) if (isToday(s.lastActivity)) tokensToday += s.tokensTotal;
   const cfg = loadConfig();
+  refreshDiffStats(sessions);   // fire-and-forget; NO bloquea (los resultados llegan en el próximo push)
+  const diffStats: Record<string, { added: number; removed: number; files: number }> = {};
+  diffCache.forEach((v, k) => { if (v.added || v.removed) diffStats[k] = { added: v.added, removed: v.removed, files: v.files }; });
   return {
     sessions,
     hooksConnected,
@@ -248,6 +303,7 @@ export function buildSnapshot(): Snapshot {
     generatedAt: Date.now(),
     watchedRoots: watchRoots(cfg),
     appVersion: app.getVersion(),
+    diffStats,
   };
 }
 
@@ -283,6 +339,9 @@ export function start(onUpdate: (s: Snapshot) => void): void {
   onUpdateCb = onUpdate;
   pushUpdate();   // snapshot inicial inmediato
   startWatcher();
+  // refresh periódico del diff (las ediciones de git NO tocan los .jsonl → el watcher solo no alcanza)
+  if (diffTimer) clearInterval(diffTimer);
+  diffTimer = setInterval(() => scheduleUpdate(), 4000);
 }
 
 /** Reinicia el watcher (p.ej. tras cambiar watchedDirs en settings). */
@@ -295,6 +354,7 @@ export function restartWatcher(): void {
 export function stop(): void {
   if (watcher) { void watcher.close(); watcher = null; }
   if (debounceTimer) { clearTimeout(debounceTimer); debounceTimer = null; }
+  if (diffTimer) { clearInterval(diffTimer); diffTimer = null; }
 }
 
 /** Forzar rescan inmediato (lo usa el refresh manual / settings). */

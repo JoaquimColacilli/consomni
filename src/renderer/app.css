@@ -924,3 +924,35 @@ body.light ::-webkit-scrollbar-thumb:hover{background:rgba(18,18,26,.28);}
 body.light ::selection{background:rgba(239,68,68,.20);color:#1a1a1f;}
 /* botón "Actualizar" (verde) sobre claro: el fondo bright-green tint sigue ok; aseguramos borde */
 body.light .upbtn{border-color:rgba(22,163,74,.45);}
+
+/* ════════════════════════════════════════════════════════════════
+   v1.7.0 — diff stat (+N/−N), rutas clickeables, visor de archivo. Aditivo, tokens existentes.
+   ════════════════════════════════════════════════════════════════ */
+/* badge de cambios sin commitear: en el header de columna y en la cabecera del dock */
+.col-diff{display:inline-flex;align-items:center;gap:6px;margin-left:8px;height:18px;padding:0 7px;border-radius:6px;background:var(--surface-input);border:1px solid rgba(255,255,255,.07);font-family:'Geist Mono',monospace;font-size:10.5px;line-height:1;cursor:pointer;transition:.13s;}
+.col-diff:hover{border-color:var(--border-hover);}
+.col-diff-add{color:var(--green);} .col-diff-del{color:var(--error);}
+.dk-tb-diff{display:inline-flex;align-items:center;gap:6px;margin-left:7px;height:18px;padding:0 7px;border-radius:6px;background:var(--surface-input);border:1px solid rgba(255,255,255,.07);font-family:'Geist Mono',monospace;font-size:10px;line-height:1;cursor:pointer;transition:.13s;}
+.dk-tb-diff[hidden]{display:none;}
+.dk-tb-diff:hover{border-color:var(--border-hover);}
+.dk-tb-diff .a{color:var(--green);} .dk-tb-diff .d{color:var(--error);}
+body.light .col-diff,body.light .dk-tb-diff{border-color:var(--border);}
+/* rutas de archivo clickeables en la conversación + separador del menú contextual */
+.cv-file{color:var(--blue-2);text-decoration:underline;text-decoration-color:rgba(96,165,250,.4);text-underline-offset:2px;cursor:pointer;}
+.cv-file:hover{text-decoration-color:var(--blue-2);}
+.dk-ctx-sep{height:1px;margin:4px 6px;background:var(--border);}
+/* panel visor de archivo */
+.dk-pane--file .dk-pane-body{display:flex;flex-direction:column;}
+.dk-fileview{flex:1;min-height:0;overflow:auto;}
+.dk-fv-pre{margin:0;padding:11px 13px;font-family:'Geist Mono',monospace;font-size:12px;line-height:1.55;color:var(--text-1);white-space:pre;tab-size:2;-moz-tab-size:2;user-select:text;}
+.dk-fv-empty{color:var(--text-3);white-space:pre-wrap;}
+.dk-fv-md{padding:13px 15px;color:var(--text-2);font-size:12.5px;line-height:1.6;}
+.dk-fv-md .fv-h{color:var(--text-1);font-weight:600;margin:14px 0 7px;letter-spacing:.2px;}
+.dk-fv-md .fv-h:first-child{margin-top:0;}
+.dk-fv-md .fv-h1{font-size:16px;} .dk-fv-md .fv-h2{font-size:14px;} .dk-fv-md .fv-h3{font-size:13px;}
+.dk-fv-md .fv-p{margin:0 0 9px;}
+.dk-fv-md .fv-ul{margin:0 0 10px;padding-left:18px;}
+.dk-fv-md .fv-ul li{margin:3px 0;}
+.dk-fv-md code{font-family:'Geist Mono',monospace;font-size:11px;background:var(--surface-input);border:1px solid var(--border-soft);border-radius:4px;padding:1px 5px;color:var(--green);}
+.dk-fv-md .fv-code{font-family:'Geist Mono',monospace;font-size:11px;background:var(--surface-input);border:1px solid var(--border-soft);border-radius:8px;padding:10px 12px;overflow-x:auto;color:var(--text-2);white-space:pre;margin:0 0 10px;}
+.dk-fv-md .fv-link{color:var(--green);cursor:pointer;text-decoration:underline;text-underline-offset:2px;}

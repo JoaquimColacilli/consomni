@@ -22,6 +22,7 @@
   var C = g.Chrome, api = g.consomni, Terminal = g.Terminal, FitNS = g.FitAddon, WebLinksNS = g.WebLinksAddon;
 
   var host = null, rootEl = null, poolEl = null, dropInd = null, countEl = null;
+  var lastSnap = null;         // último snapshot (para el badge de diff del dock)
   var terms = new Map();       // ptyId -> { term, fit, pane, ro }
   var sessions = new Map();    // sid   -> pane
   var paneSeq = 0;
@@ -55,7 +56,7 @@
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = setTimeout(function () {
       try {
-        var list = allPanes().filter(inInicio).map(serializePane);
+        var list = allPanes().filter(inInicio).filter(function (p) { return p.dataset.kind !== 'file'; }).map(serializePane);
         var rs = document.documentElement.style;
         if (api && api.term && api.term.saveDock) api.term.saveDock({ v: 2, max: isMaximized(), dh: rs.getPropertyValue('--dock-h') || '', panes: list });
       } catch (e) { /* noop */ }
@@ -137,6 +138,165 @@
   function elemChildren(el) { return Array.prototype.filter.call(el.children, function (c) { return c.nodeType === 1; }); }
   function panesOf() { return rootEl ? Array.prototype.slice.call(rootEl.querySelectorAll('.dk-pane')) : []; }
   function allPanes() { return host ? Array.prototype.slice.call(host.querySelectorAll('.dk-pane')) : []; }
+
+  /* ════════ rutas de archivo clickeables (terminal + conversación) ════════
+     Detecta rutas, las resuelve contra el cwd del panel y las abre (panel / editor / revelar).
+     Sólo Windows-paths absolutos y rutas (rel/bare) que TERMINAN en una extensión conocida → bajo ruido,
+     no pisa URLs (que ya maneja el addon web-links). */
+  var FILE_EXT = '(?:js|jsx|ts|tsx|mjs|cjs|json|jsonc|md|markdown|mdx|css|scss|sass|less|html|htm|py|rs|go|java|kt|rb|php|c|h|cc|cpp|hpp|cs|swift|sh|bash|zsh|ps1|bat|cmd|yml|yaml|toml|ini|env|txt|log|sql|vue|svelte|astro|xml|svg|lock|cfg|conf)';
+  function findPathSpans(line) {
+    var spans = [], taken = [];
+    function overlaps(s, e) { for (var i = 0; i < taken.length; i++) if (s < taken[i][1] && e > taken[i][0]) return true; return false; }
+    function run(rx) {
+      var m;
+      while ((m = rx.exec(line))) {
+        var s = m.index, e = s + m[0].length;
+        var pc = s > 0 ? line.charAt(s - 1) : '';
+        // saltar si es continuación de algo mayor (URL/path ya empezado) → preced. por / \ :
+        if (m[0].length < 3 || overlaps(s, e) || pc === '/' || pc === '\\' || pc === ':') continue;
+        taken.push([s, e]); spans.push({ text: m[0], start: s, end: e });
+      }
+    }
+    // Windows abs: \b para no confundir la "s:" de "https:"; (?![\\/]) rechaza el "://" de las URLs
+    run(/\b[A-Za-z]:[\\/](?![\\/])[^\s:*?"<>|]+/g);
+    run(new RegExp('(?:\\.{1,2}[\\\\/])?(?:[\\w.\\-]+[\\\\/])*[\\w.\\-]+\\.' + FILE_EXT + '\\b', 'g'));
+    spans.sort(function (a, b) { return a.start - b.start; });
+    return spans;
+  }
+  function findPathToken(line, col) { var sp = findPathSpans(line); for (var i = 0; i < sp.length; i++) if (col >= sp[i].start && col < sp[i].end) return sp[i]; return null; }
+  function resolveFilePath(token, cwd) {
+    if (/^([A-Za-z]:[\\/]|\/)/.test(token)) return token;
+    var base = String(cwd || '').replace(/[\\/]+$/, '');
+    return base ? base + '/' + token.replace(/^[.][\\/]/, '') : token;
+  }
+  // envuelve las rutas en `<span class="cv-file" data-path>` SOBRE html YA escapado (los chars de path
+  // sobreviven a esc). Las URLs no se tocan (no terminan en extensión conocida).
+  function linkifyPaths(escapedHtml, cwd) {
+    var spans = findPathSpans(escapedHtml);
+    if (!spans.length) return escapedHtml;
+    var out = '', last = 0;
+    for (var i = 0; i < spans.length; i++) {
+      var sp = spans[i];
+      out += escapedHtml.slice(last, sp.start) +
+        '<span class="cv-file" data-path="' + esc(resolveFilePath(sp.text, cwd)) + '">' + escapedHtml.slice(sp.start, sp.end) + '</span>';
+      last = sp.end;
+    }
+    return out + escapedHtml.slice(last);
+  }
+  function openFileEditor(resolved, cwd) { if (api && api.action) api.action('ext', { cwd: cwd || '', file: resolved }).then(function (r) { if (r && !r.ok) notifier('✗ ' + (r.error || 'editor'), 'err'); }).catch(function () {}); }
+  function revealFilePath(resolved) { if (api && api.action) api.action('revealFile', { file: resolved }).then(function (r) { if (r && !r.ok) notifier('✗ ' + (r.error || 'revelar'), 'err'); }).catch(function () {}); }
+  function onPathActivate(ev, token, pane) {
+    var cwd = (pane && pane.dataset.cwd) || (view !== '__home__' ? viewCwd : '') || '';
+    var resolved = resolveFilePath(token, cwd);
+    if (ev && (ev.ctrlKey || ev.metaKey)) openFileEditor(resolved, cwd);
+    else openFilePanel(resolved, cwd);
+  }
+  // menú contextual de archivo (reusa .dk-ctx + closeTermCtx/onCtxOutside/onCtxKey)
+  function showFileCtx(x, y, resolved, cwd) {
+    closeTermCtx();
+    var m = g.document.createElement('div'); m.id = 'dkCtx'; m.className = 'dk-ctx';
+    m.innerHTML =
+      '<button class="dk-ctx-i" data-fctx="panel">Abrir en panel</button>' +
+      '<button class="dk-ctx-i" data-fctx="editor">Abrir en editor</button>' +
+      '<button class="dk-ctx-i" data-fctx="reveal">Revelar ubicación</button>';
+    g.document.body.appendChild(m);
+    var mw = m.offsetWidth || 180, mh = m.offsetHeight || 96;
+    m.style.left = Math.max(4, Math.min(x, g.innerWidth - mw - 4)) + 'px';
+    m.style.top = Math.max(4, Math.min(y, g.innerHeight - mh - 4)) + 'px';
+    m.addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('[data-fctx]'); if (!b) return;
+      var act = b.getAttribute('data-fctx');
+      if (act === 'panel') openFilePanel(resolved, cwd); else if (act === 'editor') openFileEditor(resolved, cwd); else if (act === 'reveal') revealFilePath(resolved);
+      closeTermCtx();
+    });
+    setTimeout(function () { g.document.addEventListener('mousedown', onCtxOutside, true); g.document.addEventListener('keydown', onCtxKey, true); }, 0);
+  }
+
+  /* ════════ panel VISOR de archivo (pane efímero kind 'file') ════════ */
+  function fileBase(fp) { return String(fp).replace(/[\\/]+$/, '').split(/[\\/]/).pop() || fp; }
+  function fileDir(fp) { var s = String(fp).replace(/[\\/]+$/, ''); var i = Math.max(s.lastIndexOf('/'), s.lastIndexOf('\\')); return i > 0 ? s.slice(0, i) : ''; }
+  // mini-render markdown SEGURO (escapa TODO primero; headings/listas/**bold**/`code`/```fences```)
+  function fvInline(s) {
+    var e = esc(s);
+    e = e.replace(/`([^`]+)`/g, '<code>$1</code>');
+    e = e.replace(/\*\*([^*]+)\*\*/g, '<b>$1</b>');
+    e = e.replace(/\[([^\]]+)\]\((https?:[^)\s]+)\)/g, '<span class="fv-link" data-href="$2">$1</span>');
+    return e;
+  }
+  function renderMd(md) {
+    var lines = String(md == null ? '' : md).replace(/\r/g, '').split('\n');
+    var out = [], inList = false, inCode = false;
+    function cl() { if (inList) { out.push('</ul>'); inList = false; } }
+    for (var i = 0; i < lines.length; i++) {
+      var ln = lines[i], t = ln.trim();
+      if (/^```/.test(t)) { if (inCode) { out.push('</pre>'); inCode = false; } else { cl(); out.push('<pre class="fv-code">'); inCode = true; } continue; }
+      if (inCode) { out.push(esc(ln)); continue; }
+      if (!t) { cl(); continue; }
+      var h = t.match(/^(#{1,6})\s+(.*)$/);
+      if (h) { cl(); out.push('<div class="fv-h fv-h' + h[1].length + '">' + fvInline(h[2]) + '</div>'); continue; }
+      var li = t.match(/^[-*+]\s+(.*)$/);
+      if (li) { if (!inList) { out.push('<ul class="fv-ul">'); inList = true; } out.push('<li>' + fvInline(li[1]) + '</li>'); continue; }
+      cl(); out.push('<p class="fv-p">' + fvInline(t) + '</p>');
+    }
+    if (inCode) out.push('</pre>'); cl();
+    return out.join('');
+  }
+  function openFilePanel(filePath, cwd) {
+    if (!filePath) return;
+    ensureDock(); show();
+    var ex = allPanes().filter(function (p) { return p.dataset.kind === 'file' && p.dataset.fpath === filePath; })[0];
+    if (ex) { if (!rootEl.contains(ex)) showView(view); setFocus(ex); return; }
+    var pane = makePaneShell('file');
+    pane.dataset.kind = 'file'; pane.dataset.fpath = filePath;
+    if (cwd) pane.dataset.cwd = cwd;
+    if (view !== '__home__') { pane.dataset.proj = view; if (viewName) pane.dataset.projname = viewName; }
+    else pane.dataset.pinned = '1';
+    placeContent(pane, 'right');
+    mountFile(pane, filePath);
+    persist();
+  }
+  function mountFile(pane, fpath) {
+    pane.classList.remove('dk-pane--shell', 'dk-pane--claude', 'dk-pane--session');
+    pane.classList.add('dk-pane--file');
+    pane.dataset.kind = 'file'; pane.dataset.fpath = fpath;
+    var base = fileBase(fpath), dir = fileDir(fpath), isMd = /\.(md|markdown|mdx)$/i.test(base);
+    setPaneMeta(pane, svg('ext', 12, 1.8), base, projLabel(pane));
+    updatePinUI(pane);
+    ensureFileBtns(pane, fpath, dir, isMd);
+    var body = pane.querySelector('.dk-pane-body');
+    body.innerHTML = '<div class="dk-fileview"><pre class="dk-fv-pre">cargando…</pre><div class="dk-fv-md" hidden></div></div>';
+    // links de la vista .md: el handler global de app.js corta los clicks dentro de #terminals → se cablean acá
+    body.querySelector('.dk-fileview').addEventListener('click', function (e) {
+      var a = e.target.closest && e.target.closest('.fv-link[data-href]'); if (!a) return;
+      e.preventDefault(); e.stopPropagation();
+      if (api && api.action) api.action('openExternal', { url: a.getAttribute('data-href') });
+    });
+    var st = { content: '', view: false }; pane._fileState = st;
+    if (!api || !api.readFile) { body.querySelector('.dk-fv-pre').textContent = 'lector de archivos no disponible'; return; }
+    api.readFile(fpath).then(function (r) {
+      var pre = body.querySelector('.dk-fv-pre'); if (!pre || !pre.isConnected) return;
+      if (!r || !r.ok) { pre.textContent = '✗ ' + ((r && r.error) || 'no se pudo abrir'); pre.classList.add('dk-fv-empty'); return; }
+      st.content = r.content || '';
+      pre.textContent = st.content + (r.truncated ? '\n\n… (truncado a 1 MB)' : '');
+      if (isMd) body.querySelector('.dk-fv-md').innerHTML = renderMd(st.content);
+    }).catch(function () { var pre = body.querySelector('.dk-fv-pre'); if (pre) pre.textContent = '✗ error al leer'; });
+  }
+  function ensureFileBtns(pane, fpath, dir, isMd) {
+    var btns = pane.querySelector('.dk-pane-btns'); if (!btns || btns.querySelector('.dk-fv-copy')) return;
+    var x = btns.querySelector('.dk-pane-x');
+    function mk(cls, title, ic, fn) {
+      var b = g.document.createElement('button'); b.className = 'dk-pbtn ' + cls; b.title = title; b.innerHTML = svg(ic, 12, 1.8);
+      b.addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); fn(); });
+      if (x) btns.insertBefore(b, x); else btns.appendChild(b); return b;
+    }
+    if (isMd) mk('dk-fv-view', 'vista / crudo', 'eye', function () {
+      var s = pane._fileState; if (!s) return; s.view = !s.view;
+      var bd = pane.querySelector('.dk-pane-body'); bd.querySelector('.dk-fv-pre').hidden = s.view; bd.querySelector('.dk-fv-md').hidden = !s.view;
+    });
+    mk('dk-fv-copy', 'copiar todo', 'copy', function () { var s = pane._fileState; if (s && api && api.action) api.action('copyText', { text: s.content }).then(function () { notifier('archivo copiado'); }); });
+    mk('dk-fv-edit', 'abrir en editor', 'ext', function () { openFileEditor(fpath, dir); });
+    mk('dk-fv-reveal', 'revelar ubicación', 'folder', function () { revealFilePath(fpath); });
+  }
   // cabecera del dock: "TERMINALES" en inicio; el NOMBRE del proyecto cuando estás dentro de uno.
   function updateTitle() {
     var lbl = host && host.querySelector('.dk-tb-label');
@@ -205,7 +365,27 @@
   function bindSnap() {
     if (snapBound || !api || !api.onSnapshot) return;
     snapBound = true;
-    api.onSnapshot(function () { sessions.forEach(function (pane) { if (host && !host.hidden && !host.classList.contains('minimized') && rootEl.contains(pane)) renderSession(pane); }); });
+    api.onSnapshot(function (snap) {
+      lastSnap = snap || lastSnap;
+      updateDiffBadge();
+      sessions.forEach(function (pane) { if (host && !host.hidden && !host.classList.contains('minimized') && rootEl.contains(pane)) renderSession(pane); });
+    });
+  }
+  // badge "+N −N" en la cabecera del dock (cambios git sin commitear del proyecto activo, estilo Warp)
+  function updateDiffBadge() {
+    if (!host) return;
+    var title = host.querySelector('.dk-tb-title'); if (!title) return;
+    var el = title.querySelector('.dk-tb-diff');
+    var key = (view !== '__home__' && viewCwd) ? String(viewCwd).toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '') : '';
+    var ds = (key && lastSnap && lastSnap.diffStats) ? lastSnap.diffStats[key] : null;
+    if (!ds || (!ds.added && !ds.removed)) { if (el) el.hidden = true; return; }
+    if (!el) {
+      el = g.document.createElement('button'); el.className = 'dk-tb-diff'; el.title = 'cambios sin commitear · ver git diff';
+      el.addEventListener('click', function () { if (api && api.action) api.action('diff', { cwd: viewCwd }).then(function (r) { notifier(r && r.ok ? (r.message || 'diff abierto') : ((r && r.error) || 'no se pudo'), r && r.ok ? '' : 'err'); }); });
+      var lbl = title.querySelector('.dk-tb-label'); if (lbl && lbl.nextSibling) title.insertBefore(el, lbl.nextSibling); else title.appendChild(el);
+    }
+    el.hidden = false;
+    el.innerHTML = '<span class="a">+' + ds.added + '</span><span class="d">−' + ds.removed + '</span>';
   }
 
   function updateCount() { if (countEl) { var n = panesOf().length; countEl.textContent = n ? ('· ' + n) : ''; } }
@@ -240,6 +420,7 @@
     ensureDock();
     view = v;
     updateTitle();   // cabecera del dock: nombre del proyecto / "TERMINALES" en inicio
+    updateDiffBadge();   // badge +N/−N del proyecto activo
     // 1) todo lo visible al pool
     panesOf().forEach(function (p) { poolEl.appendChild(p); });
     rootEl.innerHTML = '';
@@ -465,12 +646,35 @@
   }
   function onCtxOutside(e) { if (!e.target.closest || !e.target.closest('#dkCtx')) closeTermCtx(); }
   function onCtxKey(e) { if (e.key === 'Escape') { e.preventDefault(); closeTermCtx(); } }
-  function showTermCtx(x, y, term) {
+  // ruta de archivo bajo la celda donde se hizo click derecho (xterm no expone hit-test → geometría)
+  function pathUnderEvent(term, ev) {
+    try {
+      var rows = term.element && term.element.querySelector('.xterm-rows'); if (!rows) return null;
+      var rect = rows.getBoundingClientRect();
+      var cw = rect.width / term.cols, ch = rect.height / term.rows;
+      if (!cw || !ch) return null;
+      var col = Math.floor((ev.clientX - rect.left) / cw);
+      var srow = Math.floor((ev.clientY - rect.top) / ch);
+      var bufY = (term.buffer.active.viewportY || 0) + srow;
+      var line = term.buffer.active.getLine(bufY); if (!line) return null;
+      return findPathToken(line.translateToString(true), col);
+    } catch (e) { return null; }
+  }
+  function showTermCtx(x, y, term, ev, pane) {
     closeTermCtx();
     var hasSel = false; try { hasSel = !!(term.hasSelection && term.hasSelection()); } catch (e) {}
+    var tok = (ev && pane) ? pathUnderEvent(term, ev) : null;
+    var resolved = null, fcwd = '';
+    if (tok) { fcwd = (pane && pane.dataset.cwd) || (view !== '__home__' ? viewCwd : '') || ''; resolved = resolveFilePath(tok.text, fcwd); }
     var m = g.document.createElement('div');
     m.id = 'dkCtx'; m.className = 'dk-ctx';
     m.innerHTML =
+      (resolved
+        ? '<button class="dk-ctx-i" data-fctx="panel">Abrir en panel</button>' +
+          '<button class="dk-ctx-i" data-fctx="editor">Abrir en editor</button>' +
+          '<button class="dk-ctx-i" data-fctx="reveal">Revelar ubicación</button>' +
+          '<div class="dk-ctx-sep"></div>'
+        : '') +
       '<button class="dk-ctx-i" data-ctx="copy"' + (hasSel ? '' : ' disabled') + '>Copiar</button>' +
       '<button class="dk-ctx-i" data-ctx="paste">Pegar</button>' +
       '<button class="dk-ctx-i" data-ctx="all">Seleccionar todo</button>';
@@ -479,7 +683,9 @@
     m.style.left = Math.max(4, Math.min(x, g.innerWidth - mw - 4)) + 'px';
     m.style.top = Math.max(4, Math.min(y, g.innerHeight - mh - 4)) + 'px';
     m.addEventListener('click', function (e) {
-      var b = e.target.closest && e.target.closest('[data-ctx]'); if (!b || b.disabled) return;
+      var b = e.target.closest && e.target.closest('[data-ctx],[data-fctx]'); if (!b || b.disabled) return;
+      var fa = b.getAttribute('data-fctx');
+      if (fa) { if (fa === 'panel') openFilePanel(resolved, fcwd); else if (fa === 'editor') openFileEditor(resolved, fcwd); else if (fa === 'reveal') revealFilePath(resolved); closeTermCtx(); return; }
       var act = b.getAttribute('data-ctx');
       if (act === 'copy') termCopy(term); else if (act === 'paste') termPaste(term); else if (act === 'all') termSelectAll(term);
       closeTermCtx(); try { term.focus(); } catch (e2) {}
@@ -525,6 +731,28 @@
       }
     } catch (e) {}
     term.open(body);
+    // rutas de archivo clickeables: además del addon web-links (URLs), un link provider propio detecta
+    // rutas y las abre (click → panel, Ctrl/Cmd+click → editor). Resuelve contra el cwd del panel.
+    try {
+      if (term.registerLinkProvider) {
+        term.registerLinkProvider({ provideLinks: function (y, cb) {
+          try {
+            var bl = term.buffer.active.getLine(y - 1);   // provideLinks y 1-based; getLine 0-based
+            if (!bl) { cb(undefined); return; }
+            var spans = findPathSpans(bl.translateToString(true));
+            if (!spans.length) { cb(undefined); return; }
+            cb(spans.map(function (sp) {
+              return {
+                range: { start: { x: sp.start + 1, y: y }, end: { x: sp.end, y: y } },   // ILink 1-based, end inclusive
+                text: sp.text,
+                activate: function (ev) { onPathActivate(ev, sp.text, pane); },
+                decorations: { pointerCursor: true, underline: true }
+              };
+            }));
+          } catch (e) { cb(undefined); }
+        } });
+      }
+    } catch (e) {}
     // CTRL+ESPACIO → otra terminal · Ctrl+C/Ctrl+Shift+C copiar (preservando SIGINT) · Ctrl+V/Ctrl+Shift+V pegar
     try {
       term.attachCustomKeyEventHandler(function (ev) {
@@ -554,8 +782,8 @@
         return true;
       });
     } catch (e) {}
-    // menú contextual (click derecho): copiar / pegar / seleccionar todo
-    try { body.addEventListener('contextmenu', function (ev) { ev.preventDefault(); showTermCtx(ev.clientX, ev.clientY, term); }); } catch (e) {}
+    // menú contextual (click derecho): si está sobre una ruta → acciones de archivo; siempre copiar/pegar/seleccionar
+    try { body.addEventListener('contextmenu', function (ev) { ev.preventDefault(); showTermCtx(ev.clientX, ev.clientY, term, ev, pane); }); } catch (e) {}
 
     var ro = null;
     if (g.ResizeObserver) { ro = new g.ResizeObserver(function () { try { fit.fit(); } catch (e) {} }); ro.observe(body); }
@@ -661,19 +889,21 @@
   }
 
   /* ── panel de SESIÓN ── */
-  function openSession(sid, name, proj, projName) {
+  function openSession(sid, name, proj, projName, cwd) {
     ensureDock(); bindSnap(); show();
     var ex = sessions.get(sid);
     if (ex) {
+      if (cwd && !ex.dataset.cwd) ex.dataset.cwd = cwd;
       if (!rootEl.contains(ex)) { if (proj && !ex.dataset.proj) ex.dataset.proj = proj; if (projName && !ex.dataset.projname) ex.dataset.projname = projName; if (view === '__home__') ex.dataset.pinned = '1'; showView(view); }
       setFocus(ex); renderSession(ex); return;
     }
     var pane = makePaneShell('session');
     if (proj) pane.dataset.proj = proj;
     if (projName) pane.dataset.projname = projName;
+    if (cwd) pane.dataset.cwd = cwd;
     if (view === '__home__') pane.dataset.pinned = '1';   // abierta desde inicio → aparece en inicio
     placeContent(pane, 'right');
-    mountSession(pane, sid, name, proj);
+    mountSession(pane, sid, name, proj, cwd);
     persist();
   }
 
@@ -700,13 +930,14 @@
   }
 
   // monta la conversación read-only dentro de un panel YA colocado
-  function mountSession(pane, sid, name, proj) {
+  function mountSession(pane, sid, name, proj, cwd) {
     pane.classList.remove('dk-pane--shell', 'dk-pane--claude');
     pane.classList.add('dk-pane--session');
     pane.dataset.kind = 'session';
     pane.dataset.sid = sid;
     pane.dataset.sname = name || 'sesión';
     if (proj) pane.dataset.proj = proj;
+    if (cwd) pane.dataset.cwd = cwd;   // para resolver rutas clickeables en la conversación
     setPaneMeta(pane, svg('eye', 12, 1.8), name || 'sesión', projLabel(pane));
     updatePinUI(pane);
     var body = pane.querySelector('.dk-pane-body');
@@ -725,6 +956,19 @@
       var b = e.target.closest && e.target.closest('[data-dock-act]');
       if (b) { e.stopPropagation(); actionHandler(b.getAttribute('data-dock-act'), b.getAttribute('data-sid')); }
     });
+    // rutas clickeables dentro de la conversación: click → panel, Ctrl/Cmd → editor, click derecho → menú
+    var convo = body.querySelector('.dk-convo');
+    convo.addEventListener('click', function (e) {
+      var f = e.target.closest && e.target.closest('.cv-file'); if (!f) return;
+      e.preventDefault(); e.stopPropagation();
+      var p = f.getAttribute('data-path'), cw = pane.dataset.cwd || '';
+      if (e.ctrlKey || e.metaKey) openFileEditor(p, cw); else openFilePanel(p, cw);
+    });
+    convo.addEventListener('contextmenu', function (e) {
+      var f = e.target.closest && e.target.closest('.cv-file'); if (!f) return;
+      e.preventDefault(); e.stopPropagation();
+      showFileCtx(e.clientX, e.clientY, f.getAttribute('data-path'), pane.dataset.cwd || '');
+    });
     sessions.set(sid, pane);
     renderSession(pane);
   }
@@ -740,10 +984,11 @@
         convoEl.innerHTML = '<div class="dk-empty">Esta sesión no tiene mensajes en el transcript todavía (o es solo-hook).<br>Tocá <b>responder</b> para continuar la conversación de forma interactiva (claude --resume).</div>';
         return;
       }
+      var cwd = pane.dataset.cwd || '';
       convoEl.innerHTML = convo.map(function (turn) {
         var who = turn.role === 'user' ? 'tú' : 'claude';
         return '<div class="cv-turn cv-' + turn.role + '"><span class="cv-who">' + who + '</span>' +
-          '<div class="cv-text">' + esc(turn.text) + '</div></div>';
+          '<div class="cv-text">' + linkifyPaths(esc(turn.text), cwd) + '</div></div>';
       }).join('');
       if (atBottom) convoEl.scrollTop = convoEl.scrollHeight;
     }).catch(function () {});
@@ -890,6 +1135,7 @@
     restoreSession: restoreSession, isMaximized: isMaximized, getView: function () { return view; },
     resumeSession: resumeSession, setBoardChecker: setBoardChecker, setCloseConfirmer: setCloseConfirmer,
     setNlEnabled: setNlEnabled, insertIntoFocused: insertIntoFocused,
-    setEditorOpener: setEditorOpener, setQuickTermHook: setQuickTermHook
+    setEditorOpener: setEditorOpener, setQuickTermHook: setQuickTermHook,
+    openFilePanel: openFilePanel
   };
 })(window);

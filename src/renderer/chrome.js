@@ -138,6 +138,14 @@
       return '<span style="' + (m.color ? 'color:' + m.color : '') + '"><span class="d" style="background:' + m.dot + '"></span>' + esc(m.label) + '</span>';
     }).join('');
     const cards = (c.cards || []).map(card).join('');
+    // badge de cambios git sin commitear (+N/−N), estilo Warp. data-cwd propio (data-proj es el projKey normalizado, no un path).
+    const dz = c.diff || null;
+    const diffBadge = (dz && (dz.added || dz.removed) && c.cwd)
+      ? '<button class="col-diff" data-act="diff-cwd" data-cwd="' + esc(c.cwd) + '" title="cambios sin commitear · ver git diff">'
+          + (dz.added ? '<span class="col-diff-add">+' + dz.added + '</span>' : '')
+          + (dz.removed ? '<span class="col-diff-del">−' + dz.removed + '</span>' : '')
+        + '</button>'
+      : '';
     let closed = '';
     if (c.closed && c.closed.length) {
       const rows = c.closed.map(function (r) {
@@ -150,7 +158,7 @@
     return '<section class="col"' + (c.id ? ' data-proj="' + esc(c.id) + '"' : '') + '>' +
       '<div class="col-head"><div class="col-title">' +
         '<span style="color:' + (c.fav ? 'var(--amber)' : '#7a7a82') + '">' + svg(c.fav ? 'star' : 'repo', c.fav ? 13 : 14, 1.7) + '</span>' +
-        '<span class="nm">' + esc(c.name) + '</span><span class="ct">' + c.count + '</span></div>' +
+        '<span class="nm">' + esc(c.name) + '</span><span class="ct">' + c.count + '</span>' + diffBadge + '</div>' +
         '<div class="col-meta">' + meta + '</div></div>' +
       '<div class="col-cards">' + cards + closed + '</div></section>';
   }
@@ -179,7 +187,7 @@
 
     return '<header class="topbar">' +
       '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span>' +
-        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.7.0') + '</span>' +
+        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.7.1') + '</span>' +
         '<button class="brand-changelog" data-act="changelog-all" title="ver todas las novedades">' + svg('sparkles', 10, 1.7) + '<span>Changelog</span></button></span></div>' +
       '<div class="divider-v"></div>' +
       '<div class="counters">' +
@@ -317,7 +325,7 @@
         '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
         '<button class="sbtn" data-act="theme" title="' + (o.light ? 'modo oscuro' : 'modo claro') + '">' + svg(o.light ? 'moon' : 'sun', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v1.7.0') + '</span></div>' +
+        '<span class="ver">' + esc(o.version || 'v1.7.1') + '</span></div>' +
     '</aside>';
   }
 

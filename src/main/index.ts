@@ -194,6 +194,36 @@ if (!gotLock) {
     // lectura del portapapeles (para PEGAR en la terminal embebida; navigator.clipboard está bloqueado por la CSP)
     ipcMain.handle('consomni:clipboardRead', () => { try { return clipboard.readText(); } catch { return ''; } });
 
+    // lectura de un archivo para el VISOR embebido (click en una ruta del chat/terminal). GUARDADO:
+    // solo dentro de los roots vigilados / projects del perfil / cwds de sesiones; cap 1MB; rechaza binarios.
+    ipcMain.handle('consomni:readFile', (_e, filePath: string) => {
+      try {
+        const fp = path.resolve(String(filePath || ''));
+        if (!fp) return { ok: false, error: 'sin ruta' };
+        const cfg = loadConfig();
+        const roots = [
+          claudeProjectsPath(cfg),
+          ...(Array.isArray(cfg.watchedDirs) ? cfg.watchedDirs : []),
+          ...buildSnapshot().sessions.map((s) => s.cwd).filter(Boolean),
+        ].map((r) => path.resolve(String(r))).filter(Boolean);
+        const allowed = roots.some((root) => fp === root || fp.startsWith(root + path.sep));
+        if (!allowed) return { ok: false, error: 'fuera del alcance permitido' };
+        const st = fs.statSync(fp);
+        if (!st.isFile()) return { ok: false, error: 'no es un archivo' };
+        const CAP = 1024 * 1024;
+        const truncated = st.size > CAP;
+        // leer SÓLO los primeros CAP bytes (no el archivo entero) → un .log/.jsonl gigante no infla la RAM del main
+        const want = Math.min(st.size, CAP);
+        const buf = Buffer.alloc(want);
+        const fd = fs.openSync(fp, 'r');
+        let read = 0;
+        try { read = fs.readSync(fd, buf, 0, want, 0); } finally { fs.closeSync(fd); }
+        const data = read < want ? buf.subarray(0, read) : buf;
+        if (data.subarray(0, Math.min(data.length, 4096)).includes(0)) return { ok: false, error: 'archivo binario' };
+        return { ok: true, content: data.toString('utf8'), truncated };
+      } catch { return { ok: false, error: 'no se pudo leer' }; }
+    });
+
     // centro de notificaciones persistido (sobrevive reinicios/updates; solo se va al "limpiar")
     ipcMain.handle('consomni:getNotifications', () => loadNotifications());
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -39,6 +39,9 @@ const api = {
   setMuted: (v: boolean): Promise<boolean> => ipcRenderer.invoke('consomni:setMuted', v),
   /** Lee el portapapeles del SO (para PEGAR en la terminal; navigator.clipboard está bloqueado por la CSP). */
   clipboardRead: (): Promise<string> => ipcRenderer.invoke('consomni:clipboardRead'),
+  /** Lee un archivo (visor embebido); guardado a los roots vigilados / cwds de sesión, cap 1MB, sin binarios. */
+  readFile: (p: string): Promise<{ ok: boolean; content?: string; error?: string; truncated?: boolean }> =>
+    ipcRenderer.invoke('consomni:readFile', p),
   /** El main pide saltar a una sesión (click en la notificación nativa). */
   onJump: (cb: (sid: string) => void): (() => void) => {
     const listener = (_e: unknown, sid: string): void => cb(sid);
