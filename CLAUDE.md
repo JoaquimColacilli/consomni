@@ -170,7 +170,7 @@ Server HTTP local express en `127.0.0.1:4517` (default, configurable) recibe POS
 | `UserPromptSubmit` | `working` | |
 | `PreToolUse` | `working` + última tool call | |
 | `PostToolUse` | `working` + feed | |
-| `Notification` | `attn` (permiso) / `idle` (idle-prompt) | ⚠️ discriminar por payload real — loguear crudo y ajustar |
+| `Notification` | `attn` SÓLO si es pedido de PERMISO; cualquier otra (idle, login, info) → `idle` | `classifyNotification` ahora **solo** marca `attn` ante permiso real (default = `idle`, NO `attn`). Ver v1.6.2 |
 | `Stop` | `idle` | |
 | `SubagentStop` | actualiza subagente | |
 | `SessionEnd` | `closed` | |
@@ -650,6 +650,25 @@ bloqueada (CSP `connect-src 'self'`) → `navigator.clipboard` NO sirve; todo va
   release) + force-push de `main` y tags. Las release (assets + `latest.yml`) NO dependen de la historia git →
   el auto-update sigue intacto. El contributor "claude" cae del repo (GitHub re-indexa con cache, puede tardar).
   Backup local `backup-claude-scrub` por las dudas. De acá en más, HARD RULE 4 garantiza que no vuelva a pasar.
+
+---
+
+## v1.6.2 — Fix: el cartel "necesita tu atención" se quedaba pegado
+> Bump **1.6.1 → 1.6.2**. Bug reportado por Facundo: tras `claude /login` (en una terminal embebida con
+> `--dangerously-skip-permissions`), saltó el cartel "1 sesión necesita tu atención" y NO se limpiaba.
+
+- **Causa raíz** (en `sessions.ts`): `attn` sale ÚNICA fuente del hook `Notification` (el parser JSONL nunca
+  produce `attn`). `classifyNotification` tenía **`return 'attn'` por defecto** para cualquier notificación que
+  no matcheara "idle" → la notificación del login se clasificó como permiso → `attn`. Y NO se limpiaba porque
+  después del login no llega ningún `Stop`/`UserPromptSubmit`/tool event, así que el overlay quedaba `attn`
+  hasta `OVERLAY_TTL` (10 min).
+- **Fix 1 (raíz):** `classifyNotification` ahora marca `attn` **SÓLO** ante un pedido de PERMISO real
+  (`notification_type` con `perm`, o mensaje con `permission/permiso/needs your permission/approve this/…`);
+  **todo lo demás** (idle, login, auth, info) → `idle`. Verificado por unit test (10/10).
+- **Fix 2 (self-heal):** en `mergeOverlay`, si la sesión siguió ACTIVA en el transcript (`s.lastActivity >
+  live.ts + 2s`) estando en `attn`, ese `attn` quedó stale → se descarta el overlay y se usa el estado real
+  del JSONL. Red de seguridad por si una notificación futura se cuela como `attn`.
+- El overlay vive en memoria del main → al actualizar/reabrir, cualquier `attn` pegado se limpia solo.
 
 ---
 

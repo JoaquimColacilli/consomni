@@ -495,6 +495,9 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.6.2', date: '22 jun 2026', title: 'Fix del cartel de atención', items: [
+      'Arreglado: el cartel "una sesión necesita tu atención" se quedaba pegado después de loguearte (o ante avisos que no eran un pedido de permiso). Ahora solo se prende ante un pedido de permiso real, y se limpia solo cuando la sesión sigue trabajando.',
+    ] },
     { v: '1.6.1', date: '21 jun 2026', title: 'Pulido del Changelog', items: [
       'La marca de cada versión en la línea de tiempo del Changelog quedó perfectamente centrada sobre el riel.',
     ] },

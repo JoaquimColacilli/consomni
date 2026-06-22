@@ -57,9 +57,14 @@ function shortName(prompt: string): string {
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function classifyNotification(p: any): 'attn' | 'idle' {
   const nt = String(p.notification_type || p.type || '').toLowerCase();
-  const msg = String(p.message || p.body || '').toLowerCase();
-  if (nt.indexOf('idle') > -1 || /waiting for (your )?input|idle/.test(msg)) return 'idle';
-  return 'attn'; // por defecto: permiso (ajustable cuando confirmemos el payload real)
+  const msg = String(p.message || p.body || p.title || '').toLowerCase();
+  // SÓLO es "atención" un pedido de PERMISO real (lo único accionable desde Consomni).
+  // Cualquier otra notificación (idle, "waiting for input", LOGIN/auth, avisos varios) → idle, NO atención.
+  // (Antes el default era 'attn' → CUALQUIER notificación —p.ej. la del login— prendía el cartel
+  //  "necesita tu atención" y NO se limpiaba, porque después no llegaba ningún Stop/PromptSubmit. Bug v1.6.2.)
+  if (nt.indexOf('perm') > -1) return 'attn';
+  if (/\bpermission\b|\bpermiso\b|needs? (your )?(permission|approval)|approve this|allow this|to use the .*? tool/.test(msg)) return 'attn';
+  return 'idle';
 }
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function permDetail(p: any): string {
@@ -158,6 +163,13 @@ function mergeOverlay(sessions: Session[]): Session[] {
     if (now - live.ts > OVERLAY_TTL && live.state !== 'closed') { overlay.delete(sid); return; }
     const s = byId.get(sid);
     if (s) {
+      // self-heal: si la sesión siguió ACTIVA en el transcript DESPUÉS de la notificación de atención,
+      // ese "atención" quedó stale (ya respondió / siguió trabajando) → lo descartamos y mandamos el
+      // estado real del JSONL. Evita que el cartel se quede pegado si no llegó un Stop/PromptSubmit.
+      if (live.state === 'attn' && s.lastActivity && s.lastActivity > live.ts + 2000) {
+        overlay.delete(sid);
+        return;
+      }
       s.state = live.state;
       s.stateSource = 'hook';
       if (live.statusText != null) s.statusText = live.statusText;
