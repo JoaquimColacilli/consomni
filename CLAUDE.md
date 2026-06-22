@@ -803,6 +803,33 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.7.2 — Shift+Enter = salto de línea en las terminales con claude
+> Pedido de Franco (venía de Warp): en la terminal embebida con `claude`, **Shift+Enter mandaba el prompt
+> de una** en vez de hacer salto de línea → no se podían escribir prompts multilínea. Bump **1.7.1 → 1.7.2**
+> (`package.json` + fallbacks `brand-ver`/`.ver` en `chrome.js`). Verificado por **test PTY headless** (ESC+CR
+> contra el `claude.exe` real → inserta newline, NO hace submit). Aditivo, respeta las 3 Hard Rules.
+
+- **Causa raíz:** xterm.js **no distingue Shift+Enter de Enter** — manda `\r` (= enviar) en ambos casos. Los
+  terminales que sí andan (WezTerm, Ghostty, Kitty, Warp, Windows Terminal) lo soportan de fábrica; xterm.js no.
+- **Ground truth (del binario `claude.exe` v2.1.186):** Claude Code trata **`\x1b\r` (ESC + CR = Meta/Alt+Return)**
+  como "insertar salto de línea". Su `/terminal-setup` para VS Code instala literalmente
+  `{"key":"shift+enter","command":"workbench.action.terminal.sendSequence","args":{"text":"\r"}}`. O sea:
+  **emular Shift+Enter = mandar `\x1b\r` a la PTY**.
+- **Fix** (`terminals-ui.js`, en el `attachCustomKeyEventHandler` de `mountTerminal`): si
+  `(code==='Enter'||'NumpadEnter') && shiftKey && !ctrl/alt/meta && !isComposing && pane.dataset.kind==='claude'`
+  → `api.term.write(pane.dataset.tid, '\x1b\r')` y `return false` (xterm NO manda su `\r` por defecto). El write es
+  UN solo chunk (ESC y CR juntos) para que el parser de claude lo lea como Meta+Return, no como ESC (cancelar) + CR.
+- **Scopeado a paneles `claude`** a propósito: en un **shell** (PowerShell) mandar ESC+CR borraría el comando
+  tipeado (ESC = cancelar línea en PSReadLine) → ahí `\r` sigue siendo "ejecutar". Cubre todos los caminos a
+  claude (botones claude/claude ⚡, responder/`--resume`, picker de proyecto, paneles restaurados). Límite conocido:
+  si abrís un shell y tipeás `claude` a mano, Shift+Enter no aplica (el panel quedó `kind:'shell'`).
+- **Verificación:** test PTY headless (electron-as-node + node-pty, ABI v121) que spawnea `claude.exe`, llega al
+  input box, escribe `A`, manda `\x1b\r`, escribe `B` → `A` y `B` quedan en **líneas distintas** del input y claude
+  **NO** entra a pensar (no hubo submit). Confirmado. (Alt+Enter ya mandaba `\x1b\r` de fábrica en xterm; ahora
+  Shift+Enter hace lo mismo, que es el muscle-memory de Warp.)
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

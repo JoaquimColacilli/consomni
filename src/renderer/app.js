@@ -497,6 +497,10 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.7.2', date: '22 jun 2026', title: 'Shift+Enter para saltar de línea en claude', items: [
+      'En las terminales con claude, Shift+Enter ahora inserta un salto de línea en vez de enviar el prompt — podés escribir prompts de varias líneas sin que se mande de una. Es lo mismo que hace el "/terminal-setup" de Claude Code en otros terminales.',
+      'Aplica solo a las sesiones de claude embebidas; en un shell normal, Enter sigue ejecutando el comando como siempre.',
+    ] },
     { v: '1.7.1', date: '22 jun 2026', title: 'Cambios sin commitear (+N/−N) y abrir archivos desde el chat', items: [
       'Indicador de cambios sin commitear (+N / −N) por proyecto, estilo Warp: aparece en el encabezado de cada columna del tablero y en la cabecera del dock cuando entrás a un proyecto. Se actualiza solo a medida que el agente edita, y al hacerle click abre el git diff.',
       'Rutas de archivo clickeables en la terminal y en la conversación de las sesiones (además de los links): click abre el archivo en un panel al costado, Ctrl/Cmd+click lo abre en tu editor, y el click derecho ofrece "Abrir en panel / Abrir en editor / Revelar ubicación".',

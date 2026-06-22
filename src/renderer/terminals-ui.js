@@ -757,6 +757,16 @@
     try {
       term.attachCustomKeyEventHandler(function (ev) {
         if (ev.type !== 'keydown') return true;
+        // Shift+Enter → SALTO DE LÍNEA en la TUI de claude (no enviar el prompt). xterm.js no distingue
+        // Shift+Enter de Enter (manda \r = enviar), por eso hay que emularlo: mandamos Meta+Return (ESC CR),
+        // EXACTAMENTE lo que /terminal-setup de Claude Code configura en VS Code (shift+enter → "\r")
+        // y lo que mandan WezTerm/Ghostty/Kitty/Warp/Windows Terminal de fábrica. Scopeado a paneles claude:
+        // en un shell, \r tiene que seguir siendo "ejecutar" (mandar ESC+CR borraría el comando tipeado).
+        if ((ev.code === 'Enter' || ev.code === 'NumpadEnter') && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.isComposing && pane.dataset.kind === 'claude') {
+          var ptid = pane.dataset.tid;
+          if (ptid && api.term && api.term.write) api.term.write(ptid, '\x1b\r');
+          return false;
+        }
         if (ev.ctrlKey && ev.code === 'Space') { if (quickTermHook) quickTermHook(); return false; }
         if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') { termCopy(term); return false; }              // copiar siempre
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.code === 'KeyC') {
