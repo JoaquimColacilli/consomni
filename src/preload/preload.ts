@@ -42,6 +42,9 @@ const api = {
   /** Lee un archivo (visor embebido); guardado a los roots vigilados / cwds de sesión, cap 1MB, sin binarios. */
   readFile: (p: string): Promise<{ ok: boolean; content?: string; error?: string; truncated?: boolean }> =>
     ipcRenderer.invoke('consomni:readFile', p),
+  /** Lista archivos del cwd (picker flotante de @); guardado a los roots vigilados; walk acotado. */
+  listFiles: (dir: string): Promise<{ ok: boolean; files?: string[]; error?: string; truncated?: boolean }> =>
+    ipcRenderer.invoke('consomni:listFiles', dir),
   /** El main pide saltar a una sesión (click en la notificación nativa). */
   onJump: (cb: (sid: string) => void): (() => void) => {
     const listener = (_e: unknown, sid: string): void => cb(sid);

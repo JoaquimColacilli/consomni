@@ -830,6 +830,68 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.7.3 — Picker flotante de @ + Shift+Enter (de verdad) + Ctrl+Espacio clona el cwd + Ctrl+W cierra
+> Bump **1.7.2 → 1.7.3**. Cuatro cosas en las terminales embebidas (feedback de Franco + Facundo). La 1.7.2
+> había sacado Shift+Enter pero estaba **mal** (a veces enviaba igual + lag); esta lo arregla de raíz.
+> Verificado en vivo (instrumented + headless PTY + screenshots) y review adversaria (0 hallazgos). Aditivo,
+> respeta las 3 Hard Rules.
+
+### 0) PICKER FLOTANTE de @ (estilo Warp) — el feature grande
+- **Problema:** claude dibuja su file-picker de `@` **inline** → te corre todo el historial de la pantalla y
+  tenés que scrollear a mano (es de claude; pasa igual en su terminal y en Consomni). Warp lo muestra como un
+  **popup flotante** que NO corre nada.
+- **Solución (Consomni reimplementa el picker):** en un panel **claude**, al tipear `@` NO se lo mandamos a
+  claude (así su picker inline no aparece) → abrimos un **overlay propio** (`terminals-ui.js`) con los archivos
+  del cwd, filtrable; al elegir le mandamos `@<ruta> ` a la PTY (un burst → claude lo toma como ref confirmada,
+  sin abrir su picker). Esc cancela; Backspace con query vacía cierra (= "lo borré"); espacio confirma.
+- **Plomería:** IPC `consomni:listFiles(dir)` (`index.ts`, guardado a los roots vigilados/cwds igual que
+  `readFile`; walk acotado depth≤9/4000 files/1.5s, salta `node_modules`/`.git`/`dist`/etc. y dot-dirs) →
+  preload `listFiles`. Fuzzy client-side (`atScore`: substring en basename > en path > subsecuencia). El `@` se
+  intercepta en el `attachCustomKeyEventHandler` ANTES de todo y se suprime en **todos los tipos de evento**
+  (mismo motivo que Shift+Enter: si no, el keypress lo cuela). Mientras el picker está abierto, TODAS las teclas
+  van al picker (`atKey`) y no a claude.
+- **Posición PIXEL-PERFECT:** `cursorRect(pane,term)` ancla al **elemento real del cursor** (`.xterm-cursor`,
+  DOM renderer) → exacto; si no, geometría de celdas con las dims REALES de xterm (`_renderService.dimensions`),
+  fallback `rect/cols`. `placeAtPicker` pega la **base** del popup `gap` px sobre la fila del cursor
+  (bottom-anchored → crece hacia arriba, glued al input) y capea el alto de la lista al espacio disponible; si el
+  cursor está muy arriba (`top<120`) cae abajo. Se re-ubica en cada `resize` (listener mientras está abierto).
+  Colores oscuros FIJOS (flota sobre la terminal, que siempre es oscura, también en modo claro). CSS `.dk-at-*`.
+- **Límite conocido:** sólo cubre el `@` de **archivos** (el caso común). Para el `@` de agentes/MCP de claude,
+  si no hay match el Enter manda `@<query>` como fallback al picker nativo. Verificado por screenshot: overlay
+  pegado al input + selección inserta `@src/renderer/app.js` limpio (sin correr la pantalla).
+
+### 1) Fix de Shift+Enter (la 1.7.2 estaba rota)
+- **Bug real (confirmado con instrumented test):** apretar Enter dispara **DOS** eventos — `keydown` Y
+  `keypress` — y xterm manda `\r` por **ambos**. El handler viejo solo gateaba `keydown`, así que en Shift+Enter
+  el `keypress` **colaba un `\r`** → claude metía el salto y **después enviaba**. (`onData` con Enter normal =
+  `["13","13"]`; Shift+Enter viejo dejaba pasar el 2º `13`.) Además usaba `ESC+CR`, que tiene el "escape
+  timeout" del lado de claude → el **lag** + a veces se leía como ESC (cancelar) + CR (enviar).
+- **Fix** (`terminals-ui.js`, `attachCustomKeyEventHandler`): el branch de Shift+Enter va **ANTES** del guard
+  `if (ev.type !== 'keydown') return true;` y **devuelve `false` para TODOS los tipos** (keydown/keypress/keyup)
+  → xterm nunca manda `\r`. El salto se escribe **solo en `keydown`** y es **`\n` (un byte)** en vez de ESC+CR
+  (sin escape-timeout → instantáneo, sin ambigüedad). Confirmado: ahora Shift+Enter = `onData []` (cero leak).
+  El guard keydown quedó después para que los Ctrl-shortcuts sigan viendo solo keydown.
+
+### 2) Ctrl+Espacio clona el directorio de la terminal activa (estilo Warp)
+- Antes abría siempre en el home. Ahora `openQuickTerm()` (app.js) toma `ConsomniTerms.activeTermCwd()` —el
+  `cwd` del panel de terminal **enfocado** (o la última terminal abierta)— y lo pasa a `openEmbeddedTerminal`;
+  `spawn()` ya respeta el cwd explícito. Si no hay terminal abierta, cae al cwd del proyecto/vista (como antes).
+- **cd en vivo (bonus, no invasivo):** `mountTerminal` registra `registerOscHandler(7, …)` (OSC 7
+  `file://host/path`) y `registerOscHandler(9, …)` (OSC 9;9 `path`) → `updatePaneCwd(pane, path)` actualiza
+  `pane.dataset.cwd`. Si el shell los emite (oh-my-posh/starship/integración de VS Code) el clon sigue el `cd`
+  real; con PowerShell pelado no se emiten → queda el cwd de arranque (caso común, cubierto). OSC 9;4 (progress)
+  NO se confunde con cwd (sólo `9;` se trata como path). `activeTermCwd` exportado en `ConsomniTerms`.
+
+### 3) Ctrl+W cierra la terminal enfocada
+- En el `attachCustomKeyEventHandler`: `Ctrl+W` (sin shift/alt/meta) → `closePane(pane)` (diferido un tick con
+  `setTimeout(…,0)` porque closePane puede disponer el xterm y estamos dentro de su propio keydown) + `return
+  false`. Cierra la terminal donde está el cursor. Si es una terminal VIVA con PTY, `closePane` dispara el modal
+  de confirmación existente (respeta `config.confirmCloseTerminal`). **Tradeoff conocido y querido:** pisa el
+  "borrar palabra" (Ctrl+W de readline/PSReadLine) en shell/claude — fue pedido explícito; alternativa
+  `Ctrl+Shift+W` es un cambio de una línea si se prefiere. Verificado: Ctrl+W llevó los paneles de 1 → 0.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

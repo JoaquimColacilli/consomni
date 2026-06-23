@@ -497,6 +497,12 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.7.3', date: '22 jun 2026', title: 'Picker flotante de @, Shift+Enter arreglado, Ctrl+Espacio clona el directorio, Ctrl+W cierra', items: [
+      'Al escribir @ en una terminal con claude ahora aparece un selector de archivos FLOTANTE (estilo Warp), pegado al input, en vez del listado inline de claude que te corría toda la pantalla. Escribís para filtrar, Enter o click para elegir, y se inserta la referencia al archivo. Esc cancela.',
+      'Shift+Enter en claude ahora hace el salto de línea bien: antes (1.7.2) a veces enviaba el mensaje igual y andaba con lag. Quedó instantáneo y confiable.',
+      'Ctrl+Espacio abre la terminal nueva parada en el MISMO directorio de la terminal que venías usando (como Warp), en vez de arrancar en tu carpeta de usuario.',
+      'Ctrl+W cierra la terminal donde está el cursor (la que estás usando). Si es una terminal viva, te pide confirmación antes de cortar el proceso. Nota: dentro de un shell, Ctrl+W deja de borrar la palabra anterior.',
+    ] },
     { v: '1.7.2', date: '22 jun 2026', title: 'Shift+Enter para saltar de línea en claude', items: [
       'En las terminales con claude, Shift+Enter ahora inserta un salto de línea en vez de enviar el prompt — podés escribir prompts de varias líneas sin que se mande de una. Es lo mismo que hace el "/terminal-setup" de Claude Code en otros terminales.',
       'Aplica solo a las sesiones de claude embebidas; en un shell normal, Enter sigue ejecutando el comando como siempre.',
@@ -806,11 +812,15 @@
       }).catch(go);
     } else { go(); }
   }
-  // CTRL+ESPACIO: abre una terminal nueva según config (shell / claude / claude --dangerously-skip-permissions)
+  // CTRL+ESPACIO: abre una terminal nueva según config (shell / claude / claude --dangerously-skip-permissions),
+  // CLONANDO el directorio de la terminal activa (estilo Warp): la nueva arranca en el cwd de la que venías
+  // usando, no en el home. Si no hay terminal abierta, cae al cwd del proyecto/vista (lo resuelve spawn()).
   function openQuickTerm() {
     var k = state.quickTermKind || 'claude-skip';
     var kind = (k === 'shell') ? 'shell' : 'claude';
-    openEmbeddedTerminal(null, kind, null, { skip: (k === 'claude-skip') });
+    var T = window.ConsomniTerms;
+    var cwd = (T && T.activeTermCwd) ? T.activeTermCwd() : '';
+    openEmbeddedTerminal(cwd || null, kind, null, { skip: (k === 'claude-skip') });
   }
   // datos de proyecto de una sesión para taguear el panel (id = projKey, igual que la vista; name = lindo)
   function sProj(s, skip) { var o = s ? { proj: projKey(s), projName: s.project } : {}; if (skip) o.skip = true; return o; }

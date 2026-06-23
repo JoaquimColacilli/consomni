@@ -224,6 +224,44 @@ if (!gotLock) {
       } catch { return { ok: false, error: 'no se pudo leer' }; }
     });
 
+    // listado de archivos del cwd para el PICKER flotante de @ (estilo Warp). GUARDADO igual que readFile:
+    // sólo dentro de los roots vigilados / cwds de sesión. Walk acotado (depth/count/tiempo), salta ignorados.
+    ipcMain.handle('consomni:listFiles', (_e, dir: string) => {
+      try {
+        const base = path.resolve(String(dir || ''));
+        if (!base) return { ok: false, error: 'sin dir' };
+        const cfg = loadConfig();
+        const roots = [
+          claudeProjectsPath(cfg),
+          ...(Array.isArray(cfg.watchedDirs) ? cfg.watchedDirs : []),
+          ...buildSnapshot().sessions.map((s) => s.cwd).filter(Boolean),
+        ].map((r) => path.resolve(String(r))).filter(Boolean);
+        const allowed = roots.some((root) => base === root || base.startsWith(root + path.sep));
+        if (!allowed) return { ok: false, error: 'fuera del alcance permitido' };
+        const IGNORE = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'out', '.cache', 'coverage', 'release', '.turbo', '.venv', 'venv', '__pycache__', '.idea', '.vscode-test']);
+        const CAP = 4000, MAXDEPTH = 9, MAXMS = 1500;
+        const files: string[] = [];
+        const start = Date.now();
+        const walk = (d: string, rel: string, depth: number): void => {
+          if (files.length >= CAP || depth > MAXDEPTH || Date.now() - start > MAXMS) return;
+          let ents: import('fs').Dirent[];
+          try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+          for (const e of ents) {
+            if (files.length >= CAP) return;
+            const nm = e.name;
+            if (e.isDirectory()) {
+              if (IGNORE.has(nm) || nm.startsWith('.')) continue;
+              walk(path.join(d, nm), rel ? rel + '/' + nm : nm, depth + 1);
+            } else if (e.isFile()) {
+              files.push(rel ? rel + '/' + nm : nm);
+            }
+          }
+        };
+        walk(base, '', 0);
+        return { ok: true, files, truncated: files.length >= CAP };
+      } catch { return { ok: false, error: 'no se pudo listar' }; }
+    });
+
     // centro de notificaciones persistido (sobrevive reinicios/updates; solo se va al "limpiar")
     ipcMain.handle('consomni:getNotifications', () => loadNotifications());
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

@@ -956,3 +956,20 @@ body.light .col-diff,body.light .dk-tb-diff{border-color:var(--border);}
 .dk-fv-md code{font-family:'Geist Mono',monospace;font-size:11px;background:var(--surface-input);border:1px solid var(--border-soft);border-radius:4px;padding:1px 5px;color:var(--green);}
 .dk-fv-md .fv-code{font-family:'Geist Mono',monospace;font-size:11px;background:var(--surface-input);border:1px solid var(--border-soft);border-radius:8px;padding:10px 12px;overflow-x:auto;color:var(--text-2);white-space:pre;margin:0 0 10px;}
 .dk-fv-md .fv-link{color:var(--green);cursor:pointer;text-decoration:underline;text-underline-offset:2px;}
+
+/* ════════ v1.7.3 — picker flotante de @ (estilo Warp) ════════
+   Flota sobre la terminal (que SIEMPRE es oscura, también en modo claro) → colores oscuros fijos. */
+.dk-at-picker{position:fixed;z-index:80;min-width:300px;max-width:460px;background:#16161c;border:1px solid rgba(255,255,255,.12);border-radius:10px;box-shadow:0 14px 44px rgba(0,0,0,.6);font-family:'Geist Mono',ui-monospace,monospace;overflow:hidden;animation:atIn .1s ease-out;}
+@keyframes atIn{from{opacity:0;transform:translateY(4px);}to{opacity:1;transform:none;}}
+.dk-at-head{display:flex;align-items:center;gap:8px;padding:7px 11px;border-bottom:1px solid rgba(255,255,255,.07);font-size:11px;}
+.dk-at-q{color:#22c55e;font-weight:600;word-break:break-all;}
+.dk-at-hint{margin-left:auto;color:#7a7a85;font-size:10px;white-space:nowrap;}
+.dk-at-list{max-height:244px;overflow-y:auto;padding:4px;}
+.dk-at-item{display:flex;align-items:center;gap:8px;padding:5px 8px;border-radius:6px;cursor:pointer;color:#c8c8cf;font-size:12px;}
+.dk-at-item svg{color:#7a7a85;flex:none;}
+.dk-at-item .dk-at-name{color:#e8e8ea;white-space:nowrap;}
+.dk-at-item .dk-at-dir{color:#6e6e78;font-size:10.5px;margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:230px;}
+.dk-at-item.sel{background:rgba(34,197,94,.16);color:#fff;}
+.dk-at-item.sel svg,.dk-at-item.sel .dk-at-name{color:#fff;}
+.dk-at-item:hover{background:rgba(255,255,255,.05);}
+.dk-at-empty{padding:11px 12px;color:#7a7a85;font-size:11px;text-align:center;}

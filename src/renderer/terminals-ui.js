@@ -570,6 +570,7 @@
   }
 
   function killPaneContent(pane) {
+    if (pane._atp) closeAtPicker(pane);   // cerrar el picker flotante de @ si quedó abierto
     var pid = pane.dataset.tid;
     if (pid) { var t = terms.get(pid); if (t) { try { t.term.dispose(); } catch (e) {} if (t.ro) try { t.ro.disconnect(); } catch (e2) {} } terms.delete(pid); if (api && api.term) api.term.kill(pid); }
     if (pane.dataset.sid) sessions.delete(pane.dataset.sid);
@@ -613,6 +614,148 @@
     placeContent(pane, dir || 'right');
     mountTerminal(pane, kind, cwd, opts.resume || null, !!opts.skip, !!opts.pick);
     persist();
+  }
+
+  // actualiza el cwd de un panel (del cd en vivo vía OSC) sin romper nada si no cambió
+  function updatePaneCwd(pane, cwd) {
+    if (!pane || !cwd) return;
+    cwd = String(cwd).replace(/[\\/]+$/, '');
+    if (!cwd || pane.dataset.cwd === cwd) return;
+    pane.dataset.cwd = cwd;
+    persist();
+  }
+  // cwd de la terminal ACTIVA (la enfocada, o la última terminal abierta) → para clonar su directorio
+  // al abrir una terminal nueva con Ctrl+Espacio (estilo Warp). '' si no hay ninguna terminal abierta.
+  function activeTermCwd() {
+    var isTerm = function (p) { return p && (p.dataset.kind === 'shell' || p.dataset.kind === 'claude'); };
+    var p = (isTerm(focused) && rootEl && rootEl.contains(focused)) ? focused : null;
+    if (!p) { var ts = panesOf().filter(isTerm); p = ts.length ? ts[ts.length - 1] : null; }
+    return (p && p.dataset.cwd) || '';
+  }
+
+  /* ════════ PICKER FLOTANTE de @ (estilo Warp) ════════
+     En un panel claude, al tipear '@' NO se lo mandamos a claude (evita su picker inline que corre la
+     pantalla): abrimos un overlay propio con los archivos del cwd, filtrable; al elegir le mandamos
+     '@ruta ' a claude (ref de archivo confirmada). Esc cancela; Backspace con query vacía cierra. */
+  function paneTerm(pane) { try { var t = terms.get(pane.dataset.tid); return t ? t.term : null; } catch (e) { return null; } }
+  function atOpen(pane) { return !!(pane && pane._atp); }
+  // posiciona el picker PIXEL-PERFECT pegado al input: ancla al elemento real del cursor si existe
+  // (DOM renderer de xterm), si no a la geometría de celdas con las dimensiones REALES de xterm.
+  function cursorRect(pane, term) {
+    try {
+      var ce = pane.querySelector('.xterm-rows .xterm-cursor') || pane.querySelector('.xterm-cursor');
+      if (ce) { var r = ce.getBoundingClientRect(); if (r.width && r.height) return { left: r.left, top: r.top, h: r.height }; }
+    } catch (e) {}
+    try {
+      var rowsEl = pane.querySelector('.xterm-rows'); if (!rowsEl) return null;
+      var rect = rowsEl.getBoundingClientRect();
+      var cw, ch;
+      try { var d = term._core._renderService.dimensions; cw = (d.css && d.css.cell.width) || d.actualCellWidth; ch = (d.css && d.css.cell.height) || d.actualCellHeight; } catch (e2) {}
+      if (!cw || !ch) { cw = rect.width / (term.cols || 80); ch = rect.height / (term.rows || 24); }
+      var cx = term.buffer.active.cursorX || 0, cy = term.buffer.active.cursorY || 0;
+      return { left: rect.left + cx * cw, top: rect.top + cy * ch, h: ch };
+    } catch (e) { return null; }
+  }
+  function placeAtPicker(pane, term, el) {
+    var c = cursorRect(pane, term); if (!c) return;
+    var gap = 6, ow = el.offsetWidth || 340;
+    var listEl = el.querySelector('.dk-at-list'), headH = 30;
+    el.style.left = Math.max(8, Math.min(Math.round(c.left), g.innerWidth - ow - 8)) + 'px';
+    if (c.top >= 120) {
+      // ARRIBA del input: base PEGADA (gap px sobre la fila del cursor); crece hacia arriba, cap al espacio
+      el.style.top = 'auto';
+      el.style.bottom = Math.round(g.innerHeight - c.top + gap) + 'px';
+      if (listEl) listEl.style.maxHeight = Math.max(72, Math.min(244, Math.round(c.top - gap - headH - 10))) + 'px';
+    } else {
+      // sin lugar arriba (cursor muy alto) → ABAJO del input
+      el.style.bottom = 'auto';
+      el.style.top = Math.round(c.top + c.h + gap) + 'px';
+      if (listEl) listEl.style.maxHeight = Math.max(72, Math.min(244, Math.round(g.innerHeight - (c.top + c.h + gap) - 10))) + 'px';
+    }
+  }
+  function atScore(p, q) {
+    p = p.toLowerCase();
+    var base = p.split('/').pop();
+    var bi = base.indexOf(q); if (bi >= 0) return 1000 - bi;
+    var pi = p.indexOf(q); if (pi >= 0) return 500 - pi * 0.1;
+    var qi = 0; for (var i = 0; i < p.length && qi < q.length; i++) if (p.charAt(i) === q.charAt(qi)) qi++;
+    return qi === q.length ? 100 : -1;
+  }
+  function filterAt(pane) {
+    var st = pane._atp; if (!st) return;
+    var q = st.query.toLowerCase(), scored = [];
+    if (!q) { st.matches = st.files.slice(0, 12); if (st.sel >= st.matches.length) st.sel = 0; return; }
+    for (var i = 0; i < st.files.length; i++) { var s = atScore(st.files[i], q); if (s > 0) scored.push([s, st.files[i]]); }
+    scored.sort(function (a, b) { return b[0] - a[0] || a[1].length - b[1].length; });
+    st.matches = scored.slice(0, 12).map(function (x) { return x[1]; });
+    if (st.sel >= st.matches.length) st.sel = Math.max(0, st.matches.length - 1);
+  }
+  function renderAtList(pane) {
+    var st = pane._atp; if (!st || !st.el) return;
+    var items = st.matches.map(function (f, i) {
+      var base = f.split('/').pop(), dir = f.slice(0, f.length - base.length).replace(/\/$/, '');
+      return '<div class="dk-at-item' + (i === st.sel ? ' sel' : '') + '" data-at-i="' + i + '">' +
+        svg('ext', 12, 1.7) + '<span class="dk-at-name">' + esc(base) + '</span>' +
+        (dir ? '<span class="dk-at-dir">' + esc(dir) + '</span>' : '') + '</div>';
+    }).join('');
+    st.el.innerHTML =
+      '<div class="dk-at-head"><span class="dk-at-q">@' + esc(st.query) + '</span>' +
+        '<span class="dk-at-hint">' + (st.loading ? 'cargando…' : 'Enter elige · Esc cancela') + '</span></div>' +
+      '<div class="dk-at-list">' + (items || '<div class="dk-at-empty">' + (st.loading ? '' : 'sin coincidencias') + '</div>') + '</div>';
+    var term = paneTerm(pane); if (term) placeAtPicker(pane, term, st.el);
+    var selEl = st.el.querySelector('.dk-at-item.sel'); if (selEl && selEl.scrollIntoView) try { selEl.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+  }
+  function openAtPicker(pane) {
+    if (pane._atp) return;
+    var term = paneTerm(pane); if (!term) return;
+    var el = g.document.createElement('div'); el.className = 'dk-at-picker';
+    g.document.body.appendChild(el);
+    var st = { el: el, files: [], matches: [], query: '', sel: 0, loading: true };
+    pane._atp = st;
+    el.addEventListener('mousedown', function (e) {
+      var it = e.target.closest && e.target.closest('[data-at-i]');
+      if (it) { e.preventDefault(); st.sel = parseInt(it.getAttribute('data-at-i'), 10) || 0; selectAt(pane); }
+    });
+    st.outside = function (e) { if (st.el && !st.el.contains(e.target)) closeAtPicker(pane); };
+    setTimeout(function () { try { g.document.addEventListener('mousedown', st.outside, true); } catch (e) {} }, 0);
+    st.onResize = function () { var t = paneTerm(pane); if (t && pane._atp) placeAtPicker(pane, t, st.el); };   // pixel-perfect en cualquier resize
+    try { g.addEventListener('resize', st.onResize); } catch (e) {}
+    renderAtList(pane);
+    if (api && api.listFiles) {
+      api.listFiles(pane.dataset.cwd || '').then(function (r) {
+        if (!pane._atp) return;
+        st.files = (r && r.ok && r.files) ? r.files : [];
+        st.loading = false; filterAt(pane); renderAtList(pane);
+      }).catch(function () { if (pane._atp) { st.loading = false; renderAtList(pane); } });
+    } else { st.loading = false; }
+  }
+  function closeAtPicker(pane) {
+    var st = pane._atp; if (!st) return;
+    try { if (st.outside) g.document.removeEventListener('mousedown', st.outside, true); } catch (e) {}
+    try { if (st.onResize) g.removeEventListener('resize', st.onResize); } catch (e) {}
+    try { if (st.el && st.el.parentNode) st.el.parentNode.removeChild(st.el); } catch (e) {}
+    pane._atp = null;
+  }
+  function selectAt(pane) {
+    var st = pane._atp; if (!st) return;
+    var tid = pane.dataset.tid, pick = st.matches[st.sel], q = st.query;
+    closeAtPicker(pane);
+    if (tid && api && api.term && api.term.write) {
+      if (pick) api.term.write(tid, '@' + pick + ' ');     // ref confirmada (un burst → claude no abre su picker inline)
+      else if (q) api.term.write(tid, '@' + q);            // sin match → fallback al @ nativo de claude
+    }
+    try { var t = paneTerm(pane); if (t) t.focus(); } catch (e) {}
+  }
+  function atKey(pane, ev) {
+    var st = pane._atp; if (!st) return;
+    var k = ev.key;
+    if (k === 'Escape') { closeAtPicker(pane); return; }
+    if (k === 'Enter' || k === 'Tab') { selectAt(pane); return; }
+    if (k === 'ArrowDown') { st.sel = Math.min(st.sel + 1, Math.max(0, st.matches.length - 1)); renderAtList(pane); return; }
+    if (k === 'ArrowUp') { st.sel = Math.max(st.sel - 1, 0); renderAtList(pane); return; }
+    if (k === 'Backspace') { if (st.query.length) { st.query = st.query.slice(0, -1); filterAt(pane); renderAtList(pane); } else { closeAtPicker(pane); } return; }
+    if (k === ' ') { selectAt(pane); return; }                 // espacio confirma (como claude)
+    if (k && k.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { st.query += k; filterAt(pane); renderAtList(pane); return; }
   }
 
   /* ── copiar / pegar / seleccionar (clipboard vía IPC; navigator.clipboard está bloqueado por la CSP) ── */
@@ -756,18 +899,33 @@
     // CTRL+ESPACIO → otra terminal · Ctrl+C/Ctrl+Shift+C copiar (preservando SIGINT) · Ctrl+V/Ctrl+Shift+V pegar
     try {
       term.attachCustomKeyEventHandler(function (ev) {
-        if (ev.type !== 'keydown') return true;
-        // Shift+Enter → SALTO DE LÍNEA en la TUI de claude (no enviar el prompt). xterm.js no distingue
-        // Shift+Enter de Enter (manda \r = enviar), por eso hay que emularlo: mandamos Meta+Return (ESC CR),
-        // EXACTAMENTE lo que /terminal-setup de Claude Code configura en VS Code (shift+enter → "\r")
-        // y lo que mandan WezTerm/Ghostty/Kitty/Warp/Windows Terminal de fábrica. Scopeado a paneles claude:
-        // en un shell, \r tiene que seguir siendo "ejecutar" (mandar ESC+CR borraría el comando tipeado).
-        if ((ev.code === 'Enter' || ev.code === 'NumpadEnter') && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.isComposing && pane.dataset.kind === 'claude') {
-          var ptid = pane.dataset.tid;
-          if (ptid && api.term && api.term.write) api.term.write(ptid, '\x1b\r');
-          return false;
+        // @ PICKER flotante (solo claude): si está abierto, las teclas van al picker (no a claude); el '@'
+        // abre el picker y NO se le manda a claude (así su picker inline no corre la pantalla). Suprime en
+        // TODOS los tipos de evento (keydown/keypress) para que xterm no cuele el caracter por keypress.
+        if (pane.dataset.kind === 'claude') {
+          if (pane._atp) { if (ev.type === 'keydown') atKey(pane, ev); return false; }
+          if (ev.key === '@' && !ev.metaKey) { if (ev.type === 'keydown') openAtPicker(pane); return false; }
         }
+        // Shift+Enter en claude -> SALTO DE LINEA (no enviar el prompt). xterm.js no distingue Shift+Enter
+        // de Enter, asi que se emula. DOS claves para que ande BIEN:
+        //  1) suprimir el evento en TODOS sus tipos (keydown/keypress/keyup): si solo gateamos keydown,
+        //     xterm igual manda '\r' por la via 'keypress' (charCode 13) -> claude SUBMITEA igual (era el bug).
+        //  2) escribir '\n' (un byte) en vez de ESC+CR: claude lo toma como salto de linea SIN el 'escape
+        //     timeout' que metia lag y a veces se leia como ESC (cancelar) + CR (enviar).
+        // Scopeado a paneles claude: en un shell, Enter sigue ejecutando (mandar esto borraria lo tipeado).
+        if ((ev.code === 'Enter' || ev.code === 'NumpadEnter') && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.isComposing && pane.dataset.kind === 'claude') {
+          if (ev.type === 'keydown') {
+            var ptid = pane.dataset.tid;
+            if (ptid && api.term && api.term.write) api.term.write(ptid, '\n');
+          }
+          return false;   // keydown + keypress + keyup -> xterm NUNCA manda '\r' por Shift+Enter
+        }
+        if (ev.type !== 'keydown') return true;
         if (ev.ctrlKey && ev.code === 'Space') { if (quickTermHook) quickTermHook(); return false; }
+        // Ctrl+W: cierra ESTA terminal (la enfocada, donde está el cursor). Pisa el "borrar palabra" del
+        // shell a propósito (pedido del usuario); si es una terminal VIVA, closePane pide confirmación.
+        // Diferido un tick: closePane puede disponer el xterm, y estamos DENTRO de su propio keydown.
+        if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey && ev.code === 'KeyW') { setTimeout(function () { closePane(pane); }, 0); return false; }
         if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') { termCopy(term); return false; }              // copiar siempre
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.code === 'KeyC') {
           if (termCopy(term)) return false;   // había selección → copió + limpió → no mandar nada
@@ -789,6 +947,22 @@
           var text = new TextDecoder('utf-8').decode(bytes);
           if (text && api && api.action) api.action('copyText', { text: text }).catch(function () {});
         } catch (e) {}
+        return true;
+      });
+    } catch (e) {}
+    // cwd EN VIVO (cd tracking): el shell puede emitir OSC 7 (file://host/path) u OSC 9;9 (path) en cada
+    // prompt → actualizamos pane.dataset.cwd para que "clonar la terminal activa" (Ctrl+Espacio) y las
+    // rutas clickeables tomen el directorio REAL. Si el shell no lo emite, queda el cwd de arranque (no rompe nada).
+    try {
+      term.parser.registerOscHandler(7, function (data) {
+        try {
+          var m = String(data || '').match(/^file:\/\/[^/]*(\/.*)$/);
+          if (m) { var pth = decodeURIComponent(m[1]).replace(/^\/([A-Za-z]:)/, '$1'); if (/^[A-Za-z]:/.test(pth)) pth = pth.replace(/\//g, '\\'); if (pth) updatePaneCwd(pane, pth); }
+        } catch (e) {}
+        return true;
+      });
+      term.parser.registerOscHandler(9, function (data) {
+        try { var s = String(data || ''); if (s.slice(0, 2) === '9;') { var pth = s.slice(2).trim(); if (pth) updatePaneCwd(pane, pth); } } catch (e) {}
         return true;
       });
     } catch (e) {}
@@ -1146,6 +1320,6 @@
     resumeSession: resumeSession, setBoardChecker: setBoardChecker, setCloseConfirmer: setCloseConfirmer,
     setNlEnabled: setNlEnabled, insertIntoFocused: insertIntoFocused,
     setEditorOpener: setEditorOpener, setQuickTermHook: setQuickTermHook,
-    openFilePanel: openFilePanel
+    openFilePanel: openFilePanel, activeTermCwd: activeTermCwd
   };
 })(window);
