@@ -714,7 +714,7 @@
     pane._atp = st;
     el.addEventListener('mousedown', function (e) {
       var it = e.target.closest && e.target.closest('[data-at-i]');
-      if (it) { e.preventDefault(); st.sel = parseInt(it.getAttribute('data-at-i'), 10) || 0; selectAt(pane); }
+      if (it) { e.preventDefault(); st.sel = parseInt(it.getAttribute('data-at-i'), 10) || 0; selectAt(pane, false); }
     });
     st.outside = function (e) { if (st.el && !st.el.contains(e.target)) closeAtPicker(pane); };
     setTimeout(function () { try { g.document.addEventListener('mousedown', st.outside, true); } catch (e) {} }, 0);
@@ -729,32 +729,45 @@
       }).catch(function () { if (pane._atp) { st.loading = false; renderAtList(pane); } });
     } else { st.loading = false; }
   }
+  // cierre DIRECTO (mouse / outside-click): libera pane._atp ya (no hay secuencia de teclas que tragar)
   function closeAtPicker(pane) {
     var st = pane._atp; if (!st) return;
+    try { if (st.endTimer) { clearTimeout(st.endTimer); st.endTimer = null; } } catch (e) {}
     try { if (st.outside) g.document.removeEventListener('mousedown', st.outside, true); } catch (e) {}
     try { if (st.onResize) g.removeEventListener('resize', st.onResize); } catch (e) {}
     try { if (st.el && st.el.parentNode) st.el.parentNode.removeChild(st.el); } catch (e) {}
     pane._atp = null;
   }
-  function selectAt(pane) {
-    var st = pane._atp; if (!st) return;
+  // cierre por TECLA: oculta el overlay YA pero deja pane._atp vivo (st.ending) hasta el keyup → el keypress
+  // y el keyup de ESA tecla quedan suprimidos. CLAVE para que Enter (elegir) NO envíe el prompt: si cerrara
+  // sincrónico, el keypress del Enter colaría un \r a claude (= submit). El 2º Enter (con el picker ya cerrado)
+  // sí envía. La red de seguridad cierra solo si por algún motivo no llega el keyup.
+  function endAtPicker(pane) {
+    var st = pane._atp; if (!st || st.ending) return;
+    st.ending = true;
+    try { if (st.outside) g.document.removeEventListener('mousedown', st.outside, true); } catch (e) {}
+    try { if (st.onResize) g.removeEventListener('resize', st.onResize); } catch (e) {}
+    try { if (st.el && st.el.parentNode) st.el.parentNode.removeChild(st.el); } catch (e) {}
+    st.endTimer = setTimeout(function () { closeAtPicker(pane); }, 250);
+  }
+  function selectAt(pane, viaKey) {
+    var st = pane._atp; if (!st || st.ending) return;
     var tid = pane.dataset.tid, pick = st.matches[st.sel], q = st.query;
-    closeAtPicker(pane);
+    if (viaKey) endAtPicker(pane); else closeAtPicker(pane);
     if (tid && api && api.term && api.term.write) {
-      if (pick) api.term.write(tid, '@' + pick + ' ');     // ref confirmada (un burst → claude no abre su picker inline)
+      if (pick) api.term.write(tid, '@' + pick + ' ');     // INSERTA @ruta + espacio (sin \r): NO envía el prompt
       else if (q) api.term.write(tid, '@' + q);            // sin match → fallback al @ nativo de claude
     }
     try { var t = paneTerm(pane); if (t) t.focus(); } catch (e) {}
   }
   function atKey(pane, ev) {
-    var st = pane._atp; if (!st) return;
+    var st = pane._atp; if (!st || st.ending) return;
     var k = ev.key;
-    if (k === 'Escape') { closeAtPicker(pane); return; }
-    if (k === 'Enter' || k === 'Tab') { selectAt(pane); return; }
+    if (k === 'Escape') { endAtPicker(pane); return; }
+    if (k === 'Enter' || k === 'Tab') { selectAt(pane, true); return; }       // elige e INSERTA (no envía); el keyup cierra
     if (k === 'ArrowDown') { st.sel = Math.min(st.sel + 1, Math.max(0, st.matches.length - 1)); renderAtList(pane); return; }
     if (k === 'ArrowUp') { st.sel = Math.max(st.sel - 1, 0); renderAtList(pane); return; }
-    if (k === 'Backspace') { if (st.query.length) { st.query = st.query.slice(0, -1); filterAt(pane); renderAtList(pane); } else { closeAtPicker(pane); } return; }
-    if (k === ' ') { selectAt(pane); return; }                 // espacio confirma (como claude)
+    if (k === 'Backspace') { if (st.query.length) { st.query = st.query.slice(0, -1); filterAt(pane); renderAtList(pane); } else { endAtPicker(pane); } return; }
     if (k && k.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { st.query += k; filterAt(pane); renderAtList(pane); return; }
   }
 
@@ -903,7 +916,12 @@
         // abre el picker y NO se le manda a claude (así su picker inline no corre la pantalla). Suprime en
         // TODOS los tipos de evento (keydown/keypress) para que xterm no cuele el caracter por keypress.
         if (pane.dataset.kind === 'claude') {
-          if (pane._atp) { if (ev.type === 'keydown') atKey(pane, ev); return false; }
+          if (pane._atp) {
+            // cerrándose por tecla: tragá keypress/keyup de esa tecla (Enter NO debe enviar) → libera en el keyup
+            if (pane._atp.ending) { if (ev.type === 'keyup') closeAtPicker(pane); return false; }
+            if (ev.type === 'keydown') atKey(pane, ev);
+            return false;
+          }
           if (ev.key === '@' && !ev.metaKey) { if (ev.type === 'keydown') openAtPicker(pane); return false; }
         }
         // Shift+Enter en claude -> SALTO DE LINEA (no enviar el prompt). xterm.js no distingue Shift+Enter
@@ -926,6 +944,11 @@
         // shell a propósito (pedido del usuario); si es una terminal VIVA, closePane pide confirmación.
         // Diferido un tick: closePane puede disponer el xterm, y estamos DENTRO de su propio keydown.
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey && ev.code === 'KeyW') { setTimeout(function () { closePane(pane); }, 0); return false; }
+        // Ctrl+Z en claude → DESHACER: claude bindea su undo a ctrl+_ (manda \x1f); le mandamos eso. xterm/shell
+        // por defecto mandaría \x1a (suspend, inútil en la PTY embebida). Scopeado a claude (en shell, dejar pasar).
+        if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey && ev.code === 'KeyZ' && pane.dataset.kind === 'claude') {
+          var ztid = pane.dataset.tid; if (ztid && api.term && api.term.write) api.term.write(ztid, '\x1f'); return false;
+        }
         if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') { termCopy(term); return false; }              // copiar siempre
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.code === 'KeyC') {
           if (termCopy(term)) return false;   // había selección → copió + limpió → no mandar nada

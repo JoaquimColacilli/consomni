@@ -892,6 +892,36 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.7.4 — Ctrl+Z deshace en claude + el selector de @ ya no envía al elegir
+> Dos fixes sobre la 1.7.3 (feedback del usuario). Bump **1.7.3 → 1.7.4**. Aditivo, respeta las 3 Hard Rules.
+> Verificado: undo por test PTY headless (escribir → Ctrl+U → `\x1f` → reaparece), no-submit del @ por screenshot.
+
+### 1) El @ ya NO envía el mensaje al elegir (bug de la 1.7.3)
+- **Causa (misma clase que el bug viejo de Shift+Enter):** al elegir con **Enter**, el `keydown` cerraba el
+  picker (sincrónico, `pane._atp = null`), y después el **`keypress` del mismo Enter** llegaba con el picker
+  YA cerrado → no lo enrutábamos → xterm colaba un `\r` → claude **enviaba** el prompt.
+- **Fix** (`terminals-ui.js`): el cierre por TECLA ahora es **diferido hasta el keyup** (`endAtPicker`): oculta
+  el overlay al toque pero deja `pane._atp` vivo con `st.ending=true`; el branch del handler, mientras
+  `ending`, **traga keypress y keyup** de esa tecla (`return false`) y recién en el **keyup** libera
+  (`closeAtPicker`). Así el `keypress` del Enter no cuela el `\r`. El **2º** Enter (picker ya cerrado) sí envía.
+  Red de seguridad: `setTimeout` 250ms por si no llega el keyup. El cierre por mouse/outside-click sigue
+  directo (`selectAt(pane,false)` → no hay secuencia de teclas que tragar). Se quitó el "espacio confirma"
+  (ahora el espacio filtra). `selectAt` sigue mandando `@ruta ` (ref + espacio, **sin `\r`** → no envía).
+
+### 2) Ctrl+Z = DESHACER en claude (sí se puede)
+- **Ground truth del binario:** claude bindea su undo a **`ctrl+_`** (`m0("chat:undo","Chat","ctrl+_")`; también
+  `ctrl+-`, `ctrl+shift+-`, `ctrl+shift+_`). `ctrl+_` manda el byte **`\x1f`** (US). Verificado por PTY headless
+  (no usa kitty protocol → el `\x1f` legacy funciona): escribí texto, lo borré con Ctrl+U (claude mostró "Ctrl+Y
+  to paste deleted text"), mandé `\x1f` y el texto **reapareció**. Exactamente el "escribís, borrás, ctrl+z y
+  vuelve" que pidió Franco.
+- **Fix** (`terminals-ui.js`, en el `attachCustomKeyEventHandler`): `Ctrl+Z` en un panel **claude** →
+  `api.term.write(tid, '\x1f')` + `return false`. Scopeado a claude (en un shell, `Ctrl+Z` = `\x1a` suspend
+  sigue pasando). xterm por defecto mandaría `\x1a` (suspend, inútil en la PTY embebida); lo reemplazamos por el
+  undo de claude. (Corrección a la nota previa de la 1.7.3: el undo SÍ es posible — claude lo tiene, sólo había
+  que mandar la secuencia correcta.)
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

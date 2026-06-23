@@ -497,6 +497,10 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.7.4', date: '22 jun 2026', title: 'Ctrl+Z deshace en claude · el selector de @ ya no envía al elegir', items: [
+      'Ctrl+Z en una terminal con claude ahora DESHACE (undo) — escribís, borrás y con Ctrl+Z vuelve a aparecer. Se mapea al undo nativo de claude.',
+      'Al elegir un archivo del selector de @ con Enter, ahora SOLO se inserta la referencia y se cierra el selector; ya no se enviaba el mensaje de una. Recién el segundo Enter lo envía.',
+    ] },
     { v: '1.7.3', date: '22 jun 2026', title: 'Picker flotante de @, Shift+Enter arreglado, Ctrl+Espacio clona el directorio, Ctrl+W cierra', items: [
       'Al escribir @ en una terminal con claude ahora aparece un selector de archivos FLOTANTE (estilo Warp), pegado al input, en vez del listado inline de claude que te corría toda la pantalla. Escribís para filtrar, Enter o click para elegir, y se inserta la referencia al archivo. Esc cancela.',
       'Shift+Enter en claude ahora hace el salto de línea bien: antes (1.7.2) a veces enviaba el mensaje igual y andaba con lag. Quedó instantáneo y confiable.',
