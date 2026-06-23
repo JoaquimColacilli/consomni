@@ -497,6 +497,15 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.8.0', date: '23 jun 2026', title: 'Varias terminales en paralelo, cambiar de carpeta sin cd, arranque con la PC y más', items: [
+      'Barra de sesiones: todas tus terminales/sesiones vivas aparecen como chips arriba del dock. Cambiás entre ellas con un click y podés minimizar una para ocultarla SIN matar su proceso (sigue corriendo en background) y traerla de vuelta cuando quieras.',
+      'Atajos en el inicio: abrís una terminal directo en un proyecto (o desde el botón "proyecto" del dock), sin ir a buscarlo, abrirla y favearla a mano cada vez.',
+      'Cambiar de directorio sin tipear cd: el botón de carpeta de una terminal te deja elegir el directorio de una lista de tus proyectos (o el selector nativo) y Consomni manda el cd por vos.',
+      'Arranque con la PC: Consomni puede abrirse sola al prender la computadora. Lo activás en Settings → Sistema.',
+      'Menciones con @: ahora se ve lo que escribís en gris pegado al cursor mientras se abre el panel, y si cerrás con Esc el @texto queda en el input (antes se perdía).',
+      'Title bar más amena: la barra de la ventana (minimizar/maximizar/cerrar) combina con la estética de la app y sigue el tema claro/oscuro.',
+      'Tour de novedades: la primera vez tras actualizar te mostramos lo nuevo con un recorrido guiado. Lo podés volver a ver desde la paleta (Ctrl/Cmd+K) o el panel de ayuda (?).',
+    ] },
     { v: '1.7.4', date: '22 jun 2026', title: 'Ctrl+Z deshace en claude · el selector de @ ya no envía al elegir', items: [
       'Ctrl+Z en una terminal con claude ahora DESHACE (undo) — escribís, borrás y con Ctrl+Z vuelve a aparecer. Se mapea al undo nativo de claude.',
       'Al elegir un archivo del selector de @ con Enter, ahora SOLO se inserta la referencia y se cierra el selector; ya no se enviaba el mensaje de una. Recién el segundo Enter lo envía.',
@@ -663,7 +672,7 @@
      Resalta UN elemento con un recorte EXACTO (box-shadow gigante que opaca el
      resto) y una tarjeta al lado, paso a paso, con "saltar". Responsive: reencuadra
      en resize y en cada re-render. Explica el tablero de Planes (idea de Facundo). */
-  var TOUR = { active: false, steps: [], idx: 0, doneKey: 'consomni.tour.plans', onDone: null };
+  var TOUR = { active: false, steps: [], idx: 0, doneKey: 'consomni.tour.plans', onDone: null, onEnd: null };
   var tourEls = { host: null, spot: null, pop: null };
 
   function openPlansForTour() {
@@ -703,10 +712,11 @@
     if (done || TOUR.active) return;
     startPlanTour();
   }
-  function startTour(steps, doneKey, onDone) {
+  function startTour(steps, doneKey, onDone, onEnd) {
     if (!steps || !steps.length) return;
     TOUR.steps = steps; TOUR.idx = 0; TOUR.active = true; TOUR.doneKey = doneKey || 'consomni.tour.plans';
     TOUR.onDone = (typeof onDone === 'function') ? onDone : null;
+    TOUR.onEnd = (typeof onEnd === 'function') ? onEnd : null;   // se llama SIEMPRE al cerrar (terminar/saltar/Esc) → cleanup
     window.addEventListener('resize', positionTour);
     showTourStep();
   }
@@ -719,10 +729,18 @@
       try { localStorage.setItem(TOUR.doneKey || 'consomni.tour.plans', '1'); } catch (e) {}
       if (TOUR.onDone) { try { TOUR.onDone(); } catch (e2) {} }   // persistencia confiable adicional (ej config.json)
     }
-    TOUR.onDone = null;
+    if (TOUR.onEnd) { try { TOUR.onEnd(); } catch (e3) {} }       // cleanup SIEMPRE (terminar/saltar/Esc): ej cerrar la demo del tour
+    TOUR.onDone = null; TOUR.onEnd = null;
   }
   function removeTourDOM() { var h = document.getElementById('tour'); if (h) h.remove(); tourEls = { host: null, spot: null, pop: null }; }
-  function tourTarget(step) { if (!step.target) return null; return document.querySelector(step.target) || (step.alt ? document.querySelector(step.alt) : null); }
+  function tourTarget(step) {
+    if (!step.target) return null;
+    var el = document.querySelector(step.target) || (step.alt ? document.querySelector(step.alt) : null);
+    if (!el) return null;
+    var r = el.getBoundingClientRect();
+    if (r.width < 2 || r.height < 2) return null;   // montado pero invisible (ej barra vacía con [hidden]) → tarjeta centrada
+    return el;
+  }
   function showTourStep() {
     var step = TOUR.steps[TOUR.idx]; if (!step) { endTour(true); return; }
     if (step.before) { try { step.before(); } catch (e) {} }
@@ -847,6 +865,28 @@
       return (b.lastActivity || 0) - (a.lastActivity || 0);    // luego, más recientes
     });
     return list.slice(0, Math.max(activeN, AUTO_OPEN_MAX)).map(function (s) { return { sid: s.id, name: s.name, projName: s.project }; });
+  }
+  // lista de proyectos para los shortcuts del inicio (F5): nombre + cwd, con fav/kept/activos primero.
+  function homeProjectsList() {
+    var list = (state.snapshot && state.snapshot.sessions) || [], byKey = {};
+    for (var i = 0; i < list.length; i++) {
+      var s = list[i], k = projKey(s);
+      if (!byKey[k]) byKey[k] = { id: k, name: s.project || '', cwd: s.cwd || '', fav: false, active: false, last: 0 };
+      var e = byKey[k];
+      if (!e.cwd && s.cwd) e.cwd = s.cwd;
+      if (!e.name && s.project) e.name = s.project;
+      if (s.fav) e.fav = true;
+      if (s.state !== 'closed') e.active = true;
+      if ((s.lastActivity || 0) > e.last) e.last = s.lastActivity || 0;
+    }
+    var arr = [];
+    for (var key in byKey) { if (byKey[key].cwd) { byKey[key].kept = isKept(key); arr.push(byKey[key]); } }
+    arr.sort(function (a, b) {
+      var ar = (a.fav || a.kept) ? 0 : 1, br = (b.fav || b.kept) ? 0 : 1; if (ar !== br) return ar - br;
+      var aa = a.active ? 0 : 1, ba = b.active ? 0 : 1; if (aa !== ba) return aa - ba;
+      return b.last - a.last;
+    });
+    return arr.slice(0, 12).map(function (p) { return { id: p.id, name: p.name || baseName(p.cwd), cwd: p.cwd, fav: p.fav }; });
   }
   // ¿el proyecto tiene cards (sesiones) en el board? (para mostrar el board en vez del placeholder al cerrar terminales)
   function projHasCards(projId) {
@@ -1484,6 +1524,41 @@
     }).catch(function () {});
   }
 
+  /* ════════ TOUR DE NOVEDADES v1.8.0 (reusa el motor de spotlight) ════════
+     Headline F6 (barra de sesiones) + F5/F4/F1 + cierre liviano F3. Abre una terminal DEMO efímera
+     para que F6/F4 sean highlights reales; se limpia en cualquier cierre (onEnd). */
+  function openWhatsNewStage() { var T = window.ConsomniTerms; if (T && T.openTourDemo) { try { T.openTourDemo(); } catch (e) {} } }
+  function whatsNewTourSteps() {
+    return [
+      { center: true, icon: 'sparkles', title: 'Novedades de la v1.8.0', before: openWhatsNewStage,
+        body: 'Salieron varias cosas nuevas para laburar con tus terminales. Te las muestro en 30 segundos — podés <b>saltar</b> cuando quieras.' },
+      { target: '.dk-sessions', place: 'bottom', icon: 'term', title: 'Varias sesiones a la vez', before: openWhatsNewStage,
+        body: 'Cada terminal/sesión viva aparece acá como un <b>chip</b>. Tené <b>varias en paralelo</b>, cambiá entre ellas con un click, y <b>minimizá</b> una (botón del panel) para ocultarla <b>sin matar su proceso</b> — sigue corriendo en background (el puntito ámbar lo confirma) y la traés de vuelta cuando quieras.' },
+      { target: '.dk-new-proj', place: 'bottom', icon: 'folder', title: 'Abrí una terminal en un proyecto', before: openWhatsNewStage,
+        body: 'Desde acá (y desde los atajos del <b>inicio</b>) abrís una terminal <b>directo en un proyecto</b> — sin ir a buscarlo, abrirla y favearla a mano cada vez.' },
+      { target: '.dk-pane-cd', place: 'bottom', icon: 'folder', title: 'Cambiá de carpeta sin tipear cd', before: openWhatsNewStage,
+        body: 'El botón de carpeta de una terminal te deja <b>cambiar el directorio</b> eligiendo de una lista de tus proyectos (o el selector nativo). Consomni le manda el <code>cd</code> por vos.' },
+      { target: '.dk-new-claude', place: 'bottom', icon: 'dispatch', title: 'Menciones con @', before: openWhatsNewStage,
+        body: 'En una terminal de <b>Claude</b>, al tipear <b>@</b> se abre el panel de archivos y tu texto se ve en <b>ghost</b> a la vez. <b>ESC</b> cierra el panel <b>conservando</b> lo que escribiste.' },
+      { center: true, icon: 'eye', title: 'Y arranca con la PC', before: openWhatsNewStage,
+        body: 'Si querés, Consomni puede <b>abrirse sola al prender la compu</b>. Lo activás en <b>Settings → Sistema</b>. ¡Eso es todo!' }
+    ];
+  }
+  function markWhatsNewSeen() { state.seenWhatsNew18 = true; if (api && api.saveConfig) api.saveConfig({ seenWhatsNew18: true }); }
+  function cleanupWhatsNewTour() { var T = window.ConsomniTerms; if (T && T.closeTourDemo) { try { T.closeTourDemo(); } catch (e) {} } }
+  function startWhatsNewTour() { startTour(whatsNewTourSteps(), 'consomni.tour.whatsnew18', markWhatsNewSeen, cleanupWhatsNewTour); }
+  // Auto-arranque tras actualizar: novedades v1.8.0 primero; si ya las vio, cae al tour de multi-perfil.
+  function maybeAutostartTours() {
+    if (TOUR.active || anyOverlayOpen() || document.querySelector('.onb-scrim')) return;
+    if (!api || !api.getConfig) return;
+    api.getConfig().then(function (cfg) {
+      if (!cfg || TOUR.active || anyOverlayOpen() || document.querySelector('.onb-scrim')) return;
+      if (!cfg.seenWhatsNew18) { startWhatsNewTour(); return; }
+      state.seenProfileTour = cfg.seenProfileTour;
+      if (!cfg.seenProfileTour) startProfileTour();
+    }).catch(function () {});
+  }
+
   /* ════════ FILTROS / ORDEN / DENSIDAD / PROYECTO ════════ */
   function setActiveProject(p) {
     state.activeProject = p; state.focusSid = null; state.plansOpen = false; state.libraryOpen = false;
@@ -1512,7 +1587,10 @@
   function setDensity(d) { state.density = d; render(); }
   function toggleDensity() { state.density = state.density === 'comodo' ? 'compacto' : 'comodo'; render(); }
   // modo claro / oscuro (default oscuro). Sólo togglea la clase body.light (el CSS hace el resto) + persiste.
-  function applyTheme() { document.body.classList.toggle('light', state.theme === 'light'); }
+  function applyTheme() {
+    document.body.classList.toggle('light', state.theme === 'light');
+    if (api && api.setTitleBarOverlay) api.setTitleBarOverlay(state.theme);   // recolorea los botones nativos de la title bar
+  }
   function toggleTheme() {
     state.theme = state.theme === 'light' ? 'dark' : 'light';
     applyTheme();
@@ -1722,6 +1800,7 @@
     rows.push({ group: 'ACCIONES', ic: 'plus', tx: 'Nuevo item en la biblioteca', sub: 'prompt / skill / rule', keys: [], act: 'libnew' });
     rows.push({ group: 'ACCIONES', ic: 'eye', tx: 'Tutorial de Biblioteca', sub: 'tour paso a paso', keys: [], act: 'libtour' });
     rows.push({ group: 'ACCIONES', ic: 'gear', tx: 'Abrir settings', sub: '', keys: [], act: 'settings' });
+    rows.push({ group: 'ACCIONES', ic: 'sparkles', tx: 'Novedades v1.8.0', sub: 'tour de lo nuevo', keys: [], act: 'whatsnew' });
     rows.push({ group: 'ACCIONES', ic: 'eye', tx: 'Tutorial de perfiles', sub: 'multi-perfil de Claude · tour', keys: [], act: 'proftour' });
     return rows;
   }
@@ -1776,6 +1855,7 @@
     else if (row.act === 'libnew') { closePalette(); openLibrary(); openLibEdit(null); }
     else if (row.act === 'libtour') { closePalette(); openLibrary(); startLibraryTour(); }
     else if (row.act === 'proftour') { closePalette(); startProfileTour(); }
+    else if (row.act === 'whatsnew') { closePalette(); startWhatsNewTour(); }
     else if (row.act && row.act.indexOf('a:') === 0) { closePalette(); dispatchAction(row.act.slice(2), state.focusSid); }
     else closePalette();
   }
@@ -1793,7 +1873,9 @@
   ];
   function openHelp() {
     var rows = HELP.map(function (h) { return '<div class="help-row"><kbd class="kbd">' + h[0] + '</kbd><span class="lbl">' + h[1] + '</span></div>'; }).join('');
-    setOverlay('<div class="help-scrim" data-act="close-help"><div class="help-card"><h3>ATAJOS DE TECLADO</h3><div class="help-grid">' + rows + '</div></div></div>');
+    var foot = '<div style="display:flex;justify-content:center;margin-top:14px;padding-top:13px;border-top:1px solid var(--border)">' +
+      '<button class="btn btn--sm" data-act="help-whatsnew">' + C.svg('sparkles', 12, 1.8) + ' Novedades v1.8.0</button></div>';
+    setOverlay('<div class="help-scrim" data-act="close-help"><div class="help-card"><h3>ATAJOS DE TECLADO</h3><div class="help-grid">' + rows + '</div>' + foot + '</div></div>');
     state.helpOpen = true;
   }
 
@@ -1856,6 +1938,10 @@
           '<button class="btn btn--sm ' + (hk ? 'btn--red' : 'btn--green') + '" id="setHooksBtn" data-hk="' + (hk ? '1' : '0') + '">' + (hk ? 'desinstalar' : 'instalar') + ' hooks</button></div>' +
         '<div style="font-size:10px;color:var(--text-4);margin-top:4px">backup automático en ~/.consomni/backups · merge no-destructivo · cero API de Anthropic</div>' +
       '</div>' +
+      '<div class="set-sec"><div class="lbl">SISTEMA</div>' +
+        '<div class="set-row"><span class="k">abrir Consomni al iniciar la PC</span>' + seg2('autoStart', cfg.autoStart ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
+        '<div style="font-size:10px;color:var(--text-4);margin-top:4px">auto-inicio nativo de Windows (registro Run) · sin servicios ni tareas programadas</div>' +
+      '</div>' +
       '<div class="set-sec"><div class="lbl">ACTUALIZACIONES</div>' +
         '<div class="set-row"><span class="k">buscar al iniciar</span>' + seg2('checkUpdates', cfg.checkUpdates !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
         '<div class="set-row"><span class="k" id="setUpdMsg">comprobar versión más reciente</span>' +
@@ -1878,6 +1964,16 @@
     Array.prototype.forEach.call(card.querySelectorAll('[data-set]'), function (el) {
       el.addEventListener('click', function () {
         var key = el.getAttribute('data-set'), val = el.getAttribute('data-val');
+        // auto-inicio: además de persistir, hay que aplicarlo al SO → IPC dedicado (setAutoStart guarda config también)
+        if (key === 'autoStart' && api.setAutoStart) {
+          api.setAutoStart(val === 'on').then(function () {
+            return api.getConfig().then(function (c) {
+              if (api.getHooksStatus) return api.getHooksStatus().then(function (h) { renderSettings(c, h); });
+              renderSettings(c, {});
+            });
+          });
+          return;
+        }
         var patch = {};
         if (key === 'sounds' || key === 'checkUpdates') patch[key] = (val === 'on'); else patch[key] = val;
         if (key === 'quickTermKind') state.quickTermKind = val;   // aplica sin reiniciar
@@ -1996,6 +2092,7 @@
       if (act === 'close-detail') { closeDetail(); return; }
       if (act === 'close-palette') { if (t.classList.contains('cmd-scrim')) closePalette(); return; }
       if (act === 'close-help') { if (t.classList.contains('help-scrim')) setOverlay(''); return; }
+      if (act === 'help-whatsnew') { e.stopPropagation(); setOverlay(''); state.helpOpen = false; startWhatsNewTour(); return; }
       if (act === 'close-settings') { if (t.classList.contains('set-scrim') || actEl.tagName === 'BUTTON') closeSettings(); return; }
       if (act === 'profile-tour') { e.stopPropagation(); startProfileTour(); return; }
       if (act === 'cfm-cancel') { if (t.classList.contains('cfm-scrim') || actEl.tagName === 'BUTTON') { pendingClose = null; setOverlay(''); } return; }
@@ -2103,17 +2200,18 @@
     var meta = e.metaKey || e.ctrlKey;
     var T = window.ConsomniTerms;
 
-    // Si el foco está DENTRO del dock (xterm), las teclas van a la terminal; sólo Esc reacciona.
-    var inDock = document.activeElement && document.activeElement.closest && document.activeElement.closest('#terminals');
-    if (inDock) {
-      if (e.key === 'Escape') { e.preventDefault(); if (T && T.isMaximized()) T.toggle(); else if (document.activeElement.blur) document.activeElement.blur(); }
-      return;
-    }
-    // tutorial activo: capturamos navegación (←/→/Enter/Esc) y bloqueamos el resto
+    // tutorial activo: la navegación del tour (←/→/Enter/Esc) GANA aunque el foco esté en una terminal
+    // (el tour de novedades abre una terminal demo enfocada). Va ANTES del guard de #terminals. Bloquea el resto.
     if (TOUR.active) {
       if (e.key === 'Escape') { e.preventDefault(); endTour(true); return; }
       if (e.key === 'Enter' || e.key === 'ArrowRight') { e.preventDefault(); tourNext(); return; }
       if (e.key === 'ArrowLeft') { e.preventDefault(); tourPrev(); return; }
+      return;
+    }
+    // Si el foco está DENTRO del dock (xterm), las teclas van a la terminal; sólo Esc reacciona.
+    var inDock = document.activeElement && document.activeElement.closest && document.activeElement.closest('#terminals');
+    if (inDock) {
+      if (e.key === 'Escape') { e.preventDefault(); if (T && T.isMaximized()) T.toggle(); else if (document.activeElement.blur) document.activeElement.blur(); }
       return;
     }
 
@@ -2248,12 +2346,12 @@
   }
   function setOnboarded() { try { localStorage.setItem('consomni.onboarded', '1'); } catch (e) {} }
   function maybeOnboard() {
-    if (!api || !api.getHooksStatus) { maybeAutostartProfileTour(); return; }
+    if (!api || !api.getHooksStatus) { maybeAutostartTours(); return; }
     var dismissed = false; try { dismissed = localStorage.getItem('consomni.onboarded') === '1'; } catch (e) {}
     api.getHooksStatus().then(function (st) {
       if (st && !st.installed && !dismissed) { showOnboarding(); return; }   // onboarding tiene prioridad este arranque
-      maybeAutostartProfileTour();   // sin onboarding → considerar el tutorial de multi-perfil (1 vez)
-    }).catch(function () { maybeAutostartProfileTour(); });
+      maybeAutostartTours();   // sin onboarding → novedades v1.8.0 (1 vez) → si ya las vio, multi-perfil
+    }).catch(function () { maybeAutostartTours(); });
   }
 
   /* ── responsive + colapso manual del sidebar ──
@@ -2297,6 +2395,8 @@
     });
     // el dock consulta esto: proyecto sin terminales pero CON cards → muestra el board, no el placeholder
     if (window.ConsomniTerms.setBoardChecker) window.ConsomniTerms.setBoardChecker(function (projId) { return projHasCards(projId); });
+    // shortcuts del inicio (F5): proyectos con su cwd para abrir terminal/claude directo
+    if (window.ConsomniTerms.setHomeProjects) window.ConsomniTerms.setHomeProjects(homeProjectsList);
     // el dock pregunta antes de cerrar una terminal viva (corta el proceso) → modal con "no volver a mostrar"
     if (window.ConsomniTerms.setCloseConfirmer) window.ConsomniTerms.setCloseConfirmer(confirmCloseTerminal);
     // SIEMPRE arrancar en "inicio" con las terminales que quedaron de la sesión anterior
@@ -2348,7 +2448,7 @@
     openPalette: openPalette, openDetail: openDetail, openHelp: openHelp, openSettings: openSettings,
     openPlans: openPlans, closePlans: closePlans,
     openLibrary: openLibrary, closeLibrary: closeLibrary, openLibEdit: openLibEdit, startLibraryTour: startLibraryTour,
-    startTutorial: startPlanTour, startProfileTour: startProfileTour, openNotifs: openNotifPanel, openNotifHistory: openNotifHistory, openChangelog: openChangelog, openChangelogAll: openChangelogAll,
+    startTutorial: startPlanTour, startProfileTour: startProfileTour, startWhatsNewTour: startWhatsNewTour, openNotifs: openNotifPanel, openNotifHistory: openNotifHistory, openChangelog: openChangelog, openChangelogAll: openChangelogAll,
     setActiveProject: setActiveProject, activateSearch: activateSearch,
     toggleDensity: toggleDensity, showOnboarding: showOnboarding,
     enterSplit: enterSplit, exitSplit: exitSplit, dispatchAction: dispatchAction,

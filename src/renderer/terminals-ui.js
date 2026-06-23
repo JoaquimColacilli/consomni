@@ -21,7 +21,7 @@
   'use strict';
   var C = g.Chrome, api = g.consomni, Terminal = g.Terminal, FitNS = g.FitAddon, WebLinksNS = g.WebLinksAddon;
 
-  var host = null, rootEl = null, poolEl = null, dropInd = null, countEl = null;
+  var host = null, rootEl = null, poolEl = null, dropInd = null, countEl = null, sessBarEl = null;
   var lastSnap = null;         // último snapshot (para el badge de diff del dock)
   var terms = new Map();       // ptyId -> { term, fit, pane, ro }
   var sessions = new Map();    // sid   -> pane
@@ -44,6 +44,7 @@
   var notifier = function () {}, actionHandler = function () {}, maxObserver = function () {}, boardChecker = null, closeConfirmer = null;
   var editorOpener = null;     // abre un cwd en el editor (lo inyecta app.js → api.action('ext',{cwd}))
   var quickTermHook = null;    // CTRL+ESPACIO dentro de un xterm → abre una terminal nueva (lo inyecta app.js)
+  var homeProjects = null;     // provider de proyectos para el inicio (lo inyecta app.js) → [{id,name,cwd,fav}]
   function isMaximized() { return !!host && host.classList.contains('maximized'); }
   function notifyMax() { try { maxObserver(isMaximized()); } catch (e) {} }
 
@@ -56,7 +57,7 @@
     if (persistTimer) clearTimeout(persistTimer);
     persistTimer = setTimeout(function () {
       try {
-        var list = allPanes().filter(inInicio).filter(function (p) { return p.dataset.kind !== 'file'; }).map(serializePane);
+        var list = allPanes().filter(inInicio).filter(function (p) { return p.dataset.kind !== 'file' && p.dataset.tourDemo !== '1'; }).map(serializePane);
         var rs = document.documentElement.style;
         if (api && api.term && api.term.saveDock) api.term.saveDock({ v: 2, max: isMaximized(), dh: rs.getPropertyValue('--dock-h') || '', panes: list });
       } catch (e) { /* noop */ }
@@ -69,6 +70,7 @@
     if (d.proj) o.proj = d.proj;
     if (d.projname) o.projname = d.projname;
     if (d.pinned === '1') o.pinned = 1;
+    if (d.min === '1') o.min = 1;   // F6: minimizada (sigue viva en la barra de sesiones)
     return o;
   }
   function buildPane(o) {
@@ -78,6 +80,7 @@
     if (o.proj) pane.dataset.proj = o.proj;
     if (o.projname) pane.dataset.projname = o.projname;
     if (o.pinned) pane.dataset.pinned = '1';
+    if (o.min) pane.dataset.min = '1';   // F6: restaura minimizada (queda en el pool, viva)
     if (kind === 'session') { pane.dataset.sid = o.sid || ''; pane.dataset.sname = o.name || ''; }
     else { if (o.cwd) pane.dataset.cwd = o.cwd; if (o.resume) pane.dataset.resume = o.resume; if (o.skip) pane.dataset.skip = '1'; }
     return pane;
@@ -325,12 +328,14 @@
           '<button class="dk-newbtn dk-new-claude-skip" title="claude SIN permisos (--dangerously-skip-permissions)">' + svg('dispatch', 12, 2) + ' claude ⚡</button>' +
           '<span class="dk-div"></span>' +
           '<button class="dk-newbtn dk-new-cmd" title="comandos rápidos: atajos (crear carpeta, git status…) + describilo en castellano y lo traduce tu claude">' + svg('dispatch', 12, 2) + ' comandos</button>' +
+          '<button class="dk-newbtn dk-new-proj" title="abrir una terminal en un proyecto (sin ir a buscarlo)">' + svg('folder', 12, 2) + ' proyecto</button>' +
           '<span class="dk-div"></span>' +
           '<button class="dk-newbtn dk-exit" title="salir de pantalla completa (volver al board)">' + svg('chevD', 13, 2.4) + ' salir</button>' +
           '<button class="dk-pb dk-max" title="pantalla completa / restaurar">' + maxIcon() + '</button>' +
           '<button class="dk-pb dk-min" title="minimizar / ocultar">' + svg('chevD', 15, 2.4) + '</button>' +
         '</span>' +
       '</div>' +
+      '<div class="dk-sessions" hidden></div>' +
       '<div class="dk-root"></div>' +
       '<div class="dk-pool" style="display:none"></div>' +
       '<div class="dk-dropind"></div>';
@@ -338,10 +343,28 @@
     poolEl = host.querySelector('.dk-pool');
     dropInd = host.querySelector('.dk-dropind');
     countEl = host.querySelector('.dk-count');
+    sessBarEl = host.querySelector('.dk-sessions');
+    sessBarEl.addEventListener('click', function (e) {
+      var c = e.target.closest && e.target.closest('[data-sess-pane]'); if (!c) return;
+      e.stopPropagation();
+      var pane = paneByKey(c.getAttribute('data-sess-pane')); if (!pane) return;
+      if (pane.dataset.min === '1') restorePane(pane);
+      else { setFocus(pane); try { var pt = paneTerm(pane); if (pt) pt.focus(); } catch (e2) {} renderSessionBar(); }
+    });
     host.querySelector('.dk-new-term').addEventListener('click', function () { spawn('shell'); });
     host.querySelector('.dk-new-claude').addEventListener('click', function () { spawn('claude'); });
     host.querySelector('.dk-new-claude-skip').addEventListener('click', function () { spawn('claude', null, null, { skip: true }); });
     host.querySelector('.dk-new-cmd').addEventListener('click', openQuickCommands);
+    host.querySelector('.dk-new-proj').addEventListener('click', function (e) {
+      openDirChooser({ anchor: e.currentTarget, title: 'abrir terminal en…', onPick: function (ruta) { spawn('shell', ruta, 'right'); } });
+    });
+    // chips de proyecto del placeholder de inicio (F5): abrir terminal/claude en el cwd del proyecto (suelta en inicio)
+    host.addEventListener('click', function (e) {
+      var hb = e.target.closest && e.target.closest('[data-home-open]');
+      if (!hb) return;
+      e.stopPropagation();
+      spawn(hb.getAttribute('data-home-open') === 'claude' ? 'claude' : 'shell', hb.getAttribute('data-cwd') || null, 'right');
+    });
     host.querySelector('.dk-exit').addEventListener('click', function () { host.classList.remove('maximized'); notifyMax(); refitSoon(); persist(); });
     host.querySelector('.dk-max').addEventListener('click', toggleMax);
     host.querySelector('.dk-min').addEventListener('click', toggleMin);
@@ -390,9 +413,56 @@
 
   function updateCount() { if (countEl) { var n = panesOf().length; countEl.textContent = n ? ('· ' + n) : ''; } }
   function setFocus(pane) {
-    if (focused === pane) return;
+    if (focused === pane) { renderSessionBar(); return; }
     focused = pane;
     panesOf().forEach(function (p) { p.classList.toggle('focused', p === pane); });
+    renderSessionBar();
+  }
+
+  /* ── F6 · barra de sesiones + minimizar ──
+     Lista TODAS las terminales/sesiones vivas de la vista actual (visibles + minimizadas) como chips.
+     Minimizar = sacar el panel del tiling al pool (PTY VIVO) marcándolo data-min; el chip lo restaura. */
+  function paneByKey(k) { var a = allPanes(); for (var i = 0; i < a.length; i++) if (a[i].dataset.pane === k) return a[i]; return null; }
+  function paneChipTitle(pane) {
+    var t = pane.querySelector('.dk-pane-title');
+    var s = (t ? (t.textContent || '') : '').replace(/\s+/g, ' ').trim();
+    if (s && s !== '…') return s;
+    if (pane.dataset.kind === 'session') return pane.dataset.sname || 'sesión';
+    var cw = pane.dataset.cwd || ''; return cw.split(/[\\/]/).filter(Boolean).pop() || (pane.dataset.kind === 'claude' ? 'claude' : 'shell');
+  }
+  function paneChipIcon(pane) {
+    var k = pane.dataset.kind;
+    return svg(k === 'claude' ? 'dispatch' : (k === 'session' ? 'reply' : 'term'), 11, 1.8);
+  }
+  function renderSessionBar() {
+    if (!sessBarEl) return;
+    if (host && host.classList.contains('minimized')) { sessBarEl.hidden = true; return; }
+    var list = allPanes().filter(function (p) { return matchesView(p, view); });
+    if (!list.length) { sessBarEl.hidden = true; sessBarEl.innerHTML = ''; return; }
+    sessBarEl.hidden = false;
+    sessBarEl.innerHTML = list.map(function (p) {
+      var min = p.dataset.min === '1', act = (p === focused) && !min;
+      return '<button class="dk-sess-chip' + (act ? ' active' : '') + (min ? ' min' : '') + '" data-sess-pane="' + esc(p.dataset.pane) + '"' +
+        ' title="' + esc(paneChipTitle(p)) + (min ? ' · minimizada (proceso vivo)' : '') + '">' +
+        paneChipIcon(p) + '<span class="dk-sess-nm">' + esc(paneChipTitle(p)) + '</span>' +
+        (min ? '<span class="dk-sess-dot" title="proceso vivo"></span>' : '') + '</button>';
+    }).join('');
+  }
+  function minimizePane(pane) {
+    if (!pane || pane.dataset.min === '1') return;
+    pane.dataset.min = '1';
+    if (focused === pane) focused = null;
+    showView(view);   // re-arma el tiling SIN ésta (queda viva en el pool) + refresca la barra
+    persist();
+  }
+  function restorePane(pane) {
+    if (!pane) return;
+    pane.removeAttribute('data-min');
+    show();
+    showView(view);   // re-incluye la terminal en el tiling de la vista
+    setFocus(pane);
+    try { var t = paneTerm(pane); if (t) t.focus(); } catch (e) {}
+    refitSoon(); persist();
   }
   function updatePinUI(pane) {
     var star = pane.querySelector('.dk-pin'); if (!star) return;
@@ -405,9 +475,24 @@
   function matchesView(p, v) { return v === '__home__' ? inInicio(p) : (p.dataset.proj === v); }
   function placeholderHTML(v) {
     if (v === '__home__') {
+      var projs = [];
+      try { if (homeProjects) projs = homeProjects() || []; } catch (e) { projs = []; }
+      var chips = '';
+      if (projs.length) {
+        chips = '<div class="dk-ph-sub">Abrí una terminal directo en un proyecto</div><div class="dk-ph-projects">' +
+          projs.map(function (p) {
+            return '<div class="dk-ph-proj" title="' + esc(p.cwd) + '">' +
+              '<span class="dk-ph-pname">' + svg(p.fav ? 'star' : 'folder', 13, 1.7) + esc(p.name) + '</span>' +
+              '<span class="dk-ph-pacts">' +
+                '<button class="dk-ph-pbtn" data-home-open="shell" data-cwd="' + esc(p.cwd) + '">' + svg('term', 11, 2) + ' terminal</button>' +
+                '<button class="dk-ph-pbtn" data-home-open="claude" data-cwd="' + esc(p.cwd) + '">' + svg('dispatch', 11, 2) + ' claude</button>' +
+              '</span></div>';
+          }).join('') + '</div>';
+      }
       return '<div class="dk-placeholder">' + (C ? C.eye(40, false) : '') +
         '<div class="dk-ph-title">Inicio sin terminales fijadas</div>' +
         '<div class="dk-ph-text">Fijá una terminal con la ★ (en cualquier proyecto) y va a aparecer acá, lista para vos.<br>O abrí una nueva con <b>terminal</b> / <b>claude</b> de arriba.</div>' +
+        chips +
         '</div>';
     }
     return '<div class="dk-placeholder">' + svg('term', 38, 1.5) +
@@ -424,12 +509,12 @@
     // 1) todo lo visible al pool
     panesOf().forEach(function (p) { poolEl.appendChild(p); });
     rootEl.innerHTML = '';
-    // 2) los que matchean, a una fila
-    var match = allPanes().filter(function (p) { return matchesView(p, v); });
+    // 2) los que matchean Y NO están minimizados, a una fila (los minimizados quedan vivos en el pool → barra)
+    var match = allPanes().filter(function (p) { return matchesView(p, v) && p.dataset.min !== '1'; });
     if (!match.length) {
       // vista de proyecto sin terminales pero CON cards (sesiones) → mostrar su board en vez del placeholder
-      if (v !== '__home__' && boardChecker && boardChecker(v)) { rootEl.innerHTML = ''; updateCount(); minimize(); return; }
-      rootEl.innerHTML = placeholderHTML(v); updateCount(); return;
+      if (v !== '__home__' && boardChecker && boardChecker(v)) { rootEl.innerHTML = ''; updateCount(); renderSessionBar(); minimize(); return; }
+      rootEl.innerHTML = placeholderHTML(v); updateCount(); renderSessionBar(); return;
     }
     if (match.length === 1) { match[0].style.flex = '1 1 0'; rootEl.appendChild(match[0]); }
     else {
@@ -438,7 +523,7 @@
       rootEl.appendChild(split);
     }
     if (!focused || !rootEl.contains(focused)) setFocus(match[0]);
-    updateCount(); refitSoon();
+    updateCount(); renderSessionBar(); refitSoon();
   }
   function setView(v, cwd, name) {
     ensureDock();
@@ -494,6 +579,7 @@
           '<button class="dk-pbtn dk-pin" title="fijar en inicio (★ favorito)">' + svg('star', 12, 1.8) + '</button>' +
           '<button class="dk-pbtn dk-split-r" title="dividir a la derecha">' + splitRIcon() + '</button>' +
           '<button class="dk-pbtn dk-split-d" title="dividir abajo">' + splitDIcon() + '</button>' +
+          '<button class="dk-pbtn dk-pane-min" title="minimizar (la sesión sigue viva en la barra)">' + svg('chevD', 13, 2.2) + '</button>' +
           '<button class="dk-pbtn dk-pane-x" title="cerrar panel">' + svg('x', 12, 2) + '</button>' +
         '</span>' +
       '</div>' +
@@ -503,6 +589,7 @@
     pane.querySelector('.dk-pin').addEventListener('click', function (e) { e.stopPropagation(); pinToggle(pane); });
     pane.querySelector('.dk-split-r').addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); spawn('shell', null, 'right'); });
     pane.querySelector('.dk-split-d').addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); spawn('shell', null, 'down'); });
+    pane.querySelector('.dk-pane-min').addEventListener('click', function (e) { e.stopPropagation(); minimizePane(pane); });
     pane.querySelector('.dk-pane-x').addEventListener('click', function (e) { e.stopPropagation(); closePane(pane); });
     return pane;
   }
@@ -518,10 +605,26 @@
     var x = btns.querySelector('.dk-pane-x');
     if (x) btns.insertBefore(vb, x); else btns.appendChild(vb);
   }
+  // botón "cd" en la cabecera de una terminal SHELL: cambia de directorio sin teclear cd a mano (F4). Idempotente.
+  function ensureCdBtn(pane) {
+    var btns = pane.querySelector('.dk-pane-btns');
+    if (!btns || btns.querySelector('.dk-pane-cd')) return;
+    var cb = document.createElement('button');
+    cb.className = 'dk-pbtn dk-pane-cd';
+    cb.title = 'cambiar de directorio (cd)';
+    cb.innerHTML = svg('folder', 12, 1.8);
+    cb.addEventListener('click', function (e) {
+      e.stopPropagation(); setFocus(pane);
+      openDirChooser({ anchor: cb, title: 'cambiar a (cd)…', onPick: function (ruta) { cdInto(pane, ruta); } });
+    });
+    var vb = btns.querySelector('.dk-pane-vscode'), x = btns.querySelector('.dk-pane-x');
+    if (vb) btns.insertBefore(cb, vb); else if (x) btns.insertBefore(cb, x); else btns.appendChild(cb);
+  }
   function setPaneMeta(pane, icon, title, proj) {
     pane.querySelector('.dk-pane-ic').innerHTML = icon;
     pane.querySelector('.dk-pane-title').innerHTML = esc(title) + (proj ? ' <span class="dk-pt-proj">· ' + esc(proj) + '</span>' : '');
     pane.title = title + (proj ? ' · ' + proj : '');
+    renderSessionBar();   // F6: el chip de la barra usa este título
   }
 
   /* ── tiling: insertar / dividir / detach ── */
@@ -673,6 +776,21 @@
       if (listEl) listEl.style.maxHeight = Math.max(72, Math.min(244, Math.round(g.innerHeight - (c.top + c.h + gap) - 10))) + 'px';
     }
   }
+  // ghost grisado pegado al cursor: muestra @query EN VIVO en el input mientras el picker está abierto (fachero).
+  // Es puramente visual (no se manda nada a claude → su picker inline no corre la pantalla). Matchea el monospace de xterm.
+  function placeGhost(pane, term, st) {
+    if (!st || !st.ghost) return;
+    var c = cursorRect(pane, term);
+    if (!c) { st.ghost.style.display = 'none'; return; }
+    st.ghost.textContent = '@' + st.query;
+    st.ghost.style.display = '';
+    st.ghost.style.left = Math.round(c.left) + 'px';
+    st.ghost.style.top = Math.round(c.top) + 'px';
+    st.ghost.style.height = Math.round(c.h) + 'px';
+    st.ghost.style.lineHeight = Math.round(c.h) + 'px';
+    try { if (term.options && term.options.fontSize) st.ghost.style.fontSize = term.options.fontSize + 'px'; } catch (e) {}
+    try { if (term.options && term.options.fontFamily) st.ghost.style.fontFamily = term.options.fontFamily; } catch (e) {}
+  }
   function atScore(p, q) {
     p = p.toLowerCase();
     var base = p.split('/').pop();
@@ -702,7 +820,7 @@
       '<div class="dk-at-head"><span class="dk-at-q">@' + esc(st.query) + '</span>' +
         '<span class="dk-at-hint">' + (st.loading ? 'cargando…' : 'Enter elige · Esc cancela') + '</span></div>' +
       '<div class="dk-at-list">' + (items || '<div class="dk-at-empty">' + (st.loading ? '' : 'sin coincidencias') + '</div>') + '</div>';
-    var term = paneTerm(pane); if (term) placeAtPicker(pane, term, st.el);
+    var term = paneTerm(pane); if (term) { placeAtPicker(pane, term, st.el); placeGhost(pane, term, st); }
     var selEl = st.el.querySelector('.dk-at-item.sel'); if (selEl && selEl.scrollIntoView) try { selEl.scrollIntoView({ block: 'nearest' }); } catch (e) {}
   }
   function openAtPicker(pane) {
@@ -710,7 +828,9 @@
     var term = paneTerm(pane); if (!term) return;
     var el = g.document.createElement('div'); el.className = 'dk-at-picker';
     g.document.body.appendChild(el);
-    var st = { el: el, files: [], matches: [], query: '', sel: 0, loading: true };
+    var ghost = g.document.createElement('span'); ghost.className = 'dk-at-ghost';   // @texto grisado en vivo al cursor (fachero)
+    g.document.body.appendChild(ghost);
+    var st = { el: el, ghost: ghost, files: [], matches: [], query: '', sel: 0, loading: true };
     pane._atp = st;
     el.addEventListener('mousedown', function (e) {
       var it = e.target.closest && e.target.closest('[data-at-i]');
@@ -718,7 +838,7 @@
     });
     st.outside = function (e) { if (st.el && !st.el.contains(e.target)) closeAtPicker(pane); };
     setTimeout(function () { try { g.document.addEventListener('mousedown', st.outside, true); } catch (e) {} }, 0);
-    st.onResize = function () { var t = paneTerm(pane); if (t && pane._atp) placeAtPicker(pane, t, st.el); };   // pixel-perfect en cualquier resize
+    st.onResize = function () { var t = paneTerm(pane); if (t && pane._atp) { placeAtPicker(pane, t, st.el); placeGhost(pane, t, st); } };   // pixel-perfect en cualquier resize
     try { g.addEventListener('resize', st.onResize); } catch (e) {}
     renderAtList(pane);
     if (api && api.listFiles) {
@@ -736,6 +856,7 @@
     try { if (st.outside) g.document.removeEventListener('mousedown', st.outside, true); } catch (e) {}
     try { if (st.onResize) g.removeEventListener('resize', st.onResize); } catch (e) {}
     try { if (st.el && st.el.parentNode) st.el.parentNode.removeChild(st.el); } catch (e) {}
+    try { if (st.ghost && st.ghost.parentNode) st.ghost.parentNode.removeChild(st.ghost); } catch (e) {}
     pane._atp = null;
   }
   // cierre por TECLA: oculta el overlay YA pero deja pane._atp vivo (st.ending) hasta el keyup → el keypress
@@ -748,6 +869,7 @@
     try { if (st.outside) g.document.removeEventListener('mousedown', st.outside, true); } catch (e) {}
     try { if (st.onResize) g.removeEventListener('resize', st.onResize); } catch (e) {}
     try { if (st.el && st.el.parentNode) st.el.parentNode.removeChild(st.el); } catch (e) {}
+    try { if (st.ghost && st.ghost.parentNode) st.ghost.parentNode.removeChild(st.ghost); } catch (e) {}
     st.endTimer = setTimeout(function () { closeAtPicker(pane); }, 250);
   }
   function selectAt(pane, viaKey) {
@@ -763,7 +885,13 @@
   function atKey(pane, ev) {
     var st = pane._atp; if (!st || st.ending) return;
     var k = ev.key;
-    if (k === 'Escape') { endAtPicker(pane); return; }
+    // ESC cierra el picker PERO deja el @texto tipeado en el input (lo escribe a la PTY, sin \r → no envía).
+    // Mismo patrón que el fallback no-match de selectAt; claude puede mostrar su picker inline (escape hatch explícito).
+    if (k === 'Escape') {
+      var etid = pane.dataset.tid;
+      if (etid && api && api.term && api.term.write) api.term.write(etid, '@' + st.query);
+      endAtPicker(pane); return;
+    }
     if (k === 'Enter' || k === 'Tab') { selectAt(pane, true); return; }       // elige e INSERTA (no envía); el keyup cierra
     if (k === 'ArrowDown') { st.sel = Math.min(st.sel + 1, Math.max(0, st.matches.length - 1)); renderAtList(pane); return; }
     if (k === 'ArrowUp') { st.sel = Math.max(st.sel - 1, 0); renderAtList(pane); return; }
@@ -852,6 +980,83 @@
     }, 0);
   }
 
+  /* ── chooser de carpeta (compartido F4/F5): lista cwds de proyectos conocidos (del último snapshot,
+     read-only) + picker nativo. F4 lo usa para 'cd' en la terminal actual; F5 para abrir una nueva. ── */
+  function projectDirs() {
+    var out = [], seen = {};
+    try {
+      var ss = (lastSnap && lastSnap.sessions) ? lastSnap.sessions : [];
+      for (var i = 0; i < ss.length; i++) {
+        var cw = String(ss[i].cwd || '').trim(); if (!cw) continue;
+        var k = cw.toLowerCase(); if (seen[k]) continue; seen[k] = 1;
+        out.push({ cwd: cw, name: cw.split(/[\\/]/).filter(Boolean).pop() || cw });
+      }
+    } catch (e) {}
+    out.sort(function (a, b) { return a.name.localeCompare(b.name); });
+    return out;
+  }
+  function closeDirChooser() {
+    var m = g.document.getElementById('dkDir'); if (m) m.remove();
+    g.document.removeEventListener('mousedown', onDirOutside, true);
+    g.document.removeEventListener('keydown', onDirKey, true);
+  }
+  function onDirOutside(e) { if (!e.target.closest || !e.target.closest('#dkDir')) closeDirChooser(); }
+  function onDirKey(e) { if (e.key === 'Escape') { e.preventDefault(); closeDirChooser(); } }
+  function openDirChooser(opts) {
+    opts = opts || {};
+    closeDirChooser();
+    var dirs = projectDirs();
+    function rowsHtml(filter) {
+      var f = (filter || '').toLowerCase().trim();
+      var list = f ? dirs.filter(function (d) { return d.name.toLowerCase().indexOf(f) >= 0 || d.cwd.toLowerCase().indexOf(f) >= 0; }) : dirs;
+      if (!list.length) return '<div class="dk-dir-empty">' + (dirs.length ? 'sin coincidencias' : 'no hay proyectos conocidos — usá "otra…"') + '</div>';
+      return list.map(function (d) {
+        return '<button class="dk-dir-item" data-cwd="' + esc(d.cwd) + '">' + svg('folder', 12, 1.7) +
+          '<span class="dk-dir-name">' + esc(d.name) + '</span><span class="dk-dir-path">' + esc(d.cwd) + '</span></button>';
+      }).join('');
+    }
+    var m = g.document.createElement('div'); m.id = 'dkDir'; m.className = 'dk-dir-chooser';
+    m.innerHTML =
+      '<div class="dk-dir-head"><span class="dk-dir-title">' + esc(opts.title || 'elegir directorio') + '</span>' +
+        '<button class="dk-dir-pick" title="elegir otra carpeta">' + svg('folder', 12, 1.8) + ' otra…</button></div>' +
+      '<input class="dk-dir-inp" placeholder="filtrar…" spellcheck="false">' +
+      '<div class="dk-dir-list">' + rowsHtml('') + '</div>';
+    g.document.body.appendChild(m);
+    var aw = m.offsetWidth || 320, ah = m.offsetHeight || 240;
+    if (opts.anchor && opts.anchor.getBoundingClientRect) {
+      var r = opts.anchor.getBoundingClientRect();
+      m.style.left = Math.max(8, Math.min(Math.round(r.left), g.innerWidth - aw - 8)) + 'px';
+      m.style.top = Math.max(8, Math.min(Math.round(r.bottom + 5), g.innerHeight - ah - 8)) + 'px';
+    } else {
+      m.style.left = Math.round((g.innerWidth - aw) / 2) + 'px';
+      m.style.top = '84px';
+    }
+    function pick(ruta) { closeDirChooser(); if (opts.onPick) opts.onPick(ruta); }
+    m.querySelector('.dk-dir-pick').addEventListener('click', function (e) {
+      e.stopPropagation();
+      if (api && api.pickFolder) api.pickFolder().then(function (p) { if (p) pick(p); });
+    });
+    var inp = m.querySelector('.dk-dir-inp'), listEl = m.querySelector('.dk-dir-list');
+    inp.addEventListener('input', function () { listEl.innerHTML = rowsHtml(inp.value); });
+    m.addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('.dk-dir-item'); if (!b) return;
+      pick(b.getAttribute('data-cwd'));
+    });
+    setTimeout(function () {
+      g.document.addEventListener('mousedown', onDirOutside, true);
+      g.document.addEventListener('keydown', onDirKey, true);
+      try { inp.focus(); } catch (e) {}
+    }, 0);
+  }
+  // cd en la terminal: manda `cd "ruta"` (con \r → ejecuta) y actualiza el cwd del panel (para @ picker / clonar).
+  function cdInto(pane, ruta) {
+    ruta = String(ruta || '').trim(); if (!ruta || !pane) return;
+    var tid = pane.dataset.tid;
+    if (tid && api && api.term && api.term.write) api.term.write(tid, 'cd "' + ruta + '"\r');
+    updatePaneCwd(pane, ruta);
+    try { var t = paneTerm(pane); if (t) t.focus(); } catch (e) {}
+  }
+
   // monta xterm + PTY dentro de un panel YA colocado (lo usa spawn y la restauración)
   // pick (sin resume): `claude --resume` abre el SELECTOR interactivo scopeado al cwd del proyecto.
   function mountTerminal(pane, kind, cwd, resume, skip, pick) {
@@ -867,6 +1072,7 @@
     setPaneMeta(pane, ic, lbl, projLabel(pane));
     updatePinUI(pane);
     ensureVscodeBtn(pane);   // botón VSCode en la cabecera de la terminal (abre su cwd en el editor)
+    if (kind === 'shell') ensureCdBtn(pane);   // botón "cd" sólo en shells (cambiar de dir sin teclear cd a mano)
     var body = pane.querySelector('.dk-pane-body');
     body.innerHTML = '';
 
@@ -1323,12 +1529,32 @@
   function isOpen() { return !!host && !host.hidden; }
   function count() { return terms.size + sessions.size; }
   function refreshActive() { sessions.forEach(function (pane) { if (rootEl && rootEl.contains(pane)) renderSession(pane); }); }
+  /* ── tour de novedades: demo efímera para que la barra de sesiones (F6) y el botón cd (F4) sean
+     highlights REALES. Abre UNA shell sólo si no hay ninguna visible; tagueada y excluida de la persistencia. ── */
+  function openTourDemo() {
+    ensureDock(); bindIpc(); show();
+    view = '__home__'; viewCwd = ''; viewName = '';
+    showView('__home__');
+    host.hidden = false; host.classList.remove('minimized'); host.classList.add('maximized');
+    document.body.classList.add('dock-open'); document.body.classList.remove('dock-min');
+    notifyMax();
+    var hasShell = allPanes().some(function (p) { return p.dataset.kind === 'shell' && p.dataset.min !== '1' && matchesView(p, '__home__'); });
+    if (hasShell) { refitSoon(); return false; }
+    spawn('shell');                                   // shell en el HOME del usuario (cwd vacío → HOME)
+    if (focused) focused.dataset.tourDemo = '1';
+    refitSoon();
+    return true;
+  }
+  function closeTourDemo() {
+    allPanes().forEach(function (p) { if (p.dataset.tourDemo === '1') doClosePane(p); });   // cierre directo (sin modal de confirmación)
+  }
   function setNotifier(fn) { if (typeof fn === 'function') notifier = fn; }
   function setActionHandler(fn) { if (typeof fn === 'function') actionHandler = fn; }
   function setMaxObserver(fn) { if (typeof fn === 'function') maxObserver = fn; }
   function setBoardChecker(fn) { if (typeof fn === 'function') boardChecker = fn; }
   function setEditorOpener(fn) { if (typeof fn === 'function') editorOpener = fn; }
   function setQuickTermHook(fn) { if (typeof fn === 'function') quickTermHook = fn; }
+  function setHomeProjects(fn) { if (typeof fn === 'function') homeProjects = fn; }
 
   var rt = null;
   window.addEventListener('resize', function () { if (isOpen()) { if (rt) clearTimeout(rt); rt = setTimeout(refitAll, 120); } });
@@ -1343,6 +1569,8 @@
     resumeSession: resumeSession, setBoardChecker: setBoardChecker, setCloseConfirmer: setCloseConfirmer,
     setNlEnabled: setNlEnabled, insertIntoFocused: insertIntoFocused,
     setEditorOpener: setEditorOpener, setQuickTermHook: setQuickTermHook,
+    setHomeProjects: setHomeProjects,
+    openTourDemo: openTourDemo, closeTourDemo: closeTourDemo,
     openFilePanel: openFilePanel, activeTermCwd: activeTermCwd
   };
 })(window);

@@ -922,6 +922,76 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.8.0 — Terminales en paralelo + cambiar dir + auto-inicio + title bar + tour de novedades
+> Batch de 6 features (Franco/Facundo/Joaquim) sobre el dock, la title bar y el arranque. Bump **1.7.4 → 1.8.0**
+> (`package.json` + fallbacks `brand-ver`/`.ver` en `chrome.js` + entrada en `CHANGELOG` de `app.js`). Verificado en
+> vivo por screenshot (1320/720px) + asserts headless. Aditivo, respeta las 3 Hard Rules (CSS con tokens, responsive,
+> cero API de Anthropic — sólo `setLoginItemSettings`/`titleBarOverlay`/`cd`, todo local).
+
+### F1 — Picker de `@`: conservar texto en ESC + ghost grisado en vivo (`terminals-ui.js` + `app.css`)
+- **ESC mantiene el `@texto`:** en `atKey`, la rama `Escape` ahora **escribe `@`+`st.query` a la PTY** (sin `\r`) antes de
+  `endAtPicker` → el texto queda en el input de claude (mismo patrón shippeado del fallback no-match de `selectAt`).
+  Tradeoff: claude puede mostrar su picker inline (escape hatch explícito del usuario).
+- **Ghost (fachero):** `openAtPicker` crea un `st.ghost` (`.dk-at-ghost`, `pointer-events:none`); `placeGhost` lo ancla al
+  cursor vía `cursorRect` (ya existía, pixel-perfect) con el font de xterm; `renderAtList`/`st.onResize` lo reubican;
+  `closeAtPicker`/`endAtPicker` lo remueven. CSS `.dk-at-ghost` color fijo oscuro (la terminal es oscura siempre).
+
+### F2 — Title bar amena: `titleBarStyle:'hidden'` + `titleBarOverlay` recoloreado (`index.ts`/`preload`/`app.js`/`app.css`)
+- La **topbar pasa a ser la barra de título** (arrastrable vía `-webkit-app-region:drag`), con botones nativos
+  min/max/cerrar **recoloreados al tema** (mantiene snap-layout de Win 11). `createWindow` setea `titleBarOverlay` con
+  color inicial según `cfg.theme` (`titleBarOverlayColors`). IPC `consomni:setTitleBarOverlay` (on) →
+  `mainWindow.setTitleBarOverlay({color,symbolColor})`; preload `setTitleBarOverlay(theme)`; `applyTheme` lo llama en cada
+  cambio + al cargar. CSS: `.topbar{-webkit-app-region:drag;padding-right:148px}` (reserva el ancho de los botones nativos)
+  + `no-drag` en todo lo interactivo de la topbar. Los botones nativos los dibuja el SO → no salen en `capturePage`
+  (verificar en vivo); la creación de la ventana no falla y el recorte/no-drag están cableados.
+
+### F3 — Auto-inicio con la PC (nativo, configurable) (`config.ts`/`index.ts`/`preload`/`app.js`)
+- `config.autoStart` (default `false`). IPC `getAutoStart`/`setAutoStart` → `app.setLoginItemSettings({openAtLogin,path:
+  execPath})` SÓLO empaquetado (en dev no toca el SO; el toggle igual persiste). **Reconcile en boot** (sincroniza el SO con
+  la config tras reinstalar). Settings: sección nueva **"SISTEMA"** con toggle (`seg2('autoStart',…)`); el handler de
+  `wireSettings` tiene caso especial que llama `setAutoStart` (aplica al SO, no sólo persiste).
+
+### F4 — Cambiar de directorio sin tipear `cd` (`terminals-ui.js` + `app.css`)
+- Botón "cd" (icono carpeta) en la cabecera de terminales **shell** (`ensureCdBtn`, idempotente; scopeado a shell porque cd
+  no aplica a claude). Abre el **chooser compartido** `openDirChooser({anchor,title,onPick})`: lista los cwds de proyectos
+  conocidos (`projectDirs()` desde `lastSnap.sessions`) + picker nativo (`api.pickFolder`). Al elegir → `cdInto(pane,ruta)`
+  = `api.term.write(tid, 'cd "ruta"\r')` (ejecuta) + `updatePaneCwd`. CSS `.dk-dir-*` (colores fijos oscuros).
+
+### F5 — Shortcuts en el inicio para abrir terminal en un proyecto (`terminals-ui.js` + `app.js` + `app.css`)
+- `placeholderHTML('__home__')` muestra **chips de proyectos** (provider `setHomeProjects` ← `app.js homeProjectsList()`,
+  fav/kept/activos primero) con botones **terminal**/**claude** que abren en el cwd del proyecto, **sueltos en inicio**
+  (persisten). Botón **"+ proyecto"** en el toolbar del dock → `openDirChooser` (modo abrir, reusa F4). Handler delegado
+  `[data-home-open]`. CSS `.dk-ph-projects`/`.dk-ph-proj`.
+
+### F6 — Barra de sesiones + minimizar (terminales en paralelo) (`terminals-ui.js` + `app.css`)
+- Strip nuevo **`.dk-sessions`** (entre toolbar y `.dk-root`) lista TODOS los paneles de la vista (visibles + minimizados)
+  como chips (`renderSessionBar`, key = `data-pane`); click → enfoca (o **restaura** si está minimizado). **Minimizar**
+  (`minimizePane`, botón nuevo en la cabecera) marca `data-min='1'` y deja el panel en el **pool VIVO** (NO `killPaneContent`)
+  → `showView` excluye los `min` del tiling. `restorePane` lo re-tilea. Persistencia: `serializePane`/`buildPane`/
+  `restoreSession` cargan `min` (los minimizados arrancan en pool). CSS `.dk-sess-chip` (+`.active`/`.min`/`.dk-sess-dot`
+  ámbar = proceso vivo). **Verificado:** abrir 3 → minimizar 1 (2 visibles, 3 vivos) → restaurar (3 visibles).
+
+### Tour de novedades v1.8.0 (reusa el motor de spotlight; `config.ts`/`terminals-ui.js`/`app.js`)
+- Reusa `startTour`/`paintTourStep`/`positionTour` (cero CSS nuevo, pixel-perfect, responsive por el motor). 6 pasos:
+  intro → **F6 headline (`.dk-sessions`)** → F5 (`.dk-new-proj`) → F4 (`.dk-pane-cd`) → F1 (`.dk-new-claude`) → F3 (cierre
+  centrado). Para que F6/F4 sean highlights reales abre una **terminal DEMO** (`ConsomniTerms.openTourDemo`: shell en el
+  home, tagueada `data-tour-demo`, **excluida de la persistencia**); `closeTourDemo` la limpia.
+- **Extensión mínima del motor:** 4º param **`onEnd`** en `startTour`/`endTour` (se llama en TODO cierre: terminar/saltar/Esc)
+  → cleanup de la demo. `tourTarget` ahora descarta targets montados-pero-invisibles (rect 0 → tarjeta centrada).
+- **⚠️ Bug fijado en QA:** el guard "foco en `#terminals`" cortocircuitaba ANTES del check `TOUR.active` → con la demo
+  enfocada, Esc/flechas/Enter no manejaban el tour (Esc des-maximizaba el dock). Se **reordenó** (la navegación del tour gana).
+- **Disparo:** flag `config.seenWhatsNew18` (confiable bajo file://); `maybeAutostartTours` (reemplaza el autostart del
+  profile-tour en `maybeOnboard`) lo dispara **1 vez** tras actualizar, si ya lo vio cae al de perfiles. **Replay:** fila
+  "Novedades v1.8.0" en la palette + botón en el overlay de ayuda (`?`). QA: `__consomni.startWhatsNewTour()`.
+
+### F1.bis (investigación, prioridad baja, SIN código) — "la conversación se rompe un poco al reabrir"
+- Pasa **también cerrando/reabriendo** (no es por el update). Causa: una PTY viva NO sobrevive al cierre de la app, así que
+  `restoreSession` recrea los paneles claude fijados con un `claude` **fresco** (no la conversación en memoria) y el tiling de
+  splits no se persiste (lista plana → fila). El transcript sí sobrevive (`--resume`). Mejora opcional futura: restaurar los
+  paneles claude fijados con `claude --resume <última sesión de ese cwd>`. Anotado, sin tocar.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

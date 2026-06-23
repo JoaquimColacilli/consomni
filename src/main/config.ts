@@ -27,6 +27,8 @@ export interface AppConfig {
   theme: 'dark' | 'light';     // tema de la app (default oscuro)
   claudeConfigDir: string;     // perfil ACTIVO de Claude Code (config dir). '' = auto (env CLAUDE_CONFIG_DIR → ~/.claude). Multi-perfil (ej ~/.claude-max)
   seenProfileTour: boolean;    // ¿ya vio el tutorial de multi-perfil? (gate confiable bajo file://, no localStorage). Auto-salta 1 vez al actualizar
+  seenWhatsNew18: boolean;     // ¿ya vio el tour de novedades v1.8.0? (gate confiable bajo file://). Auto-salta 1 vez tras actualizar
+  autoStart: boolean;          // abrir Consomni al iniciar la PC (nativo: app.setLoginItemSettings → registro Run). Sólo aplica empaquetado
   frentes: Record<string, FrenteMeta>; // estado MANUAL de cada frente (proyecto) — privado, local. key = projKey
 }
 
@@ -70,6 +72,8 @@ const DEFAULTS: AppConfig = {
   theme: 'dark',
   claudeConfigDir: '',
   seenProfileTour: false,
+  seenWhatsNew18: false,
+  autoStart: false,
   frentes: {},
 };
 

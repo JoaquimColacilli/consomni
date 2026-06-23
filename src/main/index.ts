@@ -61,6 +61,14 @@ function installNetworkGuard(): void {
   });
 }
 
+// Colores del overlay de la title bar (botones nativos min/max/cerrar) según el tema.
+// `color` = fondo de la barra (matchea el --bg-chrome de la topbar); `symbolColor` = color de los glifos.
+function titleBarOverlayColors(theme?: string): { color: string; symbolColor: string; height: number } {
+  return theme === 'light'
+    ? { color: '#fbfbfc', symbolColor: '#1a1a1f', height: 54 }
+    : { color: '#0c0c0f', symbolColor: '#e6e6e6', height: 54 };
+}
+
 function createWindow(): void {
   mainWindow = new BrowserWindow({
     width: Number(process.env.CONSOMNI_W) || 1440,
@@ -72,6 +80,10 @@ function createWindow(): void {
     title: 'Consomni',
     icon: path.join(RENDERER_DIR, 'assets', 'logo', 'app-icon.png'),
     autoHideMenuBar: true,
+    // Title bar "amena" (punto intermedio): la topbar pasa a ser la barra (arrastrable vía -webkit-app-region),
+    // con botones nativos min/max/cerrar recoloreados al tema → mantiene el snap-layout de Windows 11.
+    titleBarStyle: 'hidden',
+    titleBarOverlay: titleBarOverlayColors(loadConfig().theme),
     webPreferences: {
       preload: PRELOAD,
       contextIsolation: true,
@@ -134,6 +146,9 @@ if (!gotLock) {
   app.whenReady().then(async () => {
     installNetworkGuard();
     const cfg = loadConfig();
+
+    // Reconcilia el auto-inicio del SO con la config (p.ej. tras reinstalar). Sólo empaquetado.
+    try { if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: !!cfg.autoStart, path: process.execPath }); } catch { /* noop */ }
 
     ipcMain.handle('consomni:ping', () => 'pong');
     ipcMain.handle('consomni:getSnapshot', () => buildSnapshot());
@@ -304,6 +319,26 @@ if (!gotLock) {
       const dirsChanged = JSON.stringify(before.watchedDirs) !== JSON.stringify(after.watchedDirs);
       if (dirsChanged) restartWatcher(); else rescanNow();
       return after;
+    });
+
+    // ── auto-inicio con la PC (nativo: registro Run de Windows vía setLoginItemSettings) ──
+    // En dev (!isPackaged) NO se toca el SO (registraría electron.exe); el toggle igual persiste para la UI.
+    ipcMain.handle('consomni:getAutoStart', () => {
+      try { return app.isPackaged ? app.getLoginItemSettings().openAtLogin : !!loadConfig().autoStart; } catch { return false; }
+    });
+    ipcMain.handle('consomni:setAutoStart', (_e, enabledArg: boolean) => {
+      const enabled = !!enabledArg;
+      try { if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: enabled, path: process.execPath }); } catch { /* noop */ }
+      saveConfig({ autoStart: enabled });
+      return enabled;
+    });
+
+    // Recolorea los botones nativos de la title bar al cambiar de tema (claro/oscuro).
+    ipcMain.on('consomni:setTitleBarOverlay', (_e, theme: string) => {
+      try {
+        const c = titleBarOverlayColors(theme);
+        mainWindow?.setTitleBarOverlay({ color: c.color, symbolColor: c.symbolColor, height: c.height });
+      } catch { /* noop si la plataforma no soporta overlay */ }
     });
 
     const status = () => ({ ...getHooksStatus(), serverUp: isServerListening() });

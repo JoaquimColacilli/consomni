@@ -56,6 +56,11 @@ const api = {
   getConfig: (): Promise<Snapshot> => ipcRenderer.invoke('consomni:getConfig'),
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   saveConfig: (patch: any): Promise<Snapshot> => ipcRenderer.invoke('consomni:saveConfig', patch),
+  /** Auto-inicio con la PC (nativo). getter lee el estado real del SO (empaquetado) o la config (dev). */
+  getAutoStart: (): Promise<boolean> => ipcRenderer.invoke('consomni:getAutoStart'),
+  setAutoStart: (enabled: boolean): Promise<boolean> => ipcRenderer.invoke('consomni:setAutoStart', enabled),
+  /** Recolorea los botones nativos de la title bar al tema activo ('dark' | 'light'). */
+  setTitleBarOverlay: (theme: string): void => ipcRenderer.send('consomni:setTitleBarOverlay', theme),
 
   /* ── perfil de Claude Code (config dir; multi-perfil) ── */
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
