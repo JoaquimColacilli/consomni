@@ -497,6 +497,10 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.8.1', date: '23 jun 2026', title: 'Fix: pegar duplicaba · picker flotante de "/"', items: [
+      'Arreglado: al pegar en una terminal el texto se duplicaba (se pegaba dos veces, sobre todo cuando era una sola línea). Ahora pega una sola vez.',
+      'Picker flotante de "/": al tipear "/" al inicio del input en una terminal con claude se abre un selector flotante de comandos —built-in + los custom de tu .claude/commands— pegado al cursor, sin que se te corra la pantalla. Filtrás escribiendo, Enter o click elige, Esc cierra y conserva lo que escribiste. Igual que el de "@".',
+    ] },
     { v: '1.8.0', date: '23 jun 2026', title: 'Varias terminales en paralelo, cambiar de carpeta sin cd, arranque con la PC y más', items: [
       'Barra de sesiones: todas tus terminales/sesiones vivas aparecen como chips arriba del dock. Cambiás entre ellas con un click y podés minimizar una para ocultarla SIN matar su proceso (sigue corriendo en background) y traerla de vuelta cuando quieras.',
       'Atajos en el inicio: abrís una terminal directo en un proyecto (o desde el botón "proyecto" del dock), sin ir a buscarlo, abrirla y favearla a mano cada vez.',

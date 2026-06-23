@@ -674,6 +674,7 @@
 
   function killPaneContent(pane) {
     if (pane._atp) closeAtPicker(pane);   // cerrar el picker flotante de @ si quedó abierto
+    if (pane._slp) closeSlashPicker(pane);   // ídem el picker de '/'
     var pid = pane.dataset.tid;
     if (pid) { var t = terms.get(pid); if (t) { try { t.term.dispose(); } catch (e) {} if (t.ro) try { t.ro.disconnect(); } catch (e2) {} } terms.delete(pid); if (api && api.term) api.term.kill(pid); }
     if (pane.dataset.sid) sessions.delete(pane.dataset.sid);
@@ -782,7 +783,7 @@
     if (!st || !st.ghost) return;
     var c = cursorRect(pane, term);
     if (!c) { st.ghost.style.display = 'none'; return; }
-    st.ghost.textContent = '@' + st.query;
+    st.ghost.textContent = (st.prefix || '@') + st.query;
     st.ghost.style.display = '';
     st.ghost.style.left = Math.round(c.left) + 'px';
     st.ghost.style.top = Math.round(c.top) + 'px';
@@ -830,7 +831,7 @@
     g.document.body.appendChild(el);
     var ghost = g.document.createElement('span'); ghost.className = 'dk-at-ghost';   // @texto grisado en vivo al cursor (fachero)
     g.document.body.appendChild(ghost);
-    var st = { el: el, ghost: ghost, files: [], matches: [], query: '', sel: 0, loading: true };
+    var st = { el: el, ghost: ghost, prefix: '@', files: [], matches: [], query: '', sel: 0, loading: true };
     pane._atp = st;
     el.addEventListener('mousedown', function (e) {
       var it = e.target.closest && e.target.closest('[data-at-i]');
@@ -841,6 +842,9 @@
     st.onResize = function () { var t = paneTerm(pane); if (t && pane._atp) { placeAtPicker(pane, t, st.el); placeGhost(pane, t, st); } };   // pixel-perfect en cualquier resize
     try { g.addEventListener('resize', st.onResize); } catch (e) {}
     renderAtList(pane);
+    // re-snap al cursor tras abrir (claude puede settlear su caret un frame después) → pixel-perfect aunque no tipees
+    requestAnimationFrame(function () { if (pane._atp) renderAtList(pane); });
+    setTimeout(function () { if (pane._atp) renderAtList(pane); }, 90);
     if (api && api.listFiles) {
       api.listFiles(pane.dataset.cwd || '').then(function (r) {
         if (!pane._atp) return;
@@ -880,6 +884,7 @@
       if (pick) api.term.write(tid, '@' + pick + ' ');     // INSERTA @ruta + espacio (sin \r): NO envía el prompt
       else if (q) api.term.write(tid, '@' + q);            // sin match → fallback al @ nativo de claude
     }
+    pane._inputDirty = true;   // hay texto en el input → el '/' deja de disparar el picker
     try { var t = paneTerm(pane); if (t) t.focus(); } catch (e) {}
   }
   function atKey(pane, ev) {
@@ -890,6 +895,7 @@
     if (k === 'Escape') {
       var etid = pane.dataset.tid;
       if (etid && api && api.term && api.term.write) api.term.write(etid, '@' + st.query);
+      pane._inputDirty = true;
       endAtPicker(pane); return;
     }
     if (k === 'Enter' || k === 'Tab') { selectAt(pane, true); return; }       // elige e INSERTA (no envía); el keyup cierra
@@ -897,6 +903,125 @@
     if (k === 'ArrowUp') { st.sel = Math.max(st.sel - 1, 0); renderAtList(pane); return; }
     if (k === 'Backspace') { if (st.query.length) { st.query = st.query.slice(0, -1); filterAt(pane); renderAtList(pane); } else { endAtPicker(pane); } return; }
     if (k && k.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { st.query += k; filterAt(pane); renderAtList(pane); return; }
+  }
+
+  /* ════════ picker flotante de '/' (slash-commands) — mismo motor que @, datos distintos ════════
+     Custom (de .claude/commands: perfil + proyecto) + built-ins curados. Dispara SOLO al inicio del
+     input (heurística pane._inputDirty). Esc conserva el /texto; sin match, Enter manda el literal /query. */
+  var SLASH_BUILTINS = [
+    { name: 'help', desc: 'ayuda y lista de comandos' }, { name: 'clear', desc: 'limpiar la conversación' },
+    { name: 'compact', desc: 'compactar el contexto' }, { name: 'cost', desc: 'uso y costo de la sesión' },
+    { name: 'model', desc: 'cambiar de modelo' }, { name: 'resume', desc: 'reanudar una conversación' },
+    { name: 'config', desc: 'configuración' }, { name: 'memory', desc: 'editar la memoria (CLAUDE.md)' },
+    { name: 'review', desc: 'revisar un PR' }, { name: 'init', desc: 'generar CLAUDE.md del repo' },
+    { name: 'agents', desc: 'subagentes' }, { name: 'mcp', desc: 'servidores MCP' },
+    { name: 'status', desc: 'estado de la sesión' }, { name: 'doctor', desc: 'diagnóstico de la instalación' },
+    { name: 'export', desc: 'exportar la conversación' }, { name: 'vim', desc: 'modo vim en el editor' },
+    { name: 'terminal-setup', desc: 'atajos del terminal (Shift+Enter)' }, { name: 'add-dir', desc: 'agregar un directorio de trabajo' },
+    { name: 'hooks', desc: 'configurar hooks' }, { name: 'login', desc: 'iniciar sesión' },
+    { name: 'logout', desc: 'cerrar sesión' }, { name: 'release-notes', desc: 'novedades de la versión' },
+    { name: 'bug', desc: 'reportar un problema' }
+  ];
+  function slItems(custom) {
+    var seen = {}, out = [];
+    (custom || []).forEach(function (c) { if (c && c.name && !seen[c.name]) { seen[c.name] = 1; out.push({ name: c.name, desc: c.desc || '', tag: c.source === 'project' ? 'proyecto' : 'custom' }); } });
+    SLASH_BUILTINS.forEach(function (c) { if (!seen[c.name]) { seen[c.name] = 1; out.push({ name: c.name, desc: c.desc, tag: '' }); } });
+    return out;
+  }
+  function filterSlash(pane) {
+    var st = pane._slp; if (!st) return;
+    var q = st.query.toLowerCase(), scored = [];
+    if (!q) { st.matches = st.files.slice(0, 14); if (st.sel >= st.matches.length) st.sel = 0; return; }
+    for (var i = 0; i < st.files.length; i++) { var s = atScore(st.files[i].name, q); if (s > 0) scored.push([s, st.files[i]]); }
+    scored.sort(function (a, b) { return b[0] - a[0] || a[1].name.length - b[1].name.length; });
+    st.matches = scored.slice(0, 14).map(function (x) { return x[1]; });
+    if (st.sel >= st.matches.length) st.sel = Math.max(0, st.matches.length - 1);
+  }
+  function renderSlashList(pane) {
+    var st = pane._slp; if (!st || !st.el) return;
+    var items = st.matches.map(function (c, i) {
+      return '<div class="dk-at-item' + (i === st.sel ? ' sel' : '') + '" data-at-i="' + i + '">' +
+        svg('dispatch', 12, 1.7) + '<span class="dk-at-name">/' + esc(c.name) + '</span>' +
+        (c.desc || c.tag ? '<span class="dk-at-dir">' + esc(c.desc) + (c.desc && c.tag ? ' · ' : '') + esc(c.tag) + '</span>' : '') + '</div>';
+    }).join('');
+    st.el.innerHTML =
+      '<div class="dk-at-head"><span class="dk-at-q">/' + esc(st.query) + '</span>' +
+        '<span class="dk-at-hint">' + (st.loading ? 'cargando…' : 'Enter elige · Esc cancela') + '</span></div>' +
+      '<div class="dk-at-list">' + (items || '<div class="dk-at-empty">' + (st.loading ? '' : 'sin coincidencias') + '</div>') + '</div>';
+    var term = paneTerm(pane); if (term) { placeAtPicker(pane, term, st.el); placeGhost(pane, term, st); }
+    var selEl = st.el.querySelector('.dk-at-item.sel'); if (selEl && selEl.scrollIntoView) try { selEl.scrollIntoView({ block: 'nearest' }); } catch (e) {}
+  }
+  function openSlashPicker(pane) {
+    if (pane._slp || pane._atp) return;
+    var term = paneTerm(pane); if (!term) return;
+    var el = g.document.createElement('div'); el.className = 'dk-at-picker';
+    g.document.body.appendChild(el);
+    var ghost = g.document.createElement('span'); ghost.className = 'dk-at-ghost';
+    g.document.body.appendChild(ghost);
+    var st = { el: el, ghost: ghost, prefix: '/', files: slItems([]), matches: [], query: '', sel: 0, loading: true };
+    pane._slp = st;
+    el.addEventListener('mousedown', function (e) {
+      var it = e.target.closest && e.target.closest('[data-at-i]');
+      if (it) { e.preventDefault(); st.sel = parseInt(it.getAttribute('data-at-i'), 10) || 0; selectSlash(pane, false); }
+    });
+    st.outside = function (e) { if (st.el && !st.el.contains(e.target)) closeSlashPicker(pane); };
+    setTimeout(function () { try { g.document.addEventListener('mousedown', st.outside, true); } catch (e) {} }, 0);
+    st.onResize = function () { var t = paneTerm(pane); if (t && pane._slp) { placeAtPicker(pane, t, st.el); placeGhost(pane, t, st); } };
+    try { g.addEventListener('resize', st.onResize); } catch (e) {}
+    filterSlash(pane); renderSlashList(pane);
+    // re-snap al cursor tras abrir (claude settlea su caret un frame después) → pixel-perfect aunque no tipees
+    requestAnimationFrame(function () { if (pane._slp) renderSlashList(pane); });
+    setTimeout(function () { if (pane._slp) renderSlashList(pane); }, 90);
+    if (api && api.listCommands) {
+      api.listCommands(pane.dataset.cwd || '').then(function (r) {
+        if (!pane._slp) return;
+        st.files = slItems((r && r.ok && r.commands) ? r.commands : []);
+        st.loading = false; filterSlash(pane); renderSlashList(pane);
+      }).catch(function () { if (pane._slp) { st.loading = false; filterSlash(pane); renderSlashList(pane); } });
+    } else { st.loading = false; }
+  }
+  function closeSlashPicker(pane) {
+    var st = pane._slp; if (!st) return;
+    try { if (st.endTimer) { clearTimeout(st.endTimer); st.endTimer = null; } } catch (e) {}
+    try { if (st.outside) g.document.removeEventListener('mousedown', st.outside, true); } catch (e) {}
+    try { if (st.onResize) g.removeEventListener('resize', st.onResize); } catch (e) {}
+    try { if (st.el && st.el.parentNode) st.el.parentNode.removeChild(st.el); } catch (e) {}
+    try { if (st.ghost && st.ghost.parentNode) st.ghost.parentNode.removeChild(st.ghost); } catch (e) {}
+    pane._slp = null;
+  }
+  function endSlashPicker(pane) {
+    var st = pane._slp; if (!st || st.ending) return;
+    st.ending = true;
+    try { if (st.outside) g.document.removeEventListener('mousedown', st.outside, true); } catch (e) {}
+    try { if (st.onResize) g.removeEventListener('resize', st.onResize); } catch (e) {}
+    try { if (st.el && st.el.parentNode) st.el.parentNode.removeChild(st.el); } catch (e) {}
+    try { if (st.ghost && st.ghost.parentNode) st.ghost.parentNode.removeChild(st.ghost); } catch (e) {}
+    st.endTimer = setTimeout(function () { closeSlashPicker(pane); }, 250);
+  }
+  function selectSlash(pane, viaKey) {
+    var st = pane._slp; if (!st || st.ending) return;
+    var tid = pane.dataset.tid, pick = st.matches[st.sel], q = st.query;
+    if (viaKey) endSlashPicker(pane); else closeSlashPicker(pane);
+    if (tid && api && api.term && api.term.write) {
+      if (pick) api.term.write(tid, '/' + pick.name + ' ');   // inserta /comando + espacio (sin \r): el user agrega args y Enter
+      else if (q) api.term.write(tid, '/' + q);               // sin match → fallback al / nativo de claude
+    }
+    pane._inputDirty = true;
+    try { var t = paneTerm(pane); if (t) t.focus(); } catch (e) {}
+  }
+  function slKey(pane, ev) {
+    var st = pane._slp; if (!st || st.ending) return;
+    var k = ev.key;
+    if (k === 'Escape') {
+      var etid = pane.dataset.tid;
+      if (etid && api && api.term && api.term.write) api.term.write(etid, '/' + st.query);   // deja el /texto en el input
+      pane._inputDirty = true; endSlashPicker(pane); return;
+    }
+    if (k === 'Enter' || k === 'Tab') { selectSlash(pane, true); return; }
+    if (k === 'ArrowDown') { st.sel = Math.min(st.sel + 1, Math.max(0, st.matches.length - 1)); renderSlashList(pane); return; }
+    if (k === 'ArrowUp') { st.sel = Math.max(st.sel - 1, 0); renderSlashList(pane); return; }
+    if (k === 'Backspace') { if (st.query.length) { st.query = st.query.slice(0, -1); filterSlash(pane); renderSlashList(pane); } else { endSlashPicker(pane); } return; }
+    if (k && k.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { st.query += k; filterSlash(pane); renderSlashList(pane); return; }
   }
 
   /* ── copiar / pegar / seleccionar (clipboard vía IPC; navigator.clipboard está bloqueado por la CSP) ── */
@@ -1129,6 +1254,14 @@
             return false;
           }
           if (ev.key === '@' && !ev.metaKey) { if (ev.type === 'keydown') openAtPicker(pane); return false; }
+          // '/' PICKER flotante (slash-commands): mismo motor, datos de comandos. Sólo dispara al INICIO del
+          // input (heurística _inputDirty) para no robar el '/' de rutas/URLs/and-or en medio de un prompt.
+          if (pane._slp) {
+            if (pane._slp.ending) { if (ev.type === 'keyup') closeSlashPicker(pane); return false; }
+            if (ev.type === 'keydown') slKey(pane, ev);
+            return false;
+          }
+          if (ev.key === '/' && !ev.metaKey && !ev.ctrlKey && !ev.altKey && !pane._inputDirty) { if (ev.type === 'keydown') openSlashPicker(pane); return false; }
         }
         // Shift+Enter en claude -> SALTO DE LINEA (no enviar el prompt). xterm.js no distingue Shift+Enter
         // de Enter, asi que se emula. DOS claves para que ande BIEN:
@@ -1145,6 +1278,13 @@
           return false;   // keydown + keypress + keyup -> xterm NUNCA manda '\r' por Shift+Enter
         }
         if (ev.type !== 'keydown') return true;
+        // heurística para el picker de '/': el input está "sucio" si tipeaste algo desde el último Enter/Ctrl+C/Ctrl+U.
+        // (las teclas interceptadas arriba —pickers, Shift+Enter— ya hicieron return; acá sólo pasan las que van a claude)
+        if (pane.dataset.kind === 'claude') {
+          if (ev.code === 'Enter' && !ev.shiftKey) pane._inputDirty = false;
+          else if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && (ev.code === 'KeyC' || ev.code === 'KeyU')) pane._inputDirty = false;
+          else if (ev.key && ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) pane._inputDirty = true;
+        }
         if (ev.ctrlKey && ev.code === 'Space') { if (quickTermHook) quickTermHook(); return false; }
         // Ctrl+W: cierra ESTA terminal (la enfocada, donde está el cursor). Pisa el "borrar palabra" del
         // shell a propósito (pedido del usuario); si es una terminal VIVA, closePane pide confirmación.
@@ -1160,7 +1300,7 @@
           if (termCopy(term)) return false;   // había selección → copió + limpió → no mandar nada
           return true;                        // sin selección → la shell recibe SIGINT (\x03)
         }
-        if (ev.ctrlKey && ev.code === 'KeyV') { termPaste(term); return false; }                            // pegar (Ctrl+V / Ctrl+Shift+V)
+        if (ev.ctrlKey && ev.code === 'KeyV') { ev.preventDefault(); termPaste(term); return false; }         // pegar (Ctrl+V/Ctrl+Shift+V); preventDefault mata el paste NATIVO de xterm → no se duplica
         return true;
       });
     } catch (e) {}

@@ -45,6 +45,9 @@ const api = {
   /** Lista archivos del cwd (picker flotante de @); guardado a los roots vigilados; walk acotado. */
   listFiles: (dir: string): Promise<{ ok: boolean; files?: string[]; error?: string; truncated?: boolean }> =>
     ipcRenderer.invoke('consomni:listFiles', dir),
+  /** Lista los slash-commands CUSTOM (perfil + proyecto) para el picker flotante de '/'. */
+  listCommands: (cwd: string): Promise<{ ok: boolean; commands?: Array<{ name: string; source: string; desc: string }>; error?: string }> =>
+    ipcRenderer.invoke('consomni:listCommands', cwd),
   /** El main pide saltar a una sesión (click en la notificación nativa). */
   onJump: (cb: (sid: string) => void): (() => void) => {
     const listener = (_e: unknown, sid: string): void => cb(sid);

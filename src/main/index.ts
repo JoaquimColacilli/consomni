@@ -277,6 +277,50 @@ if (!gotLock) {
       } catch { return { ok: false, error: 'no se pudo listar' }; }
     });
 
+    // slash-commands para el picker flotante de '/': lee los comandos CUSTOM (markdown) del perfil activo
+    // (<configDir>/commands) y del proyecto (<cwd>/.claude/commands). Los built-in los cura el renderer.
+    ipcMain.handle('consomni:listCommands', (_e, cwd: string) => {
+      try {
+        const cfg = loadConfig();
+        const dirs: Array<{ dir: string; source: 'user' | 'project' }> = [
+          { dir: path.join(resolveClaudeDir(cfg), 'commands'), source: 'user' },
+        ];
+        const c = path.resolve(String(cwd || ''));
+        if (c) dirs.push({ dir: path.join(c, '.claude', 'commands'), source: 'project' });
+        const out: Array<{ name: string; source: string; desc: string }> = [];
+        const seen = new Set<string>();
+        const MAXDEPTH = 4, CAP = 300;
+        const readDesc = (fp: string): string => {
+          try {
+            const raw = fs.readFileSync(fp, 'utf8').slice(0, 2048);
+            const fm = raw.match(/^---\s*[\r\n]([\s\S]*?)[\r\n]---/);
+            if (fm) { const m = fm[1].match(/description\s*:\s*(.+)/i); if (m) return m[1].trim().replace(/^["']|["']$/g, '').slice(0, 80); }
+            for (const ln of raw.split(/\r?\n/)) { const t = ln.trim(); if (t && !t.startsWith('---') && !t.startsWith('#')) return t.slice(0, 80); }
+          } catch { /* noop */ }
+          return '';
+        };
+        const walk = (d: string, rel: string, depth: number, source: string): void => {
+          if (out.length >= CAP || depth > MAXDEPTH) return;
+          let ents: import('fs').Dirent[];
+          try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { return; }
+          for (const e of ents) {
+            if (out.length >= CAP) return;
+            if (e.isDirectory()) { if (!e.name.startsWith('.')) walk(path.join(d, e.name), rel ? rel + '/' + e.name : e.name, depth + 1, source); }
+            else if (e.isFile() && e.name.toLowerCase().endsWith('.md')) {
+              const base = e.name.slice(0, -3);
+              const name = (rel ? rel + '/' + base : base).replace(/[\\/]+/g, ':');
+              if (seen.has(name)) continue;
+              seen.add(name);
+              out.push({ name, source, desc: readDesc(path.join(d, e.name)) });
+            }
+          }
+        };
+        for (const { dir, source } of dirs) walk(dir, '', 0, source);
+        out.sort((a, b) => a.name.localeCompare(b.name));
+        return { ok: true, commands: out };
+      } catch { return { ok: false, error: 'no se pudo listar comandos' }; }
+    });
+
     // centro de notificaciones persistido (sobrevive reinicios/updates; solo se va al "limpiar")
     ipcMain.handle('consomni:getNotifications', () => loadNotifications());
     // eslint-disable-next-line @typescript-eslint/no-explicit-any

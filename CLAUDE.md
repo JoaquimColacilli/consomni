@@ -992,6 +992,37 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.8.1 — Fix pegar duplicado + picker flotante de `/`
+> Dos cosas sobre las terminales embebidas (feedback de razhel/Joaquim). Bump **1.8.0 → 1.8.1**. Aditivo, cero CSS nuevo
+> (el picker de `/` reusa las clases `.dk-at-*`). Verificado por screenshot.
+
+### 1) Bug: pegar duplicaba (`terminals-ui.js`)
+- **Causa:** devolver `false` desde `attachCustomKeyEventHandler` **NO hace `preventDefault`** (xterm corta sin cancelar el
+  evento), así que el `paste` NATIVO del navegador igual se dispara → el handler de pegado propio de xterm entrega el
+  portapapeles **una vez** y nuestro `termPaste` (IPC) **otra** = doble. Más visible en una sola línea (claude colapsa los
+  pegados multilínea en `[Pasted text]`).
+- **Fix:** `ev.preventDefault()` antes de `termPaste` en la rama `Ctrl+V/Ctrl+Shift+V` → mata el paste nativo, `termPaste`
+  queda como única fuente. El menú contextual "Pegar" no se toca.
+
+### 2) Picker flotante de `/` (slash-commands) — mismo motor que `@`
+- **Datos:** custom de `<configDir>/commands` (perfil activo) + `<cwd>/.claude/commands` (proyecto) vía IPC nuevo
+  `consomni:listCommands(cwd)` (walk acotado, name = relpath sin `.md` con `/`→`:`, desc del frontmatter `description:` o
+  1ª línea) + preload `listCommands`. Los **built-in** los cura el renderer (`SLASH_BUILTINS`: `/help /clear /model /compact
+  /cost /resume …`). Sin match en Enter → manda el literal `/query` (fallback a claude). El custom pisa al built-in por nombre.
+- **Disparo SÓLO al inicio del input** (no roba el `/` de rutas/URLs/and-or): heurística por panel `pane._inputDirty`
+  (se ensucia con cualquier char impreso; se limpia en Enter/Ctrl+C/Ctrl+U; los pickers que escriben al input también ensucian).
+  Más conservador que el `@` (que intercepta `@` en cualquier lado).
+- **Implementación:** `openSlashPicker/slKey/selectSlash/closeSlashPicker/endSlashPicker/filterSlash/renderSlashList`
+  (espejo de las del `@`, estado `pane._slp`, `prefix:'/'`). Reusa `cursorRect`/`placeAtPicker`/`placeGhost` (generalizado a
+  `st.prefix`) y `atScore`. La intercepción de `/` va en el `attachCustomKeyEventHandler` (bloque claude), suprimida en todos
+  los tipos de evento (como el `@`). `killPaneContent` cierra `_slp`.
+- **Pixel-perfect:** **re-snap al abrir** (`requestAnimationFrame` + `setTimeout 90ms` que re-`render…List`) para que la cajita
+  quede clavada al input aunque NO tipees (claude settlea su caret un frame después). Se agregó también al `@`. Esc conserva el
+  `/texto`. Verificado: `/mo` → cajita chica pegada arriba de `> /mo` con `/model` y `/memory`.
+- **Límite conocido:** la lista de built-ins es best-effort (cambia por versión de claude); el fallback al literal cubre lo que falte.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).
