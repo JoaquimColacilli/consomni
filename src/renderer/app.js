@@ -263,7 +263,7 @@
     var mf = activeModes().length ? state.modeFilter : null;
     var ver = (state.snapshot && state.snapshot.appVersion) ? 'v' + state.snapshot.appVersion : undefined;
     var o = view
-      ? { counts: view.counts, tree: view.tree, status: view.status, modeFilter: mf, density: state.density, sortLabel: curSort().label, searchValue: (state.searchActive || state.search) ? state.search : '', version: ver, light: state.theme === 'light' }
+      ? { counts: view.counts, tree: view.tree, status: view.status, modeFilter: mf, density: state.density, sortLabel: curSort().label, searchActive: !!state.searchActive, searchQuery: state.search || '', version: ver, light: state.theme === 'light' }
       : { alert: true, light: state.theme === 'light' };
     if (state.libraryOpen) return buildLibrary(o);
     if (state.plansOpen) return buildPlans(o);
@@ -497,6 +497,11 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.3', date: '24 jun 2026', title: 'El buscador del topbar ahora se ve y se usa como un buscador de verdad', items: [
+      'Al activar el buscador (con un click o con la tecla "/") ahora se ve que estás adentro: el cuadro se resalta y aparece un cursor titilando.',
+      'Mientras escribís, el texto se ve en el cuadro (antes filtraba pero no se veía qué tipeabas) y hay una "×" para borrar el filtro al instante.',
+      'Si hacés click fuera del cuadro, el buscador se desactiva (así escribir en la app no filtra sin querer); el filtro aplicado queda a la vista con su "×" para sacarlo.',
+    ] },
     { v: '1.9.2', date: '24 jun 2026', title: 'La etiqueta "actual" del changelog centrada + buscador clickeable', items: [
       'En la pantalla de Changelog, la etiqueta "actual" quedó centrada (vertical y horizontalmente) dentro de su recuadro.',
       'El buscador del topbar ahora se activa también con un click (antes era sólo con la tecla "/"). Filtra el tablero por nombre, proyecto o branch.',
@@ -2144,6 +2149,9 @@
     closeSortMenu();
     // cerrar el panel de notificaciones si clickeás afuera (no en el bell ni en el panel)
     if (state.notifOpen && t.closest && !t.closest('#notifPanel') && !t.closest('.notif-bell')) closeNotifPanel();
+    // desactivar el buscador al clickear AFUERA de la caja (mantiene el filtro aplicado; así, fuera del modo
+    // búsqueda, tipear NO filtra "invisible" — la causa de la confusión que reportó el usuario)
+    if (state.searchActive && t.closest && !t.closest('.search')) deactivateSearch(false);
 
     // el dock (#terminals) maneja sus propios clicks (toolbar, panes, acciones). El board NO debe
     // procesarlos: si lo hace, un click adentro de una terminal matchea el [data-proj] del panel y
@@ -2202,6 +2210,7 @@
       if (act === 'lib-export') { e.stopPropagation(); doExportLibrary(); return; }
       // ── buscador del topbar: el click activa lo mismo que la tecla "/" (antes era sólo visual al click) ──
       if (act === 'search') { e.stopPropagation(); activateSearch(); return; }
+      if (act === 'search-clear') { e.stopPropagation(); deactivateSearch(true); return; }   // × borra el filtro y sale
       // ── notificaciones + changelog ──
       if (act === 'notifs') { e.stopPropagation(); state.notifOpen ? closeNotifPanel() : openNotifPanel(); return; }
       if (act === 'notif-all') { e.stopPropagation(); closeNotifPanel(); openNotifHistory(); return; }

@@ -183,11 +183,23 @@
     };
     const sortLabel = o.sortLabel || 'prioridad';
     const density = o.density || 'comodo';
-    const searchTxt = o.searchValue ? o.searchValue : 'buscar nombre / proyecto / branch…';
+    // buscador: estado ACTIVO (foco + caret titilando) / CON-FILTRO (× para borrar) hermosos; INACTIVO = design-reference.
+    const sActive = !!o.searchActive, sQuery = o.searchQuery || '';
+    const sPh = 'buscar nombre / proyecto / branch…';
+    let searchInner;
+    if (sActive || sQuery) {
+      const sTxt = sQuery
+        ? '<span class="search-q">' + esc(sQuery) + '</span>' + (sActive ? '<i class="search-caret"></i>' : '')
+        : (sActive ? '<i class="search-caret"></i>' : '') + '<span class="search-ph">' + sPh + '</span>';
+      searchInner = svg('search', 13, 2) + '<span class="search-body">' + sTxt + '</span>' +
+        (sQuery ? '<button class="search-clear" data-act="search-clear" title="borrar filtro (Esc)">' + svg('x', 11, 2.4) + '</button>' : '');
+    } else {
+      searchInner = svg('search', 13, 2) + '<span class="search-ph">' + sPh + '</span><kbd class="kbd">/</kbd>';
+    }
 
     return '<header class="topbar">' +
       '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span>' +
-        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.9.2') + '</span>' +
+        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.9.3') + '</span>' +
         '<button class="brand-changelog" data-act="changelog-all" title="ver todas las novedades">' + svg('sparkles', 10, 1.7) + '<span>Changelog</span></button></span></div>' +
       '<div class="divider-v"></div>' +
       '<div class="counters">' +
@@ -198,7 +210,7 @@
         '<span style="color:var(--text-3)">' + closed + ' cerradas</span><span class="sep">·</span>' +
         '<span class="muted">Σ <b>' + tok + '</b> tok</span></div>' +
       '<div class="spacer"></div>' +
-      '<div class="search" data-act="search" title="buscar (o apretá /)">' + svg('search', 13, 2) + '<span>' + esc(searchTxt) + '</span><kbd class="kbd">/</kbd></div>' +
+      '<div class="search' + (sActive ? ' searching' : '') + (sQuery ? ' has-q' : '') + '" data-act="search" title="buscar (o apretá /)">' + searchInner + '</div>' +
       '<div class="mode-pills">' +
         pill('ask', '--ask') + pill('plan', '--blue') + pill('edit', '--violet') + pill('auto', '--red') + '</div>' +
       '<button class="tbtn">orden: <b>' + esc(sortLabel) + '</b>' + svg('chevD', 10, 2.4) + '</button>' +
@@ -325,7 +337,7 @@
         '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
         '<button class="sbtn" data-act="theme" title="' + (o.light ? 'modo oscuro' : 'modo claro') + '">' + svg(o.light ? 'moon' : 'sun', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v1.9.2') + '</span></div>' +
+        '<span class="ver">' + esc(o.version || 'v1.9.3') + '</span></div>' +
     '</aside>';
   }
 

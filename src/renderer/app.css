@@ -55,7 +55,21 @@
 .topbar .search{flex-shrink:1;min-width:120px;cursor:pointer;}  /* clickeable: activa el buscador (igual que '/') */
 @media (max-width:1180px){ .topbar .seg{display:none;} }
 @media (max-width:1040px){ .topbar .counters{display:none;} .topbar .divider-v{display:none;} }
-@media (max-width:900px){ .topbar .search span{display:none;} .topbar .search{width:auto;min-width:0;} .topbar .search .kbd{display:none;} }
+/* colapsar a icon-only en angosto SÓLO cuando está inactivo y sin filtro (si está activo / con query, se ve entero) */
+@media (max-width:900px){ .topbar .search:not(.searching):not(.has-q) span{display:none;} .topbar .search:not(.searching):not(.has-q){width:auto;min-width:0;} .topbar .search .kbd{display:none;} }
+
+/* ── ESTADO ACTIVO / CON-FILTRO del buscador (click o '/'): foco visible (ring + caret titilando) + × para borrar.
+   Aditivo y con tokens; el estado INACTIVO queda idéntico al design-reference (Hard Rule 1). ── */
+.topbar .search.searching{border-color:var(--green);box-shadow:0 0 0 3px rgba(74,222,128,.12);color:var(--text-2);}
+.topbar .search .search-body{flex:1;display:flex;align-items:center;min-width:0;overflow:hidden;white-space:nowrap;}
+.topbar .search .search-q{flex:0 1 auto;min-width:0;white-space:nowrap;color:var(--text-1);overflow:hidden;text-overflow:ellipsis;}  /* shrink-to-content → el caret queda PEGADO al texto (no al borde) */
+.topbar .search .search-ph{color:#56565c;overflow:hidden;text-overflow:ellipsis;}
+.topbar .search .search-caret{flex:none;width:1.5px;height:14px;margin:0 2px;border-radius:1px;background:var(--green);animation:searchCaret 1.06s steps(1,end) infinite;}
+@keyframes searchCaret{0%,49%{opacity:1;}50%,100%{opacity:0;}}
+.topbar .search .search-clear{flex:none;display:inline-flex;align-items:center;justify-content:center;width:17px;height:17px;margin-left:2px;padding:0;border:0;border-radius:5px;background:transparent;color:var(--text-4);cursor:pointer;transition:background .12s,color .12s;}
+.topbar .search .search-clear:hover{background:rgba(255,255,255,.09);color:var(--text-1);}
+body.light .topbar .search.searching{box-shadow:0 0 0 3px rgba(22,163,74,.14);}
+body.light .topbar .search .search-clear:hover{background:rgba(0,0,0,.07);}
 @media (max-width:780px){ .topbar .tbtn{display:none;} }
 @media (max-width:680px){ .topbar .mode-pills{display:none;} }
 /* en angosto, el botón Actualizar queda icon-only (sigue visible y clickeable) */

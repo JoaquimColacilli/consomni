@@ -1193,6 +1193,27 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.3 — Buscador del topbar con estado activo de verdad (foco + caret + × + click-afuera)
+> Feedback del usuario: al clickear el buscador no se veía que estabas adentro (ni caret), tipear filtraba
+> "invisible" y no había forma rápida de borrar el filtro. Bump **1.9.2 → 1.9.3**. Aditivo; el estado INACTIVO
+> queda IDÉNTICO al design-reference (Hard Rule 1). Verificado en vivo (4 estados + filtrado, por screenshot).
+- **Estados nuevos del `.search`** (chrome.js, data-driven con `o.searchActive` + `o.searchQuery`, reemplazan al
+  viejo `o.searchValue`): INACTIVO = igual que siempre (placeholder + `kbd /`). ACTIVO = clase `searching` →
+  **ring de foco verde** (`border-color:var(--green)` + `box-shadow` halo) + **caret titilando** (`.search-caret`,
+  barrita `var(--green)` con `@keyframes searchCaret`). CON-FILTRO = clase `has-q` → el query en `.search-q`
+  (texto `--text-1`) + **`×`** (`.search-clear`, `data-act="search-clear"`) para borrar al toque.
+- **app.js:** `transform()` pasa `searchActive`/`searchQuery`; dispatch de clicks suma `search-clear` →
+  `deactivateSearch(true)` (borra + sale). **Click AFUERA** del `.search` (junto al outside-click del bell) →
+  `deactivateSearch(false)` (mantiene el filtro pero sale del modo input → tipear ya no filtra "invisible"; el
+  query queda visible con su `×`). El typing sólo filtra con `searchActive` (que ahora SÍ se ve).
+- **⚠️ Gotcha (CSS):** `tokens.css .search span{flex:1}` (regla amplia) le pegaba `flex:1` a `.search-q` →
+  el caret quedaba al borde derecho en vez de PEGADO al texto. Fix: `.topbar .search .search-q{flex:0 1 auto}`
+  (shrink-to-content). El `.search-body`/`.search-ph` SÍ quieren `flex:1` (lo heredan de tokens, ok).
+- **Responsive:** el colapso a icon-only de `@media(max-width:900px)` se scopeó a `:not(.searching):not(.has-q)`
+  para que el buscador activo / con filtro se vea entero a cualquier ancho.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).
