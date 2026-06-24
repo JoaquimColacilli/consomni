@@ -39,6 +39,10 @@ const api = {
   setMuted: (v: boolean): Promise<boolean> => ipcRenderer.invoke('consomni:setMuted', v),
   /** Lee el portapapeles del SO (para PEGAR en la terminal; navigator.clipboard está bloqueado por la CSP). */
   clipboardRead: (): Promise<string> => ipcRenderer.invoke('consomni:clipboardRead'),
+  /** Lee una IMAGEN del portapapeles → la guarda como PNG temporal y devuelve su ruta (para pegarla en una
+      terminal `claude`: la ruta se inserta por bracketed paste y claude la convierte en [Image #N]). */
+  clipboardImageToTempPng: (): Promise<{ ok: boolean; file?: string; reason?: string; width?: number; height?: number; bytes?: number }> =>
+    ipcRenderer.invoke('consomni:clipboardImageToTempPng'),
   /** Lee un archivo (visor embebido); guardado a los roots vigilados / cwds de sesión, cap 1MB, sin binarios. */
   readFile: (p: string): Promise<{ ok: boolean; content?: string; error?: string; truncated?: boolean }> =>
     ipcRenderer.invoke('consomni:readFile', p),

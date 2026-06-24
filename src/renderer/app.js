@@ -497,6 +497,11 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.4', date: '24 jun 2026', title: 'Pegar imágenes, seleccionar lo que escribís, y ver los archivos que genera claude en vivo', items: [
+      'Pegar imágenes: pegar una imagen en una terminal de claude antes fallaba seguido en el primer intento ("no hay nada en el portapapeles") y había que pegarla de nuevo. Es un problema del propio claude en Windows (pasa igual en Warp): lee la imagen en un formato que su decodificador no soporta. Ahora Consomni la lee él mismo, la guarda como archivo temporal y se la pasa a claude por su ruta → la toma a la primera, siempre, y la ves al instante como "[Image #N]". Funciona con Alt+V y con Ctrl+V (si hay imagen la pega como imagen; si hay texto, pega el texto).',
+      'Seleccionar tu input: en las terminales de claude podés seleccionar el texto que estás escribiendo y copiarlo con Ctrl+C. Como la interfaz de claude no permite seleccionar su propio input, lo resuelve Consomni: activá el botón "selección" en la cabecera de la terminal y arrastrá con el mouse para seleccionar (al desactivarlo, el mouse vuelve a ser de claude). Y Ctrl+A selecciona TODO tu prompt de una; para ir al inicio de la línea quedó Home.',
+      'Archivos en vivo: cuando claude genera un archivo, hacé click en su ruta para abrirlo en un panel a la derecha (pantalla dividida) y Ctrl+click para abrirlo en el editor. Ahora el panel se actualiza EN VIVO mientras el agente sigue editando el archivo —no hace falta cerrarlo y reabrirlo— y además detecta rutas con espacios (como C:\\Users\\Usuario 7\\…).',
+    ] },
     { v: '1.9.3', date: '24 jun 2026', title: 'El buscador del topbar ahora se ve y se usa como un buscador de verdad', items: [
       'Al activar el buscador (con un click o con la tecla "/") ahora se ve que estás adentro: el cuadro se resalta y aparece un cursor titilando.',
       'Mientras escribís, el texto se ve en el cuadro (antes filtraba pero no se veía qué tipeabas) y hay una "×" para borrar el filtro al instante.',

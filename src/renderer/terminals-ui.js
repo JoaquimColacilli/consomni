@@ -160,7 +160,11 @@
         taken.push([s, e]); spans.push({ text: m[0], start: s, end: e });
       }
     }
-    // Windows abs: \b para no confundir la "s:" de "https:"; (?![\\/]) rechaza el "://" de las URLs
+    // Windows abs CON espacios que TERMINA en una extensión conocida (ej: C:\Users\Usuario 7\...\draft.txt).
+    // Va PRIMERO para reclamar la ruta COMPLETA (el dedup por `taken` evita que las regex de abajo la partan en
+    // el espacio). Excluye ':' (no cruza a otra unidad) y los chars shell-especiales; lazy hasta el 1er .ext.
+    run(new RegExp('\\b[A-Za-z]:[\\\\/](?![\\\\/])[^\\n:*?"<>|]*?\\.' + FILE_EXT + '\\b', 'g'));
+    // Windows abs (sin extensión / carpetas): \b para no confundir la "s:" de "https:"; (?![\\/]) rechaza "://"
     run(/\b[A-Za-z]:[\\/](?![\\/])[^\s:*?"<>|]+/g);
     run(new RegExp('(?:\\.{1,2}[\\\\/])?(?:[\\w.\\-]+[\\\\/])*[\\w.\\-]+\\.' + FILE_EXT + '\\b', 'g'));
     spans.sort(function (a, b) { return a.start - b.start; });
@@ -275,14 +279,58 @@
       if (api && api.action) api.action('openExternal', { url: a.getAttribute('data-href') });
     });
     var st = { content: '', view: false }; pane._fileState = st;
-    if (!api || !api.readFile) { body.querySelector('.dk-fv-pre').textContent = 'lector de archivos no disponible'; return; }
-    api.readFile(fpath).then(function (r) {
-      var pre = body.querySelector('.dk-fv-pre'); if (!pre || !pre.isConnected) return;
-      if (!r || !r.ok) { pre.textContent = '✗ ' + ((r && r.error) || 'no se pudo abrir'); pre.classList.add('dk-fv-empty'); return; }
-      st.content = r.content || '';
-      pre.textContent = st.content + (r.truncated ? '\n\n… (truncado a 1 MB)' : '');
-      if (isMd) body.querySelector('.dk-fv-md').innerHTML = renderMd(st.content);
-    }).catch(function () { var pre = body.querySelector('.dk-fv-pre'); if (pre) pre.textContent = '✗ error al leer'; });
+    ensureLiveBadge(pane);                                  // indicador "● vivo" (sync en tiempo real)
+    refreshFile(pane, fpath, body, isMd, true);            // lectura inicial
+    startFilePoll(pane, fpath, body, isMd);                // y mantenerlo sincronizado mientras el agente lo edita
+  }
+
+  /* ── sync en VIVO del visor: re-lee el archivo mientras el panel está abierto y actualiza si cambió
+     (pedido de Franco/Facundo: "real en tiempo real", sin tener que cerrar y reabrir el panel). Pollea
+     (no fs.watch → robusto cross-platform), salta si el panel está oculto/minimizado, preserva el scroll
+     (y hace "tail" si estabas abajo), y NO pisa el contenido bueno ante un error transitorio (archivo a
+     medio escribir). El lector (api.readFile) lee FRESCO del disco en cada llamada → siempre el último estado. ── */
+  function applyFileRead(pane, body, r, isMd, isInitial) {
+    var pre = body.querySelector('.dk-fv-pre'); if (!pre || !pre.isConnected) return;
+    var st = pane._fileState; if (!st) return;
+    if (!r || !r.ok) { if (isInitial) { pre.textContent = '✗ ' + ((r && r.error) || 'no se pudo abrir'); pre.classList.add('dk-fv-empty'); } return; }
+    var content = r.content || '';
+    if (!isInitial && content === st.content) return;     // sin cambios → no tocar el DOM (ni el scroll)
+    var changed = content !== st.content;
+    st.content = content;
+    // el contenedor que SCROLLEA es .dk-fileview (overflow:auto), no el <pre>
+    var sc = body.querySelector('.dk-fileview');
+    var atBottom = sc ? (sc.scrollTop + sc.clientHeight >= sc.scrollHeight - 12) : true, prevTop = sc ? sc.scrollTop : 0;
+    pre.classList.remove('dk-fv-empty');
+    pre.textContent = content + (r.truncated ? '\n\n… (truncado a 1 MB)' : '');
+    if (isMd) { var md = body.querySelector('.dk-fv-md'); if (md) md.innerHTML = renderMd(content); }
+    if (sc) sc.scrollTop = atBottom ? sc.scrollHeight : prevTop;   // tail si estabas abajo; si no, mantené la posición
+    if (!isInitial && changed) flashLive(pane);
+  }
+  function refreshFile(pane, fpath, body, isMd, isInitial) {
+    if (!api || !api.readFile) { if (isInitial) { var p0 = body.querySelector('.dk-fv-pre'); if (p0) p0.textContent = 'lector de archivos no disponible'; } return; }
+    api.readFile(fpath).then(function (r) { applyFileRead(pane, body, r, isMd, isInitial); })
+      .catch(function () { if (isInitial) { var pre = body.querySelector('.dk-fv-pre'); if (pre) pre.textContent = '✗ error al leer'; } });
+  }
+  function startFilePoll(pane, fpath, body, isMd) {
+    stopFilePoll(pane);
+    pane._filePoll = g.setInterval(function () {
+      if (!pane.isConnected || pane.offsetParent === null) return;   // movido (re-tiling) / oculto / minimizado → esperar
+      refreshFile(pane, fpath, body, isMd, false);
+    }, 1000);
+  }
+  function stopFilePoll(pane) { if (pane && pane._filePoll) { try { g.clearInterval(pane._filePoll); } catch (e) {} pane._filePoll = null; } }
+  function ensureLiveBadge(pane) {
+    var head = pane.querySelector('.dk-pane-head'); if (!head || head.querySelector('.dk-fv-live')) return;
+    var b = g.document.createElement('span'); b.className = 'dk-fv-live'; b.title = 'se actualiza en vivo (sync en tiempo real)';
+    b.innerHTML = '<i class="dk-fv-live-dot"></i>vivo';
+    var title = head.querySelector('.dk-pane-title');
+    if (title && title.nextSibling) head.insertBefore(b, title.nextSibling); else if (title) head.appendChild(b);
+  }
+  function flashLive(pane) {
+    var b = pane.querySelector('.dk-fv-live'); if (!b) return;
+    b.classList.add('pulse');
+    if (pane._liveT) { try { g.clearTimeout(pane._liveT); } catch (e) {} }
+    pane._liveT = g.setTimeout(function () { b.classList.remove('pulse'); }, 700);
   }
   function ensureFileBtns(pane, fpath, dir, isMd) {
     var btns = pane.querySelector('.dk-pane-btns'); if (!btns || btns.querySelector('.dk-fv-copy')) return;
@@ -379,7 +427,14 @@
   function bindIpc() {
     if (bound || !api || !api.term) return;
     bound = true;
-    api.term.onData(function (p) { var t = terms.get(p.id); if (t) t.term.write(p.data); });
+    api.term.onData(function (p) {
+      var t = terms.get(p.id); if (!t) return;
+      var data = p.data;
+      // modo selección ON (sólo claude): filtrá el mouse-tracking que claude re-asserta → xterm queda con el mouse
+      // libre para SELECCIONAR (arrastre normal) en vez de mandarle el click a claude.
+      if (t.pane && t.pane._selMode && t.pane.dataset.kind === 'claude') data = stripMouseTracking(data);
+      t.term.write(data);
+    });
     api.term.onExit(function (p) {
       var t = terms.get(p.id); if (!t) return;
       try { t.term.write('\r\n\x1b[90m[proceso finalizado · code ' + p.exitCode + ']\x1b[0m\r\n'); } catch (e) {}
@@ -685,6 +740,7 @@
   function killPaneContent(pane) {
     if (pane._atp) closeAtPicker(pane);   // cerrar el picker flotante de @ si quedó abierto
     if (pane._slp) closeSlashPicker(pane);   // ídem el picker de '/'
+    if (pane._filePoll) stopFilePoll(pane);   // visor de archivo: cortar el sync en vivo
     if (pane._sgRaf) { try { g.cancelAnimationFrame(pane._sgRaf); } catch (e) {} pane._sgRaf = 0; }   // autosuggest: cancelar rAF pendiente
     if (pane._sgGhost) { try { if (pane._sgGhost.parentNode) pane._sgGhost.parentNode.removeChild(pane._sgGhost); } catch (e) {} pane._sgGhost = null; pane._sgGhostVisible = false; }   // y quitar el ghost
     var pid = pane.dataset.tid;
@@ -1058,6 +1114,108 @@
   }
   function termSelectAll(term) { try { term.selectAll(); } catch (e) {} }
 
+  /* ── pegar una IMAGEN del portapapeles en una terminal CLAUDE ──
+     claude lee la imagen del portapapeles él mismo, pero en Windows su lector está ROTO (toma un BMP/DIB y su
+     sharp-WASM no lo decodifica → "no hay imagen", falla a la 1ª; pasa igual en Warp). En vez de eso, Consomni
+     lee la imagen (Electron, robusto), la guarda como PNG temporal y le pasa la RUTA por BRACKETED PASTE →
+     claude la convierte en [Image #N] al instante, a la 1ª, siempre. Verificado por harness PTY contra claude
+     real: el tecleo crudo de la ruta NO dispara el reconocimiento; el bracketed paste SÍ (con backslashes de
+     Windows, sin comillas). Devuelve Promise<bool> (true si había imagen y se pegó). */
+  function pasteClipImage(term, pane) {
+    if (!api || !api.clipboardImageToTempPng) return Promise.resolve(false);
+    return api.clipboardImageToTempPng().then(function (res) {
+      if (res && res.ok && res.file) {
+        // term.paste() envuelve en bracketed paste (\x1b[200~…\x1b[201~) respetando el modo del PTY (claude lo
+        // tiene activo) → claude reconoce la ruta como imagen. Fallback al raw por si el modo no estuviera trackeado.
+        try { term.paste(res.file); } catch (e) {
+          try { var tid = pane && pane.dataset.tid; if (tid) api.term.write(tid, '\x1b[200~' + res.file + '\x1b[201~'); } catch (e2) {}
+        }
+        try { term.focus(); } catch (e3) {}
+        return true;
+      }
+      return false;
+    }).catch(function () { return false; });
+  }
+
+  /* ── SELECCIÓN del input en terminales CLAUDE (la TUI de claude NO soporta selección de su input —
+     verificado: Ctrl+A mueve el cursor, Shift+flechas mueven, Ctrl+C sin selección sólo interrumpe; y
+     claude "agarra" el mouse con mouse-tracking → un arrastre normal no selecciona). Por eso lo hace
+     Consomni a nivel xterm.) ── */
+
+  // Quita las secuencias de MOUSE TRACKING (DECSET ?1000/1002/1003/1006/1005/1015/1016 h|l) del stream de
+  // claude → xterm nunca prende el modo mouse → un arrastre normal SELECCIONA (en vez de mandarle el click a
+  // claude). Se aplica sólo mientras el "modo selección" del panel está ON (toggle por panel).
+  function stripMouseTracking(data) {
+    try { return String(data).replace(/\x1b\[\?(1000|1001|1002|1003|1005|1006|1015|1016)[hl]/g, ''); }
+    catch (e) { return data; }
+  }
+
+  // Calcula la región del INPUT de claude en el buffer del xterm: desde el prompt (❯ / › / >) hasta el cursor
+  // (soporta input de varias líneas vía length que envuelve a `cols`). Pura → testeable. Devuelve {startCol,
+  // startRow, length} (coords ABSOLUTAS del buffer, base 0) o null si no encuentra el prompt.
+  function computeInputSelection(buf, cols) {
+    if (!buf || !cols) return null;
+    var curRow = (buf.baseY || 0) + (buf.cursorY || 0);
+    var curCol = buf.cursorX || 0;
+    function promptStart(row) {
+      var line = buf.getLine(row); if (!line) return -1;
+      var s = line.translateToString(true);              // texto plano, trim derecho
+      var m = s.match(/^(\s*)(❯|›|>)\s/);       // ❯ / › / >  seguido de espacio
+      return m ? m[0].length : -1;                        // columna (0-based) donde arranca el texto del input
+    }
+    var startRow = curRow, startCol = promptStart(curRow);
+    if (startCol < 0) {                                   // ¿input multi-línea? subir hasta la fila con el prompt
+      for (var r = curRow - 1; r >= Math.max(0, curRow - 12); r--) {
+        var p = promptStart(r);
+        if (p >= 0) { startRow = r; startCol = p; break; }
+      }
+      if (startCol < 0) return null;                      // sin prompt → no arriesgar una selección equivocada
+    }
+    var length = (curRow - startRow) * cols + (curCol - startCol);
+    if (length <= 0) return null;
+    return { startCol: startCol, startRow: startRow, length: length };
+  }
+
+  // Ctrl+A en claude → selecciona TODO el input que escribiste (a nivel xterm). Luego Ctrl+C lo copia (termCopy).
+  function selectClaudeInput(term) {
+    try {
+      var buf = term.buffer && term.buffer.active;
+      var sel = computeInputSelection(buf, term.cols);
+      if (!sel) return false;
+      try { term.clearSelection(); } catch (e) {}
+      term.select(sel.startCol, sel.startRow, sel.length);
+      try { term.focus(); } catch (e2) {}
+      return !!(term.hasSelection && term.hasSelection());
+    } catch (e) { return false; }
+  }
+
+  // Toggle del "modo selección" de un panel claude: ON = Consomni ignora el mouse de claude → arrastre normal
+  // selecciona + Ctrl+C copia. OFF = el mouse vuelve a ser de claude (claude re-activa su mouse-tracking solo).
+  function setPaneSelMode(pane, on) {
+    pane._selMode = !!on;
+    var btn = pane.querySelector('.dk-pane-sel');
+    if (btn) { btn.classList.toggle('on', !!on); btn.title = on ? 'modo selección ON (arrastrá para seleccionar · click para volver el mouse a claude)' : 'modo selección: arrastrá para seleccionar el texto que escribís'; }
+    if (on) {
+      // apagá YA el mouse-tracking que claude tenga activo en xterm (los re-activos se filtran en bindIpc)
+      var t = terms.get(pane.dataset.tid);
+      if (t && t.term) { try { t.term.write('\x1b[?1000l\x1b[?1002l\x1b[?1003l\x1b[?1006l\x1b[?1015l\x1b[?1005l'); } catch (e) {} }
+    }
+    // OFF: no hacemos nada; claude re-asserta su mouse-tracking en el próximo redibujo.
+  }
+
+  // botón "selección" en la cabecera de una terminal CLAUDE (toggle del modo selección con mouse). Idempotente.
+  function ensureSelBtn(pane) {
+    var btns = pane.querySelector('.dk-pane-btns');
+    if (!btns || btns.querySelector('.dk-pane-sel')) return;
+    var sb = document.createElement('button');
+    sb.className = 'dk-pbtn dk-pane-sel';
+    sb.title = 'modo selección: arrastrá para seleccionar el texto que escribís';
+    sb.innerHTML = svg('selection', 12, 1.9);
+    sb.addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); setPaneSelMode(pane, !pane._selMode); });
+    var vb = btns.querySelector('.dk-pane-vscode'), x = btns.querySelector('.dk-pane-x');
+    if (vb) btns.insertBefore(sb, vb); else if (x) btns.insertBefore(sb, x); else btns.appendChild(sb);
+  }
+
   // menú contextual (copiar/pegar/seleccionar todo) sobre la terminal. Vive en document.body (fuera de
   // #terminals) → no lo traga el handler global de clicks de app.js.
   function closeTermCtx() {
@@ -1343,6 +1501,7 @@
     updatePinUI(pane);
     ensureVscodeBtn(pane);   // botón VSCode en la cabecera de la terminal (abre su cwd en el editor)
     if (kind === 'shell') ensureCdBtn(pane);   // botón "cd" sólo en shells (cambiar de dir sin teclear cd a mano)
+    if (kind === 'claude') ensureSelBtn(pane);   // botón "selección" sólo en claude (la TUI de claude no tiene selección propia)
     var body = pane.querySelector('.dk-pane-body');
     body.innerHTML = '';
 
@@ -1422,6 +1581,21 @@
           }
           return false;   // keydown + keypress + keyup -> xterm NUNCA manda '\r' por Shift+Enter
         }
+        // Alt+V en claude → PEGAR IMAGEN del portapapeles de forma CONFIABLE. claude bindea Alt+V a "pegar
+        // imagen", pero su lector en Windows está roto (lee BMP y su sharp-WASM no lo decodifica → falla a la
+        // 1ª; pasa igual en Warp). En vez de reenviar la tecla, Consomni lee la imagen, la guarda como PNG
+        // temporal y le pasa la RUTA por bracketed paste → claude la convierte en [Image #N], a la 1ª, siempre.
+        // Sin imagen en el portapapeles → reenvía ESC v (comportamiento de siempre). Suprime el ESC v de xterm
+        // en TODOS los tipos de evento (como Shift+Enter); el trabajo sólo va en keydown.
+        if (ev.altKey && !ev.ctrlKey && !ev.metaKey && ev.code === 'KeyV' && pane.dataset.kind === 'claude') {
+          if (ev.type === 'keydown') {
+            pane._pasteGuard = Date.now();   // por las dudas, que un paste nativo no se cuele
+            pasteClipImage(term, pane).then(function (didImage) {
+              if (!didImage) { try { var vtid = pane.dataset.tid; if (vtid) api.term.write(vtid, '\x1bv'); } catch (e) {} }
+            });
+          }
+          return false;
+        }
         if (ev.type !== 'keydown') return true;
         // heurística para el picker de '/': el input está "sucio" si tipeaste algo desde el último Enter/Ctrl+C/Ctrl+U.
         // (las teclas interceptadas arriba —pickers, Shift+Enter— ya hicieron return; acá sólo pasan las que van a claude)
@@ -1442,12 +1616,24 @@
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey && ev.code === 'KeyZ' && pane.dataset.kind === 'claude') {
           var ztid = pane.dataset.tid; if (ztid && api.term && api.term.write) api.term.write(ztid, '\x1f'); return false;
         }
+        // Ctrl+A en claude → SELECCIONAR todo el input que escribiste (a nivel xterm; la TUI de claude NO tiene
+        // selección de su input — verificado: su Ctrl+A es "inicio de línea", que queda en Home). Luego Ctrl+C copia.
+        if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey && ev.code === 'KeyA' && pane.dataset.kind === 'claude') {
+          if (selectClaudeInput(term)) return false;   // seleccionó el input → consumir
+          return true;                                  // input vacío / sin prompt → dejar pasar (claude: inicio de línea)
+        }
         if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') { termCopy(term); return false; }              // copiar siempre
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.code === 'KeyC') {
           if (termCopy(term)) return false;   // había selección → copió + limpió → no mandar nada
           return true;                        // sin selección → la shell recibe SIGINT (\x03)
         }
-        if (ev.ctrlKey && ev.code === 'KeyV') { pane._pasteGuard = Date.now(); ev.preventDefault(); termPaste(term); return false; }   // pegar (Ctrl+V/Ctrl+Shift+V); guard + listener de captura matan el paste NATIVO de xterm → NUNCA se duplica (ver de-dup abajo)
+        if (ev.ctrlKey && ev.code === 'KeyV') {                                  // pegar (Ctrl+V/Ctrl+Shift+V); guard + listener de captura matan el paste NATIVO de xterm → NUNCA se duplica (ver de-dup abajo)
+          pane._pasteGuard = Date.now(); ev.preventDefault();
+          // en claude: si hay IMAGEN en el portapapeles, pegala (ruta→[Image #N]); si no, pegá TEXTO. En shell: sólo texto.
+          if (pane.dataset.kind === 'claude') { pasteClipImage(term, pane).then(function (didImage) { if (!didImage) termPaste(term); }); }
+          else termPaste(term);
+          return false;
+        }
         return true;
       });
     } catch (e) {}

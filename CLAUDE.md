@@ -1214,6 +1214,132 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.4 — Pegar imágenes en claude funciona a la 1ª (Consomni lee la imagen y le pasa la ruta)
+> Reporte del usuario: al pegar una imagen en una terminal `claude` (con **Alt+V**), a veces el primer intento
+> decía "no hay nada pegado" y había que pegarla de nuevo. El usuario aclaró que **no es de Consomni** (pasa
+> igual en Warp). Bump **1.9.3 → 1.9.4** (`package.json` + fallbacks `brand-ver`/`.ver` en `chrome.js` + entrada en
+> `CHANGELOG` de `app.js`). TODO verificado EMPÍRICAMENTE (investigación multi-fuente + harness PTY headless contra
+> `claude.exe` real + e2e con clipboard real en Electron). Aditivo, respeta las 4 Hard Rules (cero red, cero API
+> de Anthropic — sólo Electron `clipboard` + `fs` en %TEMP%; cero atribución a IA).
+
+### Causa raíz (CONFIRMADA, no asumida)
+- **La tecla de pegar-imagen en Windows es `Alt+V`** (= Meta+V = `ESC v`), NO Ctrl+V (Ctrl+V es texto). Verificado.
+- **El lector de imágenes de claude en Windows está ROTO** (no es timing): claude toma del portapapeles un **bitmap
+  CF_DIB/BMP** y lo intenta decodificar con el **`sharp`/libvips WASM que bundlea — que NO tiene loader de BMP** →
+  devuelve nada → "no hay imagen", falla en silencio. Prueba irrefutable (issue #56792): el SO confirma
+  `Clipboard::ContainsImage()=True` y Codex CLI lee la misma imagen bien, y aun así claude dice vacío → **el bug es
+  del lector de claude, no del SO ni del host** (por eso pasa también en Warp). La intermitencia "2ª vez anda" es un
+  contribuyente secundario (settling/contención del portapapeles), no la causa principal.
+- **claude SÍ adjunta una imagen por su RUTA**: una ruta a `.png/.jpg/.gif/.webp` (absoluta, **con backslashes de
+  Windows, sin comillas, sin `@`**) se convierte en `[Image #N]`. **Clave (verificado por harness):** sólo la dispara
+  si llega como **BRACKETED PASTE** (`\x1b[200~…\x1b[201~`); el tecleo crudo de la ruta NO la reconoce.
+
+### El fix (Consomni se adueña del pegado de imagen → saltea el lector roto de claude)
+- **`index.ts` IPC nuevo `consomni:clipboardImageToTempPng`:** `clipboard.readImage()` (Electron/Chromium lee el
+  CF_DIB robusto; nunca devuelve null → `isEmpty()`/`getSize().width===0` = sin imagen) → `toPNG()` → escribe
+  `%TEMP%\consomni-paste\clip-<ts>.png` y devuelve `{ok,file,…}`. Limpieza best-effort de pastes >6h (Windows no purga
+  %TEMP%). Import nuevo `os`. 100% local (HR3): sólo `clipboard`+`fs`, sin red.
+- **`preload.ts`:** bridge `clipboardImageToTempPng()`.
+- **`terminals-ui.js`:** helper `pasteClipImage(term,pane)` → llama el IPC; si hay imagen, inserta la ruta con
+  **`term.paste(file)`** (envuelve en bracketed paste respetando el modo del PTY, que claude tiene activo; fallback al
+  raw `\x1b[200~…\x1b[201~`) → claude la convierte en `[Image #N]` al instante. Wiring en `attachCustomKeyEventHandler`:
+  - **Alt+V** (sólo claude, ANTES del guard `if (ev.type!=='keydown')` como Shift+Enter → suprime el `ESC v` de xterm en
+    TODOS los tipos): si hay imagen → la pega; **sin imagen → reenvía `\x1bv`** (deja que claude intente, como siempre).
+  - **Ctrl+V** (sólo claude): si hay imagen → la pega; si no → **pega texto** (`termPaste`, como siempre). En shell, Ctrl+V
+    sigue siendo sólo texto.
+- **Por qué la ruta y no "cebar" el portapapeles:** cebar (materializar el CF_DIB con `readImage` antes de reenviar la
+  tecla) sólo arreglaría el caso de timing, NO el de formato (claude seguiría leyendo el BMP que su `sharp` no decodifica).
+  La ruta saltea el lector roto entero → anda a la 1ª SIEMPRE, sin importar el formato del origen.
+
+### Verificación empírica (gold standard)
+- **Harness PTY headless** (electron-as-node + node-pty ABI v121) contra `claude.exe` v2.1.190 real: el tecleo crudo de la
+  ruta → NO reconocida (queda el texto literal); el **bracketed paste** de la ruta → **`[Image #N]` al instante**, en las 4
+  variantes (backslash / forward-slash / con y sin espacio). Nunca se envía Enter → cero llamadas a la API.
+- **E2E en Electron completo** (con `clipboard` real): `clipboard.writeImage()` (deja CF_DIB, como un screenshot) →
+  lógica EXACTA del IPC (`readImage→toPNG`) → `size=512x512, validPNG=true, existsOnDisk=true` → bracketed paste de esa
+  ruta → claude mostró `[Image#1]`. **VERDICT=FIX OK end-to-end.**
+- **Límite del sandbox:** `capturePage` necesita display → el screenshot del app corriendo no se pudo sacar en este entorno
+  (el e2e *sin ventana* sí corrió). El wiring del renderer (Alt+V→`pasteClipImage`→`term.paste`) reusa el patrón YA probado
+  del pegado de texto (`termPaste`→`term.paste`, que funciona contra claude en Consomni) → `term.paste` envuelve en bracketed
+  paste correctamente. TS compila limpio; `terminals-ui.js` pasa `node --check`.
+
+---
+
+## v1.9.4 — Selección del input en terminales claude (toggle de mouse + Ctrl+A) — a nivel xterm
+> Pedido de Franco + Joaquim: poder **seleccionar (y copiar con Ctrl+C) el texto que venís escribiendo** en una
+> terminal de claude, y que **Ctrl+A seleccione TODO el input**. (Parte de 1.9.4; va junto con el pegado de imágenes
+> y el visor de archivos en vivo en el mismo release.) Aditivo, respeta las 4 Hard Rules.
+
+### Por qué a nivel xterm (la TUI de claude NO soporta selección — VERIFICADO por harness PTY)
+- Probe contra `claude.exe` v2.1.190 real: **Ctrl+A = "inicio de línea"** (mueve el cursor a la col 3), **Shift+flechas
+  = mueven el cursor** (no seleccionan), **Ctrl+C sin selección = "Press Ctrl-C again to exit"** (no copia). O sea
+  **claude no tiene selección de su input**. Además claude **activa mouse-tracking** (`?1000h/1002h/1003h/1006h`,
+  re-asertado en cada redibujo) → un arrastre normal del mouse le manda el click a claude, NO selecciona. Por eso
+  esto **sólo se puede hacer desde el host (xterm)**.
+
+### Implementación (`terminals-ui.js` + `chrome.js` + `app.css`)
+- **Toggle "modo selección" por panel (decisión del usuario):** botón `selection` (icono nuevo I-beam en `chrome.js`)
+  en la cabecera de las terminales **claude** (`ensureSelBtn`, idempotente, espejo de `ensureVscodeBtn`/`ensureCdBtn`).
+  `setPaneSelMode(pane,on)`: ON = `pane._selMode=true` + apaga YA el mouse-tracking de xterm (`\x1b[?1000l…?1006l`).
+  El handler global de `term:data` (`bindIpc`) filtra `stripMouseTracking(data)` mientras el panel esté en modo
+  selección → xterm queda con el mouse LIBRE → **arrastre normal selecciona** + Ctrl+C copia (`termCopy`, ya existía).
+  OFF = claude re-asserta su mouse-tracking solo en el próximo redibujo (no se persiste; default OFF, no cambia nada).
+- **`stripMouseTracking(data)`:** `data.replace(/\x1b\[\?(1000|1001|1002|1003|1005|1006|1015|1016)[hl]/g,'')` — saca
+  SÓLO los DECSET de mouse; **no toca** cursor (`?25`), bracketed paste (`?2004`) ni alt-screen (`?1049`). Unit-tested.
+- **Ctrl+A → seleccionar todo el input** (sólo claude; en shell pasa nativo a PSReadLine): intercepta Ctrl+A →
+  `selectClaudeInput(term)` → `computeInputSelection(buf, cols)` calcula la región del input (del prompt `❯`/`›`/`>`
+  hasta el cursor, multi-línea vía `length` que envuelve a `cols`; coords ABSOLUTAS `baseY+cursorY`, que en el
+  alt-screen de claude = relativas porque `baseY=0`) → `term.select(startCol,startRow,length)`. Después Ctrl+C copia.
+  Input vacío / sin prompt → `return true` (deja pasar a claude = inicio de línea). `Home` queda para inicio de línea.
+- **CSS (`app.css`):** `.dk-pane-sel.on` = verde + borde verde + `var(--surface-input)` (tokens existentes, sin
+  `color-mix` para no driftear de la convención del repo).
+
+### Verificación
+- **Unit test (node, 11/11):** `computeInputSelection` (1 línea / sin prompt→null / multi-línea / input vacío→null /
+  con scrollback) y `stripMouseTracking` (saca mouse, NO toca cursor/bracketed/alt-screen). `node --check` OK en
+  `terminals-ui.js`/`chrome.js`. API de xterm usada (`buffer.active.baseY/cursorY/cursorX/getLine`,
+  `select(col,row,length)`, `hasSelection`/`clearSelection`) verificada contra la semántica de xterm.
+- **Límite del sandbox:** el render de la selección y el arrastre del mouse son DOM de xterm → no se pueden verificar
+  headless ni por screenshot en este entorno (sin display). La lógica pura está testeada y los botones reusan
+  patrones ya probados; **el usuario debe probar el arrastre + Ctrl+A en vivo**.
+
+---
+
+## v1.9.4 — Visor de archivo: sync EN VIVO + rutas con espacios clickeables
+> Pedido de Franco + Facundo: cuando claude genera un archivo, **click en su ruta → abrirlo en un panel a la derecha**
+> (pantalla dividida) para laburarlo, **Ctrl+click → abrirlo en el editor**, y —lo nuevo/importante— que el panel se
+> **actualice EN TIEMPO REAL** mientras el agente sigue editando (sin cerrar y reabrir). (Parte de 1.9.4.) Aditivo,
+> respeta las 4 Hard Rules (sólo `fs` local, cero red/API).
+
+### Qué ya existía (v1.7.1) y qué se agregó
+- **Ya existía:** click en una ruta (terminal vía `registerLinkProvider` / conversación vía `linkifyPaths`) →
+  `onPathActivate` → `openFilePanel` (pane efímero kind `'file'`, `placeContent(pane,'right')`); Ctrl/Cmd+click →
+  `openFileEditor`; menú contextual con panel/editor/revelar. El visor (`mountFile`) leía el archivo **UNA sola vez**.
+- **Nuevo 1) SYNC EN VIVO (`terminals-ui.js`):** `mountFile` ahora arranca un **poll** (`startFilePoll`, `setInterval`
+  1000ms) que re-lee con `api.readFile` (que lee FRESCO del disco en cada llamada) y, si cambió, actualiza el `<pre>`
+  (y el render `.md`) vía `applyFileRead`. **Robusto:** salta si el panel está oculto/minimizado (`offsetParent===null`)
+  o movido en un re-tiling (`!isConnected`); **preserva el scroll** (si estabas abajo hace "tail", si no mantiene la
+  posición); un error transitorio (archivo a medio escribir) NO pisa el contenido bueno (sólo en la lectura inicial se
+  muestra el error). `stopFilePoll` se llama en `killPaneContent` (cierre del pane). Badge **"● vivo"** en la cabecera
+  (`ensureLiveBadge`) que **pulsa** al actualizarse (`flashLive`). Se eligió poll (no `fs.watch`) por robustez
+  cross-platform. CSS aditivo `.dk-fv-live`/`.dk-fv-live-dot`/`@keyframes fvLivePulse` con tokens.
+- **Nuevo 2) RUTAS CON ESPACIOS (`findPathSpans`):** la regex vieja `[^\s…]+` cortaba en el espacio →
+  `C:\Users\Usuario 7\…\draft.txt` se detectaba sólo hasta `C:\Users\Usuario` (no clickeable). Se agregó una regex
+  **space-aware** que corre PRIMERO (el dedup por `taken` evita que las de abajo la partan): `\b[A-Za-z]:[\\/](?![\\/])
+  [^\n:*?"<>|]*?\.<EXT>\b` — Windows-abs que puede tener espacios pero TERMINA en una extensión conocida; excluye `:`
+  (no cruza a otra unidad) y lazy hasta la 1ª `.ext`. Verificado por unit test (9 casos: screenshot `Usuario 7`,
+  `Program Files`, frase con la ruta en el medio, sin-espacios, relativas, dos rutas separadas por `:`, URLs intactas).
+
+### Verificación
+- **Unit test (node, 9/9):** `findPathSpans` con rutas con espacios + no-regresión + URLs. `node --check` OK.
+- El sync en vivo se apoya en que `api.readFile` lee fresco del disco cada vez (evidente en el IPC: `openSync`/`readSync`
+  por llamada, sin cache) → cada poll trae el último estado. **Límite del sandbox:** el render del panel + el pulso del
+  badge son DOM → no verificables headless ni por screenshot (sin display); **el usuario debe ver el panel actualizándose
+  en vivo**. Límite conocido pre-existente: si la ruta se **envuelve** en varias filas de la terminal, el link provider
+  (por fila) no la arma entera (igual que antes).
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

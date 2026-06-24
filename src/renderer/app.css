@@ -336,6 +336,10 @@ body.view-archived .board{ flex-wrap: wrap; align-content: flex-start; overflow-
 .dk-pin.on{color:var(--green);}
 .dk-pin.on svg{fill:var(--green);}
 .dk-pane.no-proj .dk-pin{display:none;}
+/* modo selección (sólo claude): verde + borde verde cuando está ON (arrastre normal selecciona el input) */
+.dk-pane-sel.on{color:var(--green);border-color:var(--green);background:var(--surface-input);}
+.dk-pane-sel.on svg{stroke:var(--green);}
+.dk-pane-sel.on:hover{color:var(--green);border-color:var(--green);}
 .dk-pane-body{flex:1;min-height:0;min-width:0;position:relative;overflow:hidden;}
 /* xterm en ABSOLUTE: llena el body (flex) sin inflarlo con su contenido (rows*cellHeight).
    Esto hace que el panel respete SIEMPRE el alto del contenedor (como la terminal de VS Code). */
@@ -999,6 +1003,12 @@ body.light .col-diff,body.light .dk-tb-diff{border-color:var(--border);}
 .dk-pane--file .dk-pane-body{display:flex;flex-direction:column;}
 .dk-fileview{flex:1;min-height:0;overflow:auto;}
 .dk-fv-pre{margin:0;padding:11px 13px;font-family:'Geist Mono',monospace;font-size:12px;line-height:1.55;color:var(--text-1);white-space:pre;tab-size:2;-moz-tab-size:2;user-select:text;}
+/* badge "● vivo" del visor de archivo (sync en tiempo real); pulsa al actualizarse */
+.dk-fv-live{display:inline-flex;align-items:center;gap:4px;flex:0 0 auto;margin-left:6px;font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--text-4);user-select:none;}
+.dk-fv-live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);opacity:.55;transition:opacity .2s;}
+.dk-fv-live.pulse{color:var(--green);}
+.dk-fv-live.pulse .dk-fv-live-dot{opacity:1;animation:fvLivePulse .7s ease;}
+@keyframes fvLivePulse{0%{box-shadow:0 0 0 0 var(--green);}100%{box-shadow:0 0 0 5px transparent;}}
 .dk-fv-empty{color:var(--text-3);white-space:pre-wrap;}
 .dk-fv-md{padding:13px 15px;color:var(--text-2);font-size:12.5px;line-height:1.6;}
 .dk-fv-md .fv-h{color:var(--text-1);font-weight:600;margin:14px 0 7px;letter-spacing:.2px;}

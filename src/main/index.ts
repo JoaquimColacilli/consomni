@@ -6,6 +6,7 @@
 import { app, BrowserWindow, ipcMain, session, Notification, dialog, clipboard } from 'electron';
 import * as path from 'path';
 import * as fs from 'fs';
+import * as os from 'os';
 import { start as startSessions, stop as stopSessions, buildSnapshot, rescanNow, setHooksConnected, applyHookEvent, getDetail, findSessionFile, findPlanDocs, setAttnCallback, restartWatcher, type AttnInfo } from './sessions';
 import { runAction, type ActionPayload } from './actions';
 import { startHooksServer, stopHooksServer, isServerListening } from './hooks-server';
@@ -213,6 +214,39 @@ if (!gotLock) {
 
     // lectura del portapapeles (para PEGAR en la terminal embebida; navigator.clipboard está bloqueado por la CSP)
     ipcMain.handle('consomni:clipboardRead', () => { try { return clipboard.readText(); } catch { return ''; } });
+
+    // IMAGEN del portapapeles → PNG temporal, para PEGARLA en una terminal `claude` embebida. Consomni LEE
+    // la imagen (Electron/Chromium, robusto) y le pasa la RUTA a claude (que la convierte en [Image #N] por
+    // bracketed paste) → saltea el lector de imágenes de claude, que en Windows está ROTO: lee un BMP/DIB y su
+    // `sharp`-WASM bundleado no tiene loader de BMP → falla en silencio ("no hay imagen", falla a la 1ª; pasa
+    // igual en Warp porque el bug es del lector de claude, no del SO ni del host). 100% local, sin red, sin
+    // API de Anthropic (sólo Electron `clipboard` + `fs` en %TEMP%). Verificado por harness PTY contra claude real.
+    ipcMain.handle('consomni:clipboardImageToTempPng', () => {
+      try {
+        let img;
+        try { img = clipboard.readImage(); } catch { return { ok: false, reason: 'read-failed' }; }
+        // readImage() NUNCA devuelve null: cuando no hay imagen, da un NativeImage 0x0 (isEmpty()=true).
+        if (!img || img.isEmpty()) return { ok: false, reason: 'no-image' };
+        const sz = img.getSize();
+        if (!sz || sz.width === 0 || sz.height === 0) return { ok: false, reason: 'no-image' };
+        const buf = img.toPNG();
+        if (!buf || !buf.length) return { ok: false, reason: 'encode-failed' };
+        const dir = path.join(os.tmpdir(), 'consomni-paste');
+        fs.mkdirSync(dir, { recursive: true });
+        // limpieza best-effort de pastes viejos (>6h) — Windows no purga %TEMP% solo
+        try {
+          const now = Date.now();
+          for (const f of fs.readdirSync(dir)) {
+            if (!/^clip-\d+\.png$/.test(f)) continue;
+            const fp = path.join(dir, f);
+            try { if (now - fs.statSync(fp).mtimeMs > 6 * 3600 * 1000) fs.unlinkSync(fp); } catch { /* noop */ }
+          }
+        } catch { /* noop */ }
+        const file = path.join(dir, `clip-${Date.now()}.png`);
+        fs.writeFileSync(file, buf);
+        return { ok: true, file, width: sz.width, height: sz.height, bytes: buf.length };
+      } catch { return { ok: false, reason: 'error' }; }
+    });
 
     // lectura de un archivo para el VISOR embebido (click en una ruta del chat/terminal). GUARDADO:
     // solo dentro de los roots vigilados / projects del perfil / cwds de sesiones; cap 1MB; rechaza binarios.
