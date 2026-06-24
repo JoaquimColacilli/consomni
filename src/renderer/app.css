@@ -231,6 +231,8 @@ body.view-archived .board{ flex-wrap: wrap; align-content: flex-start; overflow-
 .cfm-dont{display:flex;align-items:center;gap:8px;font-size:12px;color:var(--text-3);cursor:pointer;margin-bottom:16px;}
 .cfm-dont input{accent-color:var(--green);}
 .cfm-btns{display:flex;justify-content:flex-end;gap:9px;}
+/* captura de tecla para reasignar la tecla de aceptar del autosuggest (reusa el lenguaje .cfm-*) */
+.sg-rebind-key{display:flex;align-items:center;justify-content:center;height:42px;border-radius:8px;background:var(--surface-input);border:1px dashed var(--border-hover);color:var(--text-2);font-family:'Geist Mono',monospace;font-size:13px;}
 
 /* borde arrastrable: superior = ALTO del dock (ns). El ANCHO entre terminales se ajusta
    con el divisor del MEDIO (.dk-splitter), no desde los bordes. */
@@ -1005,6 +1007,12 @@ body.light .col-diff,body.light .dk-tb-diff{border-color:var(--border);}
 .dk-at-empty{padding:11px 12px;color:#7a7a85;font-size:11px;text-align:center;}
 /* @texto grisado en vivo, pegado al cursor de la terminal (font se setea inline desde JS para igualar xterm). Color fijo: la terminal es oscura siempre. */
 .dk-at-ghost{position:fixed;z-index:79;pointer-events:none;white-space:pre;color:rgba(220,220,228,.36);font-family:'Geist Mono',ui-monospace,monospace;}
+/* ── AUTOSUGGEST (ghost text estilo Warp/fish, sólo terminales SHELL): sufijo gris pegado al cursor + pill "Tab" clickeable.
+   Colores FIJOS oscuros (la terminal es oscura siempre, también en modo claro) — mismo criterio que .dk-at-ghost. ── */
+.dk-sg{position:fixed;z-index:79;pointer-events:none;display:inline-flex;align-items:center;white-space:pre;}
+.dk-sg-text{color:rgba(220,220,228,.34);font-family:'Geist Mono',ui-monospace,monospace;}
+.dk-sg-hint{pointer-events:auto;cursor:pointer;margin-left:8px;padding:0 6px;height:15px;display:inline-flex;align-items:center;border-radius:5px;background:rgba(255,255,255,.06);border:1px solid rgba(255,255,255,.14);color:rgba(220,220,228,.6);font-family:'Geist Mono',ui-monospace,monospace;font-size:9.5px;line-height:1;white-space:nowrap;transition:.12s;}
+.dk-sg-hint:hover{border-color:rgba(255,255,255,.3);color:rgba(235,235,240,.92);}
 /* ── chooser de carpeta (F4 cd en terminal · F5 abrir en proyecto). Colores fijos oscuros (flota sobre la terminal). ── */
 .dk-dir-chooser{position:fixed;z-index:81;width:330px;max-width:calc(100vw - 16px);background:#16161c;border:1px solid rgba(255,255,255,.12);border-radius:10px;box-shadow:0 14px 44px rgba(0,0,0,.6);font-family:'Geist Mono',ui-monospace,monospace;overflow:hidden;animation:atIn .1s ease-out;}
 .dk-dir-head{display:flex;align-items:center;gap:8px;padding:8px 11px;border-bottom:1px solid rgba(255,255,255,.07);}

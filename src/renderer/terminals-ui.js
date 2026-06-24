@@ -372,6 +372,7 @@
     wireDockResize();
     wireSplitterDrag();
     wirePaneDrag();
+    bindSnap();   // escuchar snapshots desde que el dock existe → lastSnap siempre disponible para el badge +N/−N
     return host;
   }
 
@@ -394,29 +395,37 @@
       sessions.forEach(function (pane) { if (host && !host.hidden && !host.classList.contains('minimized') && rootEl.contains(pane)) renderSession(pane); });
     });
   }
-  // badge "+N −N" en la cabecera del dock (cambios git sin commitear del proyecto activo, estilo Warp)
+  // badge "+N −N" en la cabecera del dock (cambios git sin commitear, estilo Warp). El cwd se resuelve con
+  // FALLBACK a la terminal ACTIVA (no sólo viewCwd): así también aparece en "inicio" con una terminal suelta
+  // (donde view==='__home__' → no había key → el badge NUNCA se mostraba; era el bug reportado por el user).
   function updateDiffBadge() {
     if (!host) return;
     var title = host.querySelector('.dk-tb-title'); if (!title) return;
     var el = title.querySelector('.dk-tb-diff');
-    var key = (view !== '__home__' && viewCwd) ? String(viewCwd).toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '') : '';
+    var norm = function (p) { return String(p || '').toLowerCase().replace(/\\/g, '/').replace(/\/+$/, ''); };
+    // vista de PROYECTO → el diff de ESE proyecto (viewCwd, matchea el nombre del header). INICIO → la terminal
+    // ACTIVA (no hay nombre de proyecto que contradecir). Así el número nunca pertenece a otro proyecto que el del título.
+    var rawCwd = (view !== '__home__' && viewCwd) ? viewCwd : activeTermCwd();
+    var key = rawCwd ? norm(rawCwd) : '';
     var ds = (key && lastSnap && lastSnap.diffStats) ? lastSnap.diffStats[key] : null;
     if (!ds || (!ds.added && !ds.removed)) { if (el) el.hidden = true; return; }
     if (!el) {
       el = g.document.createElement('button'); el.className = 'dk-tb-diff'; el.title = 'cambios sin commitear · ver git diff';
-      el.addEventListener('click', function () { if (api && api.action) api.action('diff', { cwd: viewCwd }).then(function (r) { notifier(r && r.ok ? (r.message || 'diff abierto') : ((r && r.error) || 'no se pudo'), r && r.ok ? '' : 'err'); }); });
+      el.addEventListener('click', function () { var cw = el._cwd || viewCwd; if (api && api.action) api.action('diff', { cwd: cw }).then(function (r) { notifier(r && r.ok ? (r.message || 'diff abierto') : ((r && r.error) || 'no se pudo'), r && r.ok ? '' : 'err'); }); });
       var lbl = title.querySelector('.dk-tb-label'); if (lbl && lbl.nextSibling) title.insertBefore(el, lbl.nextSibling); else title.appendChild(el);
     }
+    el._cwd = rawCwd;   // el cwd resuelto (puede ser el de la terminal activa) → el click abre el diff correcto
     el.hidden = false;
     el.innerHTML = '<span class="a">+' + ds.added + '</span><span class="d">−' + ds.removed + '</span>';
   }
 
-  function updateCount() { if (countEl) { var n = panesOf().length; countEl.textContent = n ? ('· ' + n) : ''; } }
+  function updateCount() { if (countEl) { var n = panesOf().length; countEl.textContent = n ? ('· ' + n) : ''; } updateDiffBadge(); }
   function setFocus(pane) {
     if (focused === pane) { renderSessionBar(); return; }
     focused = pane;
     panesOf().forEach(function (p) { p.classList.toggle('focused', p === pane); });
     renderSessionBar();
+    updateDiffBadge();   // el badge +N/−N sigue a la terminal enfocada (fallback activeTermCwd en inicio)
   }
 
   /* ── F6 · barra de sesiones + minimizar ──
@@ -452,6 +461,7 @@
     if (!pane || pane.dataset.min === '1') return;
     pane.dataset.min = '1';
     if (focused === pane) focused = null;
+    if (pane._sgGhost) hideShellGhost(pane);   // que el ghost del autosuggest no quede flotando sobre el board
     showView(view);   // re-arma el tiling SIN ésta (queda viva en el pool) + refresca la barra
     persist();
   }
@@ -675,6 +685,8 @@
   function killPaneContent(pane) {
     if (pane._atp) closeAtPicker(pane);   // cerrar el picker flotante de @ si quedó abierto
     if (pane._slp) closeSlashPicker(pane);   // ídem el picker de '/'
+    if (pane._sgRaf) { try { g.cancelAnimationFrame(pane._sgRaf); } catch (e) {} pane._sgRaf = 0; }   // autosuggest: cancelar rAF pendiente
+    if (pane._sgGhost) { try { if (pane._sgGhost.parentNode) pane._sgGhost.parentNode.removeChild(pane._sgGhost); } catch (e) {} pane._sgGhost = null; pane._sgGhostVisible = false; }   // y quitar el ghost
     var pid = pane.dataset.tid;
     if (pid) { var t = terms.get(pid); if (t) { try { t.term.dispose(); } catch (e) {} if (t.ro) try { t.ro.disconnect(); } catch (e2) {} } terms.delete(pid); if (api && api.term) api.term.kill(pid); }
     if (pane.dataset.sid) sessions.delete(pane.dataset.sid);
@@ -1179,7 +1191,139 @@
     var tid = pane.dataset.tid;
     if (tid && api && api.term && api.term.write) api.term.write(tid, 'cd "' + ruta + '"\r');
     updatePaneCwd(pane, ruta);
+    pane._sgLine = ''; pane._sgTrusted = true; if (pane._sgGhost) hideShellGhost(pane);   // ejecuta (\r) → prompt fresco: reset de la línea sombra del autosuggest
     try { var t = paneTerm(pane); if (t) t.focus(); } catch (e) {}
+  }
+
+  /* ════════ AUTOSUGGEST (ghost text estilo Warp/fish) — sólo terminales SHELL ════════
+     Mantenemos un BUFFER SOMBRA de la línea tipeada (pane._sgLine) y mostramos en gris, pegado al cursor,
+     el comando más reciente del historial que matchea el prefijo. La tecla configurada (default Tab) ACEPTA
+     (escribe sólo el sufijo a la PTY, sin \r). Modelo de confianza INVERTIDO: sólo confiamos tras tipeo
+     hacia adelante / Backspace; CUALQUIER otra tecla (flechas, Home/End, Tab sin sugerencia, F-keys, paste,
+     historial…) marca la línea como "no confiable" → sin sugerencia (NUNCA corrompemos la línea). Reseteo a
+     confiable y vacío SÓLO en Enter / Ctrl+C (la línea queda vacía y conocida). Claude queda fuera de alcance
+     (dibuja su propio input/TUI y su propia sugerencia → un ghost pelearía con su render). */
+  var termHistory = [];                 // [{cmd, cwd, ts}] más-reciente-primero (cap 500)
+  var autosuggestEnabled = true;        // config.autosuggest (lo empuja app.js vía bridge)
+  var autosuggestAcceptKey = 'Tab';     // config.autosuggestAcceptKey (reconfigurable)
+  var autosuggestRebinder = null;       // callback a app.js para reasignar la tecla (dueño de la config)
+  var sgSaveTimer = 0;
+  function setAutosuggest(enabled, acceptKey) {
+    autosuggestEnabled = enabled !== false;
+    if (acceptKey) autosuggestAcceptKey = acceptKey;
+    if (!autosuggestEnabled) { try { allPanes().forEach(function (p) { if (p._sgGhost) hideShellGhost(p); }); } catch (e) {} }
+    else { try { allPanes().forEach(function (p) { if (p._sgGhostHint) p._sgGhostHint.textContent = prettyKey(autosuggestAcceptKey); }); } catch (e) {} }
+  }
+  function setAutosuggestRebinder(fn) { if (typeof fn === 'function') autosuggestRebinder = fn; }
+  function loadTermHistoryStore() {
+    try { if (api && api.term && api.term.getHistory) api.term.getHistory().then(function (d) { if (d && Array.isArray(d.commands)) termHistory = d.commands.slice(0, 500); }).catch(function () {}); } catch (e) {}
+  }
+  function saveTermHistoryStore() {
+    if (sgSaveTimer) clearTimeout(sgSaveTimer);
+    sgSaveTimer = setTimeout(function () { sgSaveTimer = 0; try { if (api && api.term && api.term.saveHistory) api.term.saveHistory({ v: 1, commands: termHistory }); } catch (e) {} }, 500);
+  }
+  function sgRecordHistory(pane) {
+    var line = (pane._sgLine || '').trim();
+    if (!line || !pane._sgTrusted || line.length > 800) return;
+    termHistory = termHistory.filter(function (h) { return h && h.cmd !== line; });   // dedupe → al frente
+    termHistory.unshift({ cmd: line, cwd: pane.dataset.cwd || '', ts: Date.now() });
+    if (termHistory.length > 500) termHistory = termHistory.slice(0, 500);
+    saveTermHistoryStore();
+  }
+  // mejor match del historial: prefijo exacto; preferí el mismo cwd (sino el más reciente cualquiera)
+  function bestHistoryMatch(prefix, cwd) {
+    var ncwd = String(cwd || '').toLowerCase().replace(/\\/g, '/').replace(/\/+$/, ''), any = null;
+    for (var i = 0; i < termHistory.length; i++) {
+      var h = termHistory[i]; if (!h || !h.cmd) continue;
+      if (h.cmd.length > prefix.length && h.cmd.lastIndexOf(prefix, 0) === 0) {
+        var hc = String(h.cwd || '').toLowerCase().replace(/\\/g, '/').replace(/\/+$/, '');
+        if (hc === ncwd) return h.cmd;        // mismo cwd → gana (el 1º es el más reciente de ese cwd)
+        if (!any) any = h.cmd;                // sino, recordá el más reciente cualquiera
+      }
+    }
+    return any;
+  }
+  function prettyKey(k) { var m = { ArrowRight: '→', ArrowLeft: '←', ArrowUp: '↑', ArrowDown: '↓' }; return m[k] || k; }
+  // serializa una tecla a un descriptor estable + legible: 'Tab' · 'ArrowRight' · 'End' · 'Ctrl+F'
+  function sgSerializeKey(ev) {
+    var mods = ''; if (ev.ctrlKey) mods += 'Ctrl+'; if (ev.altKey) mods += 'Alt+'; if (ev.shiftKey) mods += 'Shift+';
+    var base; var c = ev.code || '';
+    if (c.indexOf('Key') === 0) base = c.slice(3); else if (c.indexOf('Digit') === 0) base = c.slice(5); else base = c || ev.key;
+    return mods + base;
+  }
+  // ghost: un span ÚNICO por panel (.dk-sg) con el sufijo gris + un pill "Tab" clickeable para reasignar.
+  // Vive en document.body (fuera de #terminals) y usa colores FIJOS oscuros (la terminal es oscura siempre,
+  // también en modo claro) — mismo criterio que .dk-at-ghost/.dk-at-picker.
+  function ensureShellGhost(pane) {
+    if (pane._sgGhost) return pane._sgGhost;
+    var wrap = g.document.createElement('span'); wrap.className = 'dk-sg';
+    var txt = g.document.createElement('span'); txt.className = 'dk-sg-text';
+    var hint = g.document.createElement('span'); hint.className = 'dk-sg-hint'; hint.title = 'cambiar la tecla para aceptar la sugerencia';
+    wrap.appendChild(txt); wrap.appendChild(hint);
+    hint.addEventListener('mousedown', function (e) { e.preventDefault(); e.stopPropagation(); if (autosuggestRebinder) autosuggestRebinder(); });
+    g.document.body.appendChild(wrap);
+    pane._sgGhost = wrap; pane._sgGhostText = txt; pane._sgGhostHint = hint;
+    return wrap;
+  }
+  function placeShellGhost(pane, term) {
+    var wrap = pane._sgGhost; if (!wrap) return;
+    var c = cursorRect(pane, term);
+    if (!c || !pane._sgSuffix) { wrap.style.display = 'none'; pane._sgGhostVisible = false; return; }
+    pane._sgGhostText.textContent = pane._sgSuffix;
+    pane._sgGhostHint.textContent = prettyKey(autosuggestAcceptKey);
+    wrap.style.display = '';
+    wrap.style.left = Math.round(c.left) + 'px';
+    wrap.style.top = Math.round(c.top) + 'px';
+    wrap.style.height = Math.round(c.h) + 'px';
+    try { if (term.options) { pane._sgGhostText.style.fontSize = term.options.fontSize + 'px'; pane._sgGhostText.style.fontFamily = term.options.fontFamily; pane._sgGhostText.style.lineHeight = Math.round(c.h) + 'px'; } } catch (e) {}
+    try { pane._sgCursorY = term.buffer.active.cursorY; } catch (e) {}
+    pane._sgGhostVisible = true;
+  }
+  function hideShellGhost(pane) {
+    pane._sgSuffix = '';
+    if (pane._sgGhost) pane._sgGhost.style.display = 'none';
+    pane._sgGhostVisible = false;
+  }
+  function computeShellSuggest(pane) {
+    if (!autosuggestEnabled || pane.dataset.kind !== 'shell' || !pane._sgTrusted) { hideShellGhost(pane); return; }
+    var line = pane._sgLine || '';
+    if (!line) { hideShellGhost(pane); return; }
+    var sug = bestHistoryMatch(line, pane.dataset.cwd || '');
+    if (!sug || sug.lastIndexOf(line, 0) !== 0 || sug.length <= line.length) { hideShellGhost(pane); return; }
+    pane._sgSuffix = sug.slice(line.length);
+    var term = paneTerm(pane);
+    if (term) { ensureShellGhost(pane); placeShellGhost(pane, term); } else hideShellGhost(pane);
+  }
+  function scheduleShellSuggest(pane) {
+    if (pane._sgRaf) return;
+    pane._sgRaf = g.requestAnimationFrame(function () { pane._sgRaf = 0; computeShellSuggest(pane); });
+  }
+  // maneja el autosuggest en el keydown de un panel SHELL. Devuelve true si CONSUMIÓ el evento (aceptar).
+  function shellAutosuggestKey(pane, ev) {
+    if (pane.dataset.kind !== 'shell' || !autosuggestEnabled) return false;
+    var k = ev.key, code = ev.code;
+    if (k === 'Shift' || k === 'Control' || k === 'Alt' || k === 'Meta' || k === 'CapsLock' || k === 'Dead' || k === 'Process' || k === 'AltGraph') return false;  // modificador solo → ignorar
+    // 1) ACEPTAR con la tecla configurada (sólo si hay ghost visible). NUNCA con Ctrl: esas teclas mapean a
+    // chars de control del terminal (Ctrl+C=SIGINT, Ctrl+W=cerrar pane, Ctrl+V=pegar) → aceptar las robaría
+    // (defensa por si quedó una config vieja con Ctrl+X; el bind ya las rechaza en isValidAcceptKey de app.js).
+    if (!ev.ctrlKey && pane._sgGhostVisible && pane._sgSuffix && sgSerializeKey(ev) === autosuggestAcceptKey) {
+      var tid = pane.dataset.tid;
+      if (tid && api.term && api.term.write) {
+        api.term.write(tid, pane._sgSuffix);
+        pane._sgLine = (pane._sgLine || '') + pane._sgSuffix;   // extender la sombra (escribimos de verdad → siguen matcheando)
+        hideShellGhost(pane);
+        ev.preventDefault();   // que xterm NO mande \t (si era Tab) — return false NO hace preventDefault
+        return true;
+      }
+      hideShellGhost(pane); return false;   // sin tid (no debería pasar con ghost visible) → no consumir la tecla
+    }
+    // 2) tracking del buffer sombra (reset SÓLO en Enter / Ctrl+C → línea vacía y conocida)
+    if (code === 'Enter' || code === 'NumpadEnter') { sgRecordHistory(pane); pane._sgLine = ''; pane._sgTrusted = true; hideShellGhost(pane); }
+    else if (ev.ctrlKey && !ev.altKey && !ev.shiftKey && code === 'KeyC') { pane._sgLine = ''; pane._sgTrusted = true; hideShellGhost(pane); }
+    else if (code === 'Backspace') { if (pane._sgTrusted) { pane._sgLine = (pane._sgLine || '').slice(0, -1); scheduleShellSuggest(pane); } else hideShellGhost(pane); }
+    else if (!ev.ctrlKey && !ev.metaKey && !ev.altKey && k && k.length === 1) { if (pane._sgTrusted) { pane._sgLine = (pane._sgLine || '') + k; scheduleShellSuggest(pane); } }
+    else { pane._sgTrusted = false; hideShellGhost(pane); }   // cualquier otra tecla → no modelable → untrust
+    return false;
   }
 
   // monta xterm + PTY dentro de un panel YA colocado (lo usa spawn y la restauración)
@@ -1187,6 +1331,7 @@
   function mountTerminal(pane, kind, cwd, resume, skip, pick) {
     kind = (kind === 'claude') ? 'claude' : 'shell';
     pane.dataset.kind = kind;
+    pane._sgLine = ''; pane._sgTrusted = true; pane._sgSuffix = ''; pane._sgGhostVisible = false;   // autosuggest: buffer sombra arranca vacío y confiable
     if (cwd) pane.dataset.cwd = cwd;
     if (resume) pane.dataset.resume = resume; else pane.removeAttribute('data-resume');
     if (skip) pane.dataset.skip = '1'; else pane.removeAttribute('data-skip');
@@ -1285,6 +1430,8 @@
           else if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && (ev.code === 'KeyC' || ev.code === 'KeyU')) pane._inputDirty = false;
           else if (ev.key && ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) pane._inputDirty = true;
         }
+        // AUTOSUGGEST (ghost text, sólo SHELL): trackea el buffer sombra y, si aceptás la sugerencia, consume la tecla
+        if (pane.dataset.kind === 'shell' && shellAutosuggestKey(pane, ev)) return false;
         if (ev.ctrlKey && ev.code === 'Space') { if (quickTermHook) quickTermHook(); return false; }
         // Ctrl+W: cierra ESTA terminal (la enfocada, donde está el cursor). Pisa el "borrar palabra" del
         // shell a propósito (pedido del usuario); si es una terminal VIVA, closePane pide confirmación.
@@ -1300,7 +1447,7 @@
           if (termCopy(term)) return false;   // había selección → copió + limpió → no mandar nada
           return true;                        // sin selección → la shell recibe SIGINT (\x03)
         }
-        if (ev.ctrlKey && ev.code === 'KeyV') { ev.preventDefault(); termPaste(term); return false; }         // pegar (Ctrl+V/Ctrl+Shift+V); preventDefault mata el paste NATIVO de xterm → no se duplica
+        if (ev.ctrlKey && ev.code === 'KeyV') { pane._pasteGuard = Date.now(); ev.preventDefault(); termPaste(term); return false; }   // pegar (Ctrl+V/Ctrl+Shift+V); guard + listener de captura matan el paste NATIVO de xterm → NUNCA se duplica (ver de-dup abajo)
         return true;
       });
     } catch (e) {}
@@ -1335,6 +1482,16 @@
         return true;
       });
     } catch (e) {}
+    // DE-DUP de PEGADO (la terminal tiene que andar PERFECTO): xterm tiene su PROPIO handler de 'paste'
+    // que TAMBIÉN escribe el bracketed-paste a la PTY (verificado por test). Nuestro Ctrl+V hace
+    // preventDefault para matarlo, pero eso es frágil: si el paste nativo igual se cuela, claude recibe
+    // el MISMO paste DOS veces → colapsa con el 1º y el 2º (idéntico) lo EXPANDE → se ve "[...] paste again
+    // to expand" con el texto entero (= el bug que reportó Franco). Guard en CAPTURA: si nuestro paste
+    // acaba de correr, tragamos el paste nativo → claude recibe UNO solo → colapsa y queda colapsado.
+    // Sin guard reciente (pegar por menú del SO sobre el textarea) dejamos pasar el nativo (no rompe nada).
+    try { body.addEventListener('paste', function (ev) {
+      if (pane._pasteGuard && (Date.now() - pane._pasteGuard) < 400) { ev.preventDefault(); ev.stopImmediatePropagation(); }
+    }, true); } catch (e) {}
     // menú contextual (click derecho): si está sobre una ruta → acciones de archivo; siempre copiar/pegar/seleccionar
     try { body.addEventListener('contextmenu', function (ev) { ev.preventDefault(); showTermCtx(ev.clientX, ev.clientY, term, ev, pane); }); } catch (e) {}
 
@@ -1358,6 +1515,17 @@
         setPaneMeta(pane, ic, res.title || (kind === 'claude' ? 'claude' : 'shell'), projLabel(pane));
         term.onData(function (d) { api.term.write(res.id, d); });
         term.onResize(function (sz) { pushPty(pane, res.id, sz.cols, sz.rows); });   // resize genuino (drag/ventana) → al PTY
+        // AUTOSUGGEST (shell): reposicionar el ghost al cursor real tras cada render (el echo del shell llega
+        // async). Si la fila del cursor SALTÓ (output) → ocultar (la línea se movió; el próximo keystroke recomputa).
+        if (kind === 'shell') {
+          try { term.onRender(function () {
+            if (!pane._sgGhostVisible) return;
+            var cy; try { cy = term.buffer.active.cursorY; } catch (e) { cy = pane._sgCursorY; }
+            if (pane._sgCursorY != null && Math.abs(cy - pane._sgCursorY) > 1) { hideShellGhost(pane); return; }
+            placeShellGhost(pane, term);
+          }); } catch (e) {}
+          try { if (term.textarea) term.textarea.addEventListener('blur', function () { hideShellGhost(pane); }); } catch (e) {}
+        }
         if (rootEl.contains(pane)) { try { term.focus(); } catch (e) {} }
         syncTerm(term, fit, pane);                                   // EMPUJE ATÓMICO post-create: corrige el race de montaje (fit no-op igual empuja)
         requestAnimationFrame(function () { syncTerm(term, fit, pane); });   // captura el crecimiento por fuentes / asentamiento del layout
@@ -1375,6 +1543,9 @@
   function insertCmd(pane, text) {
     var tid = pane.dataset.tid;
     if (tid && api && api.term && api.term.write) api.term.write(tid, text);
+    // el autosuggest tipea SOMBRA por keydown; un insert programático mete texto que la sombra NO conoce →
+    // marcar la línea como NO confiable (sin sugerencia hasta el próximo Enter/Ctrl+C) para no aceptar un sufijo desfasado y corromper la línea
+    pane._sgTrusted = false; if (pane._sgGhost) hideShellGhost(pane);
     var t = terms.get(tid); if (t) { try { t.term.focus(); } catch (e) {} }
   }
   // insertar texto (un prompt de la biblioteca) en la terminal/claude enfocada (o la 1ª viva),
@@ -1671,6 +1842,7 @@
     try { fit.fit(); } catch (e) {}
     pushPty(pane, pane.dataset.tid, term.cols || 0, term.rows || 0);
     if (wasBottom) { try { term.scrollToBottom(); } catch (e) {} }
+    if (pane._sgGhostVisible) placeShellGhost(pane, term);   // autosuggest: el cursor se movió con el resize → reubicar el ghost
   }
   function refitSoon() { if (fitTimer) cancelAnimationFrame(fitTimer); fitTimer = requestAnimationFrame(function () { fitTimer = requestAnimationFrame(refitAll); }); }
   // fit por frame durante un drag (reflow EN VIVO; el ResizeObserver llega tarde)
@@ -1748,7 +1920,9 @@
     setNlEnabled: setNlEnabled, insertIntoFocused: insertIntoFocused,
     setEditorOpener: setEditorOpener, setQuickTermHook: setQuickTermHook,
     setHomeProjects: setHomeProjects,
+    setAutosuggest: setAutosuggest, setAutosuggestRebinder: setAutosuggestRebinder,
     openTourDemo: openTourDemo, closeTourDemo: closeTourDemo,
     openFilePanel: openFilePanel, activeTermCwd: activeTermCwd
   };
+  loadTermHistoryStore();   // cargar el historial de comandos para el autosuggest (una vez, al iniciar)
 })(window);

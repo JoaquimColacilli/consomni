@@ -10,7 +10,7 @@ import { start as startSessions, stop as stopSessions, buildSnapshot, rescanNow,
 import { runAction, type ActionPayload } from './actions';
 import { startHooksServer, stopHooksServer, isServerListening } from './hooks-server';
 import { install as installHooks, uninstall as uninstallHooks, getStatus as getHooksStatus, isInstalled } from './hooks-install';
-import { loadConfig, saveConfig, setLocalState, loadDock, saveDock, loadLibrary, saveLibrary, loadNotifications, saveNotifications, detectClaudeProfiles, claudeProjectsPath, resolveClaudeDir, type AppConfig } from './config';
+import { loadConfig, saveConfig, setLocalState, loadDock, saveDock, loadLibrary, saveLibrary, loadNotifications, saveNotifications, loadTermHistory, saveTermHistory, detectClaudeProfiles, claudeProjectsPath, resolveClaudeDir, type AppConfig } from './config';
 import { checkForUpdate, initAutoUpdate, triggerAutoCheck, downloadUpdate } from './updates';
 import { setTerminalWindow, createTerm, writeTerm, resizeTerm, killTerm, listTerms, killAllTerms, terminalsAvailable, nlToCommand } from './terminals';
 import type { Snapshot, LocalSessionState } from './types';
@@ -205,6 +205,11 @@ if (!gotLock) {
     ipcMain.handle('consomni:getDock', () => loadDock());
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     ipcMain.on('consomni:saveDock', (_e, data: any) => saveDock(data));
+
+    // historial de comandos de las terminales (autosuggest ghost text)
+    ipcMain.handle('consomni:getTermHistory', () => loadTermHistory());
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    ipcMain.on('consomni:saveTermHistory', (_e, data: any) => saveTermHistory(data));
 
     // lectura del portapapeles (para PEGAR en la terminal embebida; navigator.clipboard está bloqueado por la CSP)
     ipcMain.handle('consomni:clipboardRead', () => { try { return clipboard.readText(); } catch { return ''; } });

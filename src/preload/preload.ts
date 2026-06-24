@@ -148,6 +148,11 @@ const api = {
     getDock: (): Promise<any> => ipcRenderer.invoke('consomni:getDock'),
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     saveDock: (data: any): void => ipcRenderer.send('consomni:saveDock', data),
+    // historial de comandos para el autosuggest ghost text
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    getHistory: (): Promise<any> => ipcRenderer.invoke('consomni:getTermHistory'),
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    saveHistory: (data: any): void => ipcRenderer.send('consomni:saveTermHistory', data),
   },
 };
 

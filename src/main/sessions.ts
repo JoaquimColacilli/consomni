@@ -35,10 +35,14 @@ let hooksConnected = false;
 /* ════════ diff stat (+N/−N) por proyecto, estilo Warp ════════
    git diff --shortstat HEAD por cwd ACTIVO, cacheado y throttled (async, nunca bloquea el snapshot).
    key = cwd normalizado IGUAL que projKey del renderer (lowercase + forward-slash) para que matcheen.
-   Limitación conocida: --shortstat HEAD NO cuenta archivos nuevos sin trackear (igual que el diff de Warp). */
+   Para MATCHEAR el número de Warp/VS Code sumamos también las líneas de archivos NUEVOS sin trackear
+   (git diff --shortstat HEAD NO los cuenta) — lectura read-only, ASÍNCRONA (no bloquea el main) y ACOTADA. */
 interface DiffStat { added: number; removed: number; files: number; ts: number; }
 const diffCache = new Map<string, DiffStat>();
 const DIFF_RECOMPUTE_MS = 3000;
+// conteo de untracked ACOTADO (el footgun es un dir generado grande no-ignorado): topes de archivos + tamaño/archivo
+const UNTRACKED_MAX_FILES = 200;
+const UNTRACKED_MAX_BYTES = 256 * 1024;
 let diffLastDriver = 0;
 let gitBin: string | null | undefined;
 function getGit(): string | null {
@@ -60,10 +64,52 @@ function computeDiffStat(cwd: string): void {
       const a = out.match(/(\d+)\s+insertions?\(\+\)/); if (a) added = +a[1];
       const d = out.match(/(\d+)\s+deletions?\(-\)/); if (d) removed = +d[1];
     }
-    const prev = diffCache.get(key);
-    diffCache.set(key, { added, removed, files, ts: Date.now() });
-    // si cambió respecto a lo cacheado, empujamos un snapshot fresco (eventual-consistente)
-    if (!prev || prev.added !== added || prev.removed !== removed || prev.files !== files) scheduleUpdate();
+    // sumar los archivos NUEVOS sin trackear (para matchear lo que muestra Warp) y recién ahí cachear
+    countUntrackedAdds(git, cwd, (uFiles, uAdded) => {
+      const tAdded = added + uAdded, tFiles = files + uFiles;
+      const prev = diffCache.get(key);
+      diffCache.set(key, { added: tAdded, removed, files: tFiles, ts: Date.now() });
+      // si cambió respecto a lo cacheado, empujamos un snapshot fresco (eventual-consistente)
+      if (!prev || prev.added !== tAdded || prev.removed !== removed || prev.files !== tFiles) scheduleUpdate();
+    });
+  });
+}
+/** Cuenta archivos nuevos sin trackear + sus líneas (= additions, como un diff de archivo nuevo).
+    ASÍNCRONO (fs.stat/fs.readFile → NO bloquea el event loop del main, ni con muchos archivos) y
+    DETERMINÍSTICO: procesa SIEMPRE el mismo set (orden estable de git status, capado por CANTIDAD) → el
+    número no parpadea entre recálculos (un break por presupuesto de tiempo daba sumas parciales distintas). */
+function countUntrackedAdds(git: string, cwd: string, cb: (files: number, added: number) => void): void {
+  // core.quotepath=false: si no, git C-quotea rutas con espacios/no-ASCII y no resuelven. --untracked-files=all
+  // respeta .gitignore (node_modules suele quedar afuera); el tope de archivos es el backstop por las dudas.
+  execFile(git, ['-C', cwd, '-c', 'core.quotepath=false', 'status', '--porcelain', '--untracked-files=all'],
+    { timeout: 5000, windowsHide: true, maxBuffer: 4 << 20 }, (err, stdout) => {
+    if (err) { cb(0, 0); return; }
+    const paths: string[] = [];
+    for (const ln of String(stdout || '').split(/\r?\n/)) {
+      if (ln.slice(0, 2) !== '??') continue;             // sólo archivos sin trackear
+      let p = ln.slice(3).trim();
+      if (p.startsWith('"') && p.endsWith('"')) { try { p = JSON.parse(p) as string; } catch { /* dejar como vino */ } }
+      if (p) paths.push(p);
+      if (paths.length >= UNTRACKED_MAX_FILES) break;    // cap por CANTIDAD (set fijo → determinístico)
+    }
+    if (!paths.length) { cb(0, 0); return; }
+    let files = 0, added = 0, pending = paths.length;
+    const done = (): void => { if (--pending === 0) cb(files, added); };
+    for (const rel of paths) {
+      const abs = path.join(cwd, rel);
+      fs.stat(abs, (e, st) => {
+        if (e || !st.isFile()) { done(); return; }
+        files++;
+        if (st.size > UNTRACKED_MAX_BYTES) { done(); return; }   // grande → contamos el archivo, no las líneas
+        fs.readFile(abs, (e2, buf) => {
+          if (!e2 && buf && !buf.subarray(0, 8192).includes(0)) {   // saltar binarios (NUL en el head)
+            const txt = buf.toString('utf8');
+            if (txt.length) added += txt.split('\n').length - (txt.endsWith('\n') ? 1 : 0);   // líneas del archivo nuevo
+          }
+          done();
+        });
+      });
+    }
   });
 }
 /** Dispara el recálculo (fire-and-forget) de los cwds ACTIVOS únicos que estén vencidos. Throttled. */

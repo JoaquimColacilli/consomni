@@ -497,6 +497,11 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.0', date: '24 jun 2026', title: 'Autocompletar con Tab, pegar largo que se resume y el contador de cambios sin commitear', items: [
+      'Autocompletar con Tab en las terminales: mientras escribís, Consomni te sugiere en gris (pegado al cursor) el comando más reciente de tu historial que empieza igual. Apretás Tab y lo completa. La tecla es reconfigurable: clickeás el cartelito "Tab" al lado de la sugerencia y elegís otra (→, End, Ctrl+algo). Lo prendés y apagás desde Settings → Editor & Terminal. Por ahora funciona en terminales shell.',
+      'Pegar textos largos en claude ahora se resume solo a "[Texto pegado]" en vez de volcar las 50 líneas en pantalla, y si lo pegás de nuevo se expande. Antes, en algunos casos, el pegado se duplicaba y eso hacía que se viera expandido; quedó resuelto para que siempre se pegue una sola vez.',
+      'El indicador de cambios sin commitear (+N / −N) ahora se ve siempre, también cuando estás con las terminales en pantalla completa: sigue a la terminal activa. Además cuenta los archivos nuevos sin trackear, así el número coincide con lo que ves en Warp o tu editor.',
+    ] },
     { v: '1.8.2', date: '23 jun 2026', title: 'El input de claude queda SIEMPRE abajo + terminales que se reajustan perfecto', items: [
       'El cuadro de texto de claude ahora queda anclado abajo de todo en la terminal, como en WezTerm/Ghostty. Antes, en una sesión recién abierta (o al escribir y borrar), el input quedaba flotando en el medio con espacio vacío debajo. Se resuelve activando el modo "fullscreen" de claude en las terminales embebidas.',
       'Lo podés desactivar en Settings → Editor & Terminal ("claude: input box anclado abajo") si preferís el modo inline con el historial en el buffer de la terminal.',
@@ -1929,6 +1934,9 @@
         '<div class="set-row"><span class="k">Ctrl+Espacio abre</span>' + seg2('quickTermKind', cfg.quickTermKind || 'claude-skip', [['shell', 'terminal'], ['claude', 'claude'], ['claude-skip', 'claude ⚡']]) + '</div>' +
         '<div class="set-row"><span class="k">claude: input box anclado abajo</span>' + seg2('claudeFullscreen', cfg.claudeFullscreen !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
         '<div style="font-size:10px;color:var(--text-4);margin-top:4px">modo fullscreen de claude (alt-screen) → el input queda abajo de todo, como WezTerm · off = inline (input sigue al contenido, scrollback en el buffer) · aplica a terminales nuevas</div>' +
+        '<div class="set-row"><span class="k">autocompletar con Tab (terminal)</span>' + seg2('autosuggest', cfg.autosuggest !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
+        '<div class="set-row"><span class="k">tecla para aceptar la sugerencia</span><span style="display:inline-flex;align-items:center;gap:8px"><code id="setSgKey" style="padding:2px 7px;border-radius:5px;background:var(--surface-input);border:1px solid var(--border);font-family:\'Geist Mono\',monospace;font-size:11px;color:var(--text-2)">' + esc(prettyAcceptKey(cfg.autosuggestAcceptKey || 'Tab')) + '</code><button class="btn btn--sm" id="setSgRebind">cambiar</button></span></div>' +
+        '<div style="font-size:10px;color:var(--text-4);margin-top:4px">sugiere en gris (pegado al cursor) el comando más reciente de tu historial que empieza con lo que escribís · la tecla acepta SÓLO cuando hay sugerencia visible (si no, pasa al completado nativo) · sólo en terminales shell</div>' +
       '</div>' +
       '<div class="set-sec" id="setProfSec"><div class="lbl">PERFIL DE CLAUDE (config dir)<button class="set-tour-link" data-act="profile-tour" title="ver el tutorial">' + C.svg('eye', 11, 1.8) + ' tutorial</button></div>' + profRows +
         '<div class="set-row" style="margin-top:8px"><input class="set-inp" id="setProfPath" style="flex:1;width:auto" placeholder="ruta personalizada (ej C:\\Users\\vos\\.claude-max)"><button class="btn btn--sm" id="setProfPick">' + C.svg('folder', 12, 2) + ' elegir</button></div>' +
@@ -1969,6 +1977,56 @@
       renderSettings(cfg, {});
     });
   }
+
+  /* ── AUTOSUGGEST (Feature: autocompletar con Tab) — bridge a las terminales + reasignar la tecla ── */
+  function prettyAcceptKey(k) { var m = { ArrowRight: '→', ArrowLeft: '←', ArrowUp: '↑', ArrowDown: '↓' }; return m[k] || k; }
+  // serializa una tecla EXACTAMENTE igual que terminals-ui (sgSerializeKey) → lo guardado matchea en runtime
+  function serializeAcceptKey(ev) {
+    var mods = ''; if (ev.ctrlKey) mods += 'Ctrl+'; if (ev.altKey) mods += 'Alt+'; if (ev.shiftKey) mods += 'Shift+';
+    var c = ev.code || '', base;
+    if (c.indexOf('Key') === 0) base = c.slice(3); else if (c.indexOf('Digit') === 0) base = c.slice(5); else base = c || ev.key;
+    return mods + base;
+  }
+  // válida como tecla de aceptar: navegación/función sola (Tab/→/End/F-keys…) o cualquier cosa con Ctrl/Alt;
+  // NO imprimibles sin modificador (se tipearían), ni Enter/Escape/Backspace.
+  function isValidAcceptKey(ev) {
+    if (ev.key === 'Escape' || ev.key === 'Enter' || ev.key === 'Backspace') return false;
+    // Ctrl mapea a chars de control del terminal (Ctrl+C=SIGINT, Ctrl+W=cerrar pane, Ctrl+V=pegar, Ctrl+U=borrar…)
+    // → NO se permite como tecla de aceptar (robaría esos shortcuts cuando hay una sugerencia). Alt sí (no choca).
+    if (ev.ctrlKey) return false;
+    if (ev.altKey) return !(ev.key === 'Control' || ev.key === 'Alt' || ev.key === 'Shift' || ev.key === 'Meta');
+    if (ev.shiftKey) return false;   // sin Ctrl/Alt, con Shift, el descriptor llevaría 'Shift+' pero la tecla pelada nunca matchearía en runtime → rechazar
+    var ok = { Tab: 1, ArrowRight: 1, ArrowLeft: 1, ArrowUp: 1, ArrowDown: 1, End: 1, Home: 1, Insert: 1, Delete: 1, PageUp: 1, PageDown: 1, F1: 1, F2: 1, F3: 1, F4: 1, F5: 1, F6: 1, F7: 1, F8: 1, F9: 1, F10: 1, F11: 1, F12: 1 };
+    return !!(ok[ev.key] || ok[ev.code]);
+  }
+  function pushAutosuggest() { try { if (window.ConsomniTerms && window.ConsomniTerms.setAutosuggest) window.ConsomniTerms.setAutosuggest(state.autosuggest !== false, state.autosuggestAcceptKey || 'Tab'); } catch (e) {} }
+  function closeAcceptKeyRebind() { var o = document.getElementById('sgRebind'); if (o && o._cleanup) o._cleanup(); else if (o && o.parentNode) o.parentNode.removeChild(o); }
+  function openAcceptKeyRebind() {
+    closeAcceptKeyRebind();
+    var ov = document.createElement('div'); ov.id = 'sgRebind'; ov.className = 'cfm-scrim';
+    ov.innerHTML = '<div class="cfm-card" role="dialog" aria-modal="true">' +
+      '<div class="cfm-ttl">' + C.svg('term', 15, 2) + 'tecla para aceptar la sugerencia</div>' +
+      '<div class="cfm-body">Apretá la tecla que querés usar para aceptar el ghost text.<br>Sirven <code>Tab</code>, <code>→</code>, <code>End</code>, una tecla de función, o una combinación con <code>Alt</code>. <code>Esc</code> cancela.</div>' +
+      '<div class="sg-rebind-key" id="sgRebindKey">esperando una tecla…</div>' +
+    '</div>';
+    document.body.appendChild(ov);
+    var keyEl = ov.querySelector('#sgRebindKey');
+    function onKey(ev) {
+      ev.preventDefault(); ev.stopPropagation();
+      if (ev.key === 'Escape') { cleanup(); return; }
+      if (ev.key === 'Control' || ev.key === 'Alt' || ev.key === 'Shift' || ev.key === 'Meta' || ev.key === 'CapsLock') { keyEl.textContent = '…'; return; }
+      if (!isValidAcceptKey(ev)) { keyEl.textContent = 'esa no sirve — probá Tab, →, End o Ctrl+algo'; return; }
+      var k = serializeAcceptKey(ev);
+      state.autosuggestAcceptKey = k; pushAutosuggest(); saveSetting({ autosuggestAcceptKey: k });
+      var disp = document.getElementById('setSgKey'); if (disp) disp.textContent = prettyAcceptKey(k);
+      cleanup();
+    }
+    function onClick(e) { if (e.target === ov) cleanup(); }
+    function cleanup() { document.removeEventListener('keydown', onKey, true); ov.removeEventListener('click', onClick); if (ov.parentNode) ov.parentNode.removeChild(ov); }
+    ov._cleanup = cleanup;
+    document.addEventListener('keydown', onKey, true);
+    ov.addEventListener('click', onClick);
+  }
   function wireSettings(cfg) {
     var card = document.querySelector('.set-card');
     if (!card) return;
@@ -1986,11 +2044,13 @@
           return;
         }
         var patch = {};
-        if (key === 'sounds' || key === 'checkUpdates' || key === 'claudeFullscreen') patch[key] = (val === 'on'); else patch[key] = val;
+        if (key === 'sounds' || key === 'checkUpdates' || key === 'claudeFullscreen' || key === 'autosuggest') patch[key] = (val === 'on'); else patch[key] = val;
         if (key === 'quickTermKind') state.quickTermKind = val;   // aplica sin reiniciar
+        if (key === 'autosuggest') { state.autosuggest = (val === 'on'); pushAutosuggest(); }   // aplica en vivo a las terminales
         saveSetting(patch);
       });
     });
+    var sgReb = card.querySelector('#setSgRebind'); if (sgReb) sgReb.addEventListener('click', function () { openAcceptKeyRebind(); });
     var ctx = card.querySelector('#setCtx'); if (ctx) ctx.addEventListener('change', function () { saveSetting({ ctxWarnThreshold: Math.max(50, Math.min(100, +ctx.value || 90)) }); });
     var rf = card.querySelector('#setRefresh'); if (rf) rf.addEventListener('change', function () { saveSetting({ refreshMs: Math.max(1, Math.min(60, +rf.value || 2)) * 1000 }); });
     var port = card.querySelector('#setPort'); if (port) port.addEventListener('change', function () { saveSetting({ port: Math.max(1024, Math.min(65535, +port.value || 4517)) }).then(function () { toast('puerto guardado — reinstalá hooks + reiniciá para aplicar', 'warn'); }); });
@@ -2410,6 +2470,8 @@
     if (window.ConsomniTerms.setHomeProjects) window.ConsomniTerms.setHomeProjects(homeProjectsList);
     // el dock pregunta antes de cerrar una terminal viva (corta el proceso) → modal con "no volver a mostrar"
     if (window.ConsomniTerms.setCloseConfirmer) window.ConsomniTerms.setCloseConfirmer(confirmCloseTerminal);
+    // autosuggest: el hint "Tab" clickeable de la terminal abre el popover de reasignar tecla (la config vive acá)
+    if (window.ConsomniTerms.setAutosuggestRebinder) window.ConsomniTerms.setAutosuggestRebinder(openAcceptKeyRebind);
     // SIEMPRE arrancar en "inicio" con las terminales que quedaron de la sesión anterior
     try { window.ConsomniTerms.restoreSession(); } catch (e) {}
   }
@@ -2426,6 +2488,9 @@
         state.frentes = (cfg.frentes && typeof cfg.frentes === 'object') ? cfg.frentes : {};
         state.quickTermKind = cfg.quickTermKind || 'claude-skip';
         state.theme = (cfg.theme === 'light') ? 'light' : 'dark';
+        state.autosuggest = cfg.autosuggest !== false;
+        state.autosuggestAcceptKey = cfg.autosuggestAcceptKey || 'Tab';
+        pushAutosuggest();   // empujar la config del autosuggest a las terminales
         applyTheme();
       }
       render();

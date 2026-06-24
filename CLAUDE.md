@@ -1070,6 +1070,89 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.0 — Autocompletar con Tab (ghost text) + pegar largo que colapsa + badge +N/−N visible
+> Tres features (Franco/Facundo). Bump **1.8.2 → 1.9.0** (`package.json` + fallbacks `brand-ver`/`.ver` en
+> `chrome.js` + entrada en `CHANGELOG` de `app.js`). TODO verificado EMPÍRICAMENTE (harness PTY headless ABI v121,
+> captura de bytes reales en la PTY, screenshots en vivo). Aditivo, respeta las 4 Hard Rules (CSS aditivo con
+> precedente de colores fijos para overlays de terminal; responsive; cero API de Anthropic; cero atribución a IA).
+
+### F1 — Autocompletar con Tab (ghost text estilo Warp/fish, SÓLO shells)
+- **Qué:** mientras tipeás en una terminal SHELL, Consomni muestra en gris (pegado al cursor) el comando más
+  reciente del historial que matchea el prefijo + un pill **"Tab"** clickeable. La tecla configurada (default
+  `Tab`) ACEPTA (escribe SÓLO el sufijo a la PTY, sin `\r`). Verificado en vivo: tipear "git s" → ghost "tatus" +
+  "Tab" → Tab completa a "git status" → ghost desaparece; toggle off en Settings → no aparece.
+- **Buffer sombra + modelo de confianza INVERTIDO** (`terminals-ui.js`, `shellAutosuggestKey` en el
+  `attachCustomKeyEventHandler`): `pane._sgLine` se llena con tipeo hacia adelante / Backspace; **CUALQUIER otra
+  tecla** (flechas, Home/End, Tab sin sugerencia, F-keys, paste, modificadores combinados…) marca `pane._sgTrusted
+  = false` → sin sugerencia (NUNCA corrompe la línea, porque aceptar exige `_sgGhostVisible`). Reset a vacío+confiable
+  SÓLO en Enter / Ctrl+C (la línea queda conocida-vacía en PSReadLine). Los modificadores solos (Shift/Ctrl/…) se
+  ignoran (si no, tipear mayúsculas rompía el tracking). **claude queda fuera de alcance** (stub honesto: dibuja su
+  propio input/TUI en alt-screen + su propia sugerencia → un ghost persistente pelearía con su render).
+- **Ghost** (reusa `cursorRect`; span ÚNICO por panel `.dk-sg` con `.dk-sg-text` + `.dk-sg-hint`, en `document.body`,
+  colores FIJOS oscuros como `.dk-at-ghost` porque la terminal es oscura siempre). Reposiciona en cada keystroke
+  (rAF), resize (`syncTerm`) y `term.onRender` (el echo del shell llega async); si la fila del cursor SALTÓ (output)
+  → oculta. Limpieza en `killPaneContent`.
+- **Historial:** store dedicado `~/.consomni/term-history.json` (clon de `loadDock/saveDock` en `config.ts`;
+  IPC `getTermHistory`/`saveTermHistory`; preload `term.getHistory/saveHistory`). `{commands:[{cmd,cwd,ts}]}`,
+  dedup, más-reciente-primero, cap 500. Match = prefijo exacto, **preferí mismo cwd** (sino el más reciente
+  cualquiera). Se graba en Enter (si la línea es confiable). **⚠️ Gotcha de testing:** sembrar el JSON con
+  `Out-File -Encoding utf8` mete un BOM → `JSON.parse` del main tira y el historial queda vacío (el feature real
+  escribe con `JSON.stringify`, sin BOM — sólo afectaba al seed de test).
+- **Config:** `autosuggest:boolean` (default `true`) + `autosuggestAcceptKey:string` (default `'Tab'`,
+  reconfigurable). Settings → Editor & Terminal: toggle (`seg2('autosuggest',…)`, coerción a bool en
+  `wireSettings`) + fila con la tecla actual + botón **"cambiar"** → popover on-brand (reusa `.cfm-*`) que captura
+  el próximo keydown y lo serializa (`serializeAcceptKey`, **idéntico** a `sgSerializeKey` de terminals-ui →
+  'Tab'/'ArrowRight'/'End'/'Alt+F'). Bridge `ConsomniTerms.setAutosuggest(enabled,key)` (empujado al boot + al
+  togglear) y `setAutosuggestRebinder` (el hint clickeable de la terminal abre el popover; la config vive en app.js).
+- **⚠️ Hardening (review adversaria):** (a) `isValidAcceptKey` **rechaza Ctrl** (mapea a chars de control del
+  terminal: Ctrl+C=SIGINT, Ctrl+W=cerrar, Ctrl+V=pegar → bindearlas robaría esos shortcuts cuando hay sugerencia)
+  y **Shift solo** (el descriptor llevaría `Shift+` pero la tecla pelada nunca matchearía); permite Alt + nav/F-keys.
+  Defensa en profundidad: el accept en `shellAutosuggestKey` exige `!ev.ctrlKey`. (b) Los writes PROGRAMÁTICOS a la
+  PTY (`insertCmd`/`insertIntoFocused`/NL/presets) marcan `_sgTrusted=false` (la sombra no conoce ese texto → sin
+  sugerencia hasta el próximo Enter, para NO aceptar un sufijo desfasado y corromper la línea); `cdInto` ejecuta
+  (\r) → resetea la sombra a vacío+confiable. (c) El accept extiende `_sgLine` SÓLO si el write a la PTY ocurrió.
+
+### F2 — Pegar largo en claude colapsa a "[Pasted text]" (root-cause EMPÍRICO: era DUPLICACIÓN, no "unwrap")
+- **Hipótesis descartada con evidencia:** se asumía que el paste no llegaba "envuelto" en bracketed paste. Falso.
+  Captura de los bytes REALES que Consomni manda a la PTY (hex log temporal en `writeTerm`, paste en vivo): el
+  `term.paste` de xterm SÍ envuelve correctamente — `\x1b[200~…\r…\x1b[201~`. Y el harness PTY headless contra
+  `claude.exe` v2.1.187 confirma: cualquier wrap (`\r`/`\n`/`\r\n`) **colapsa** a `[Pasted text #N]`; sólo el
+  texto SIN envolver queda expandido. O sea: el wrap ya funcionaba.
+- **Causa REAL (verificada):** xterm tiene su PROPIO handler de `paste` que TAMBIÉN escribe el bracketed-paste a
+  la PTY (probado: un `paste` event pelado → 1 write envuelto). Sumado a nuestro `termPaste` del Ctrl+V, un Ctrl+V
+  real podía pegar DOS veces (si `preventDefault` no frenaba el paste nativo) → claude colapsa con el 1º y el 2º
+  paste idéntico lo **EXPANDE** ("paste again to expand") → exactamente el síntoma de Franco (texto expandido +
+  ese hint). El `ev.preventDefault()` de v1.8.1 mitigaba pero es frágil.
+- **Fix** (`terminals-ui.js`): **guard de de-dup en CAPTURA**. El Ctrl+V setea `pane._pasteGuard = Date.now()`;
+  un listener `body.addEventListener('paste', …, true)` traga el paste nativo si nuestro paste corrió hace <400ms
+  (`preventDefault + stopImmediatePropagation`). GARANTIZA un solo paste sin importar si `preventDefault` frenó el
+  nativo. Verificado: keydown Ctrl+V + `paste` event juntos → **1** write → `[Pasted text #1 +21 lines]` (queda
+  colapsado). Pegar por menú del SO (sin guard reciente) sigue pasando el nativo (no rompe nada).
+- **PASO 2 (colapso a nivel Consomni para SHELL): NO se hizo** (honesto): retener el paste del shell rompería
+  "pego y Enter para correr". El colapso es feature de la TUI de claude; los shells reciben el paste verbatim.
+
+### F3 — Badge "+N −N" (cambios sin commitear) VISIBLE en inicio + matchea Warp (cuenta untracked)
+- **Causa raíz de "no se ve" (`terminals-ui.js`):** `updateDiffBadge()` sólo armaba key con `view!=='__home__' &&
+  viewCwd`. Franco trabaja en **inicio** con una terminal suelta → key='' → el badge NUNCA se mostraba, aunque
+  `lastSnap.diffStats` SÍ tenía la key del cwd. **Fix:** fallback a la **terminal ACTIVA** (`activeTermCwd()`) cuando
+  no hay `viewCwd`; el cwd resuelto se guarda en `el._cwd` (el click abre el diff correcto); `updateDiffBadge()` se
+  dispara también desde `setFocus`/`updateCount` (sigue a la terminal enfocada). **⚠️ Bug secundario fijado:**
+  `bindSnap()` no se llamaba en el path de abrir una terminal (sólo en restore con dock NO vacío) → `lastSnap`
+  quedaba null → el badge no tenía datos. Ahora `ensureDock()` llama `bindSnap()` (idempotente) → `lastSnap` siempre
+  disponible. Verificado: en inicio maximizado, "TERMINALES [+313 −12]" sigue al cwd de la terminal activa.
+- **Matchear Warp (cuenta untracked) (`sessions.ts`):** `git diff --shortstat HEAD` NO cuenta archivos nuevos sin
+  trackear; Warp/VS Code sí. `countUntrackedAdds()` corre `git -c core.quotepath=false status --porcelain
+  --untracked-files=all`, parsea las líneas `??` y suma las líneas de cada archivo nuevo. **ASÍNCRONO**
+  (`fs.stat`/`fs.readFile`, NO `*Sync` → no bloquea el event loop del main aunque haya muchos archivos) y
+  **DETERMINÍSTICO** (cap por CANTIDAD ≤200, orden estable de git status → el set es fijo → el número NO parpadea
+  entre recálculos; ≤256KB/archivo, salta binarios por NUL). **⚠️ Review adversaria:** la 1ª versión leía con
+  `*Sync` + un presupuesto de ~150ms que cortaba el loop en distinta cantidad de archivos cada ciclo → sumas
+  parciales distintas → el badge parpadeaba + jank en el main thread. La versión async+por-cantidad lo elimina.
+  El número difiere a propósito de `git diff --shortstat` puro — para matchear lo que ve el usuario. El board
+  (`.col-diff`) ya andaba; ahora muestra el total con untracked (ej consomni +408/−15, altitude +1856/−1).
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

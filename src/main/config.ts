@@ -30,6 +30,8 @@ export interface AppConfig {
   seenProfileTour: boolean;    // ¿ya vio el tutorial de multi-perfil? (gate confiable bajo file://, no localStorage). Auto-salta 1 vez al actualizar
   seenWhatsNew18: boolean;     // ¿ya vio el tour de novedades v1.8.0? (gate confiable bajo file://). Auto-salta 1 vez tras actualizar
   autoStart: boolean;          // abrir Consomni al iniciar la PC (nativo: app.setLoginItemSettings → registro Run). Sólo aplica empaquetado
+  autosuggest: boolean;        // autocompletar con ghost text (estilo Warp/fish) en las terminales SHELL, desde el historial. default true
+  autosuggestAcceptKey: string; // tecla que ACEPTA la sugerencia (default 'Tab'; reconfigurable: 'ArrowRight'|'End'|'Ctrl+F'|…)
   frentes: Record<string, FrenteMeta>; // estado MANUAL de cada frente (proyecto) — privado, local. key = projKey
 }
 
@@ -51,6 +53,7 @@ export const STATE_PATH = path.join(CONSOMNI_DIR, 'state.json');
 export const DOCK_PATH = path.join(CONSOMNI_DIR, 'dock.json');
 export const LIBRARY_PATH = path.join(CONSOMNI_DIR, 'library.json');
 export const NOTIFICATIONS_PATH = path.join(CONSOMNI_DIR, 'notifications.json');
+export const TERM_HISTORY_PATH = path.join(CONSOMNI_DIR, 'term-history.json');
 export const BACKUPS_DIR = path.join(CONSOMNI_DIR, 'backups');
 export const SETUP_LOG = path.join(CONSOMNI_DIR, 'setup.log');
 
@@ -76,6 +79,8 @@ const DEFAULTS: AppConfig = {
   seenProfileTour: false,
   seenWhatsNew18: false,
   autoStart: false,
+  autosuggest: true,
+  autosuggestAcceptKey: 'Tab',
   frentes: {},
 };
 
@@ -217,6 +222,19 @@ export function loadDock(): any {
 export function saveDock(data: any): void {
   ensureConsomniDir();
   try { fs.writeFileSync(DOCK_PATH, JSON.stringify(data), 'utf8'); } catch { /* noop */ }
+}
+
+/* ── historial de comandos de las terminales que Consomni lanza (para el autosuggest ghost text) ──
+   Store dedicado (NO config.json) → no dispara rescan/saveConfig en cada comando. Dedup + más-reciente-primero. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function loadTermHistory(): any {
+  try { if (fs.existsSync(TERM_HISTORY_PATH)) return JSON.parse(fs.readFileSync(TERM_HISTORY_PATH, 'utf8')); } catch { /* noop */ }
+  return null;
+}
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export function saveTermHistory(data: any): void {
+  ensureConsomniDir();
+  try { fs.writeFileSync(TERM_HISTORY_PATH, JSON.stringify(data), 'utf8'); } catch { /* noop */ }
 }
 
 /* ── centro de notificaciones (store dedicado) ──
