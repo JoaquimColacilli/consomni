@@ -1023,6 +1023,53 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.8.2 — Input de claude anclado ABAJO (fullscreen) + resize atómico PTY↔xterm
+> Bug reportado por el usuario (2 personas): el input box de claude en la terminal embebida NO quedaba pegado
+> al fondo —en una sesión fresca, o tras escribir y borrar, flotaba en el medio con filas vacías debajo—,
+> mientras que en WezTerm/Ghostty SÍ queda abajo. Bump **1.8.1 → 1.8.2**. Aditivo, respeta las 3 Hard Rules
+> (cero API de Anthropic: el fix es una env var sólo-claude que NO toca disco). Verificado en vivo (PTY real
+> + xterm real de Consomni) por screenshot.
+
+### Causa raíz (investigada empíricamente, NO asumida)
+- **No era dimensiones ni resolución.** Claude Code tiene DOS modos de render de su TUI:
+  - **`default` (inline):** el input box sigue al contenido → en una sesión sin conversación queda ARRIBA,
+    con filas vacías abajo; al achicarse el contenido (escribir→borrar) el input "sube". Era lo que usaba Consomni.
+  - **`fullscreen` (alt-screen, tipo vim/htop):** el input box queda FIJO abajo y el contenido scrollea arriba.
+    Es lo que hace WezTerm/Ghostty (tienen el modo activado).
+- **Ground truth (capturando la salida real de `claude` v2.1.187 en una PTY cruda + en el xterm de Consomni):**
+  claude renderiza inline por defecto y la ÚNICA query que manda al arrancar es `XTVERSION` (`\x1b[>0q`); NO
+  manda DSR/DA/winsize, y responderle como WezTerm / setear `TERM_PROGRAM` / probar 5 identidades de XTVERSION
+  **NO** cambia el anclado (probado 6 formas → todas ARRIBA). El disparador es el modo TUI, no una capability.
+- **El control real:** la env var **`CLAUDE_CODE_NO_FLICKER=1`** (o `tui:fullscreen` en settings.json, o
+  `/tui fullscreen`). Verificado en PTY 80×40: con la var, claude entra a **alt-screen** y el input pasa de la
+  fila 14/40 → **40/40** (abajo). Verificado en vivo en el xterm de Consomni: banner arriba, input `›` + hint
+  pegados abajo, render limpio (alt-screen anda bien sobre ConPTY).
+
+### Fix 1 — `CLAUDE_CODE_NO_FLICKER=1` en las terminales embebidas (`config.ts` + `terminals.ts`)
+- `applyClaudeFullscreenEnv(env)` inyecta `CLAUDE_CODE_NO_FLICKER=1` en `createTerm` (sólo las terminales
+  INTERACTIVAS embebidas; NO en el helper NL `claude -p`, que parsea JSON de stdout). Es env var **sólo-claude,
+  no toca disco** (respeta HR3), no afecta a otros procesos del shell. Resuelve LOS DOS síntomas: sesión fresca
+  (input abajo) y el transitorio escribir→borrar→flotar (en alt-screen el input es una región fija abajo).
+- **Config nueva `claudeFullscreen: boolean` (default `true`)** en `config.ts` (interface + DEFAULTS). Opt-out.
+- **Toggle en Settings → Editor & Terminal** ("claude: input box anclado abajo"): `seg2('claudeFullscreen', …)`
+  con coerción a bool en `wireSettings` (junto a `sounds`/`checkUpdates`). Aplica a terminales NUEVAS.
+
+### Fix 2 — Resize ATÓMICO PTY↔xterm (`terminals-ui.js`) — complementario y ahora load-bearing
+- El PTY se sincronizaba SÓLO vía `term.onResize`, que dispara únicamente cuando CAMBIAN las dims de xterm;
+  un `fit.fit()` no-op (dims propuestas == actuales) NUNCA empujaba al PTY → el PTY podía quedar con menos
+  filas que las visibles. Con el modo fullscreen esto importa MÁS: el layout full-height ancla el input a la
+  ÚLTIMA fila que cree tener → si el PTY tiene menos filas que las visibles, ancla a la fila equivocada.
+- `syncTerm(term, fit, pane)`: salta paneles ocultos (`offsetParent === null` → `fit()` daría NaN y
+  `term.cols/rows` quedarían stale), hace `fit.fit()`, LEE las dims REALES de xterm y las empuja al PTY
+  SIEMPRE (idempotente, dedupe por dims vía `pane._ptySize` + `pushPty`), y re-ancla al fondo sólo si el
+  usuario ya estaba al fondo (`nearBottom`). `refitAll` (único choke point: RO, ventana, drag, show/restore/
+  maximize, showView, minimize/restore, ask-bar) pasa por `syncTerm`. En `mountTerminal`: guard `offsetParent`
+  en el 1er fit, `onResize` empuja vía `pushPty`, y empuje atómico post-create + un rAF diferido (captura el
+  crecimiento por fuentes/asentamiento). Verificado en vivo: pty.rows == xterm.rows siempre (37/37, 22/22, y
+  tras un resize no-op).
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

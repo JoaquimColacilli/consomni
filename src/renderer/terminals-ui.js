@@ -1338,21 +1338,29 @@
     // menú contextual (click derecho): si está sobre una ruta → acciones de archivo; siempre copiar/pegar/seleccionar
     try { body.addEventListener('contextmenu', function (ev) { ev.preventDefault(); showTermCtx(ev.clientX, ev.clientY, term, ev, pane); }); } catch (e) {}
 
+    // RESIZE ATÓMICO: el ResizeObserver y fonts.ready ahora empujan fit+sync al PTY (no sólo el fit del
+    // xterm) → el PTY nunca queda más chico que las filas visibles (raíz del "input flotando").
+    pane._ptySize = '';   // se siembra al crear el PTY; pushPty dedupea por dims para no spamear SIGWINCH
     var ro = null;
-    if (g.ResizeObserver) { ro = new g.ResizeObserver(function () { try { fit.fit(); } catch (e) {} }); ro.observe(body); }
-    if (g.document && g.document.fonts && g.document.fonts.ready) g.document.fonts.ready.then(function () { try { fit.fit(); } catch (e) {} });
+    if (g.ResizeObserver) { ro = new g.ResizeObserver(function () { syncTerm(term, fit, pane); }); ro.observe(body); }
+    if (g.document && g.document.fonts && g.document.fonts.ready) g.document.fonts.ready.then(function () { syncTerm(term, fit, pane); });
 
     requestAnimationFrame(function () {
-      try { fit.fit(); } catch (e) {}
-      api.term.create({ cwd: cwd, kind: kind, cols: term.cols || 80, rows: term.rows || 24, resume: resume, skip: skip, pick: pick }).then(function (res) {
+      // hidden mount: NO medir (proposeDimensions daría NaN) → el PTY nace en 80x24 y se corrige al mostrarse
+      if (pane.offsetParent !== null) { try { fit.fit(); } catch (e) {} }
+      var bootCols = term.cols || 80, bootRows = term.rows || 24;
+      api.term.create({ cwd: cwd, kind: kind, cols: bootCols, rows: bootRows, resume: resume, skip: skip, pick: pick }).then(function (res) {
         if (!res || !res.ok) { term.write('\r\n  \x1b[31m' + ((res && res.error) || 'no se pudo abrir') + '\x1b[0m\r\n'); return; }
         pane.dataset.tid = res.id;
         pane.dataset.cwd = res.cwd || cwd || '';
+        pane._ptySize = bootCols + 'x' + bootRows;   // el PTY nació con estas dims (último empuje conocido)
         terms.set(res.id, { term: term, fit: fit, pane: pane, ro: ro });
         setPaneMeta(pane, ic, res.title || (kind === 'claude' ? 'claude' : 'shell'), projLabel(pane));
         term.onData(function (d) { api.term.write(res.id, d); });
-        term.onResize(function (sz) { api.term.resize(res.id, sz.cols, sz.rows); });
-        try { fit.fit(); if (rootEl.contains(pane)) term.focus(); } catch (e) {}
+        term.onResize(function (sz) { pushPty(pane, res.id, sz.cols, sz.rows); });   // resize genuino (drag/ventana) → al PTY
+        if (rootEl.contains(pane)) { try { term.focus(); } catch (e) {} }
+        syncTerm(term, fit, pane);                                   // EMPUJE ATÓMICO post-create: corrige el race de montaje (fit no-op igual empuja)
+        requestAnimationFrame(function () { syncTerm(term, fit, pane); });   // captura el crecimiento por fuentes / asentamiento del layout
         persist();
       }).catch(function () { term.write('\r\n  \x1b[31mfalló el IPC\x1b[0m\r\n'); });
     });
@@ -1634,12 +1642,42 @@
     });
   }
 
-  /* ── fit ── */
+  /* ── fit · RESIZE ATÓMICO (single source of truth de dimensiones) ──
+     El bug del "input flotando en el medio" era un DESYNC PTY↔xterm: el PTY se sincronizaba SÓLO como
+     efecto de term.onResize, que dispara únicamente cuando CAMBIAN las dims de xterm. addon-fit.fit()
+     es no-op cuando las dims propuestas == las actuales → un fit no-op NUNCA empujaba al PTY. Así el
+     PTY podía quedar con MENOS filas que las visibles y, como ningún fit posterior cambiaba xterm,
+     el desync quedaba pegado. Claude/Ink lee process.stdout.rows (= filas del PTY) para anclar su
+     bloque inferior; con pty.rows < visibles ancla el "fondo" muy arriba → al reimprimir un frame más
+     corto in-place el input queda en el medio con filas vacías debajo. syncTerm hace fit + LEE las
+     dims REALES de xterm + las empuja al PTY SIEMPRE (idempotente), cerrando el desync en su raíz. */
   var fitTimer = null, liveRaf = null;
+  function nearBottom(term) { try { var b = term.buffer.active; return (b.baseY - b.viewportY) <= 1; } catch (e) { return true; } }
+  // empuje al PTY con dedupe por dims (evita SIGWINCH redundante: onResize + syncTerm + drags por frame)
+  function pushPty(pane, tid, cols, rows) {
+    if (!tid || !api || !api.term || !api.term.resize || !(cols > 0) || !(rows > 0)) return;
+    var key = cols + 'x' + rows;
+    if (pane._ptySize === key) return;   // el PTY ya está en estas dims → no re-empujar
+    pane._ptySize = key;
+    api.term.resize(tid, cols, rows);
+  }
+  // fit del xterm + empuje ATÓMICO al PTY de sus dims REALES (no de proposeDimensions, que es unclamped
+  // y NaN si está oculto). Salta paneles ocultos (offsetParent null): ahí fit() es no-op por NaN y
+  // term.cols/rows quedarían STALE → empujarlas desincronizaría. Re-ancla al fondo SÓLO si el usuario
+  // ya estaba al fondo (respeta el scroll hacia arriba intencional → no lo saca de la historia).
+  function syncTerm(term, fit, pane) {
+    if (!term || !fit || !pane || pane.offsetParent === null) return;
+    var wasBottom = nearBottom(term);
+    try { fit.fit(); } catch (e) {}
+    pushPty(pane, pane.dataset.tid, term.cols || 0, term.rows || 0);
+    if (wasBottom) { try { term.scrollToBottom(); } catch (e) {} }
+  }
   function refitSoon() { if (fitTimer) cancelAnimationFrame(fitTimer); fitTimer = requestAnimationFrame(function () { fitTimer = requestAnimationFrame(refitAll); }); }
   // fit por frame durante un drag (reflow EN VIVO; el ResizeObserver llega tarde)
   function liveFit() { if (liveRaf) cancelAnimationFrame(liveRaf); liveRaf = requestAnimationFrame(function () { liveRaf = null; refitAll(); }); }
-  function refitAll() { terms.forEach(function (t) { try { if (t.pane.offsetParent !== null) t.fit.fit(); } catch (e) {} }); }
+  // único choke point de refit → todos los paths (RO, ventana, drag, show/restore/maximize, showView,
+  // minimize/restore, ask-bar) pasan por el empuje atómico. Los ocultos los saltea syncTerm.
+  function refitAll() { terms.forEach(function (t) { try { syncTerm(t.term, t.fit, t.pane); } catch (e) {} }); }
 
   /* ── estados: show / minimize / restore / maximize / home / hide ── */
   function show() {

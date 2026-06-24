@@ -24,6 +24,16 @@ function applyClaudeProfileEnv(env: NodeJS.ProcessEnv): void {
   if ((cfg.claudeConfigDir || '').trim()) env.CLAUDE_CONFIG_DIR = resolveClaudeDir(cfg);
 }
 
+/** Modo "fullscreen" de Claude Code: ancla el input box ABAJO (alt-screen, como vim/htop) en vez del
+    render inline por defecto, que en una sesión sin conversación deja el input ARRIBA con filas vacías
+    abajo (la diferencia con WezTerm/Ghostty). Es una env var SÓLO-claude, NO toca disco (respeta Hard
+    Rule 3) y no afecta a otros procesos del shell. Verificado en PTY real: con esto claude entra a
+    alt-screen y fija el input a la última fila. Opt-out con claudeFullscreen:false. Sólo en las
+    terminales INTERACTIVAS embebidas (NO en el helper NL `claude -p`, que parsea JSON de stdout). */
+function applyClaudeFullscreenEnv(env: NodeJS.ProcessEnv): void {
+  if (loadConfig().claudeFullscreen !== false) env.CLAUDE_CODE_NO_FLICKER = '1';
+}
+
 // Tipos mínimos (evita acoplar el build al .d.ts del fork).
 interface IPty {
   onData(cb: (data: string) => void): void;
@@ -106,6 +116,8 @@ export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number;
   delete env.ELECTRON_RUN_AS_NODE;
   // Perfil activo de Claude Code (multi-perfil): cualquier `claude` adentro usa este config dir.
   applyClaudeProfileEnv(env);
+  // Input box anclado abajo (fullscreen/alt-screen) para cualquier `claude` de esta terminal embebida.
+  applyClaudeFullscreenEnv(env);
 
   // ¿qué comando tipear cuando el shell muestre el prompt?
   // claude normal, o `claude --resume <id>` para CONTINUAR esa conversación (interactiva).

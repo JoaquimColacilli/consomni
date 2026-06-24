@@ -497,6 +497,11 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.8.2', date: '23 jun 2026', title: 'El input de claude queda SIEMPRE abajo + terminales que se reajustan perfecto', items: [
+      'El cuadro de texto de claude ahora queda anclado abajo de todo en la terminal, como en WezTerm/Ghostty. Antes, en una sesión recién abierta (o al escribir y borrar), el input quedaba flotando en el medio con espacio vacío debajo. Se resuelve activando el modo "fullscreen" de claude en las terminales embebidas.',
+      'Lo podés desactivar en Settings → Editor & Terminal ("claude: input box anclado abajo") si preferís el modo inline con el historial en el buffer de la terminal.',
+      'Las terminales se reajustan exacto al redimensionar la ventana, cambiar de pestaña/sesión o achicar paneles: el tamaño real que ve claude ahora siempre coincide con el visible, así no se desacomoda el dibujo.',
+    ] },
     { v: '1.8.1', date: '23 jun 2026', title: 'Fix: pegar duplicaba · picker flotante de "/"', items: [
       'Arreglado: al pegar en una terminal el texto se duplicaba (se pegaba dos veces, sobre todo cuando era una sola línea). Ahora pega una sola vez.',
       'Picker flotante de "/": al tipear "/" al inicio del input en una terminal con claude se abre un selector flotante de comandos —built-in + los custom de tu .claude/commands— pegado al cursor, sin que se te corra la pantalla. Filtrás escribiendo, Enter o click elige, Esc cierra y conserva lo que escribiste. Igual que el de "@".',
@@ -1922,6 +1927,8 @@
         '<div class="set-row"><span class="k">editor preferido</span>' + seg2('editor', cfg.editor, [['code', 'VS Code'], ['cursor', 'Cursor']]) + '</div>' +
         '<div class="set-row"><span class="k">terminal preferida</span>' + seg2('terminal', cfg.terminal, [['wt', 'Win Terminal'], ['powershell', 'PowerShell']]) + '</div>' +
         '<div class="set-row"><span class="k">Ctrl+Espacio abre</span>' + seg2('quickTermKind', cfg.quickTermKind || 'claude-skip', [['shell', 'terminal'], ['claude', 'claude'], ['claude-skip', 'claude ⚡']]) + '</div>' +
+        '<div class="set-row"><span class="k">claude: input box anclado abajo</span>' + seg2('claudeFullscreen', cfg.claudeFullscreen !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
+        '<div style="font-size:10px;color:var(--text-4);margin-top:4px">modo fullscreen de claude (alt-screen) → el input queda abajo de todo, como WezTerm · off = inline (input sigue al contenido, scrollback en el buffer) · aplica a terminales nuevas</div>' +
       '</div>' +
       '<div class="set-sec" id="setProfSec"><div class="lbl">PERFIL DE CLAUDE (config dir)<button class="set-tour-link" data-act="profile-tour" title="ver el tutorial">' + C.svg('eye', 11, 1.8) + ' tutorial</button></div>' + profRows +
         '<div class="set-row" style="margin-top:8px"><input class="set-inp" id="setProfPath" style="flex:1;width:auto" placeholder="ruta personalizada (ej C:\\Users\\vos\\.claude-max)"><button class="btn btn--sm" id="setProfPick">' + C.svg('folder', 12, 2) + ' elegir</button></div>' +
@@ -1979,7 +1986,7 @@
           return;
         }
         var patch = {};
-        if (key === 'sounds' || key === 'checkUpdates') patch[key] = (val === 'on'); else patch[key] = val;
+        if (key === 'sounds' || key === 'checkUpdates' || key === 'claudeFullscreen') patch[key] = (val === 'on'); else patch[key] = val;
         if (key === 'quickTermKind') state.quickTermKind = val;   // aplica sin reiniciar
         saveSetting(patch);
       });
