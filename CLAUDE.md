@@ -1174,6 +1174,26 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
   DESPUÉS de la última letra (dentro de la caja) → la palabra se veía corrida a la izquierda. Fix: `padding`
   asimétrico `2px 6px 2px 7px` (1px más a la izquierda) para compensar y centrar. (Nota: `text-indent` no servía,
   el pill es `<span>` inline.) Verificado por zoom 14x.
+
+---
+
+## v1.9.2 — "actual" del changelog centrado (medido por métricas) + buscador del topbar clickeable
+> Dos ajustes (feedback del usuario). Bump **1.9.1 → 1.9.2**. Aditivo, CSS con tokens.
+- **Pill "actual" — centrado VERTICAL (el `padding` de la 1.9.1 sólo arregló lo horizontal):** las mayúsculas son
+  ink 7px TODO sobre la baseline (descent 0; medido con `canvas.measureText`), así que con `line-height:1` +
+  `align-items:center` el ink quedaba **1px ARRIBA** del centro de la caja (16.5px de alto). Fix MEDIDO: `.chl-pill`
+  → `display:inline-flex;align-items:center;justify-content:center;line-height:1` + `padding:4px 6px 2px 7px`
+  (top 1px MÁS que bottom → baja el ink 1px exacto al centro; left 1px más que right por el letter-spacing).
+  Verificado clonando el pill a 16x con una línea roja en el centro de la caja (el ink la cruza por el medio).
+- **Buscador del topbar clickeable:** el cuadro de "buscar" SÍ funcionaba (tecla `/` → `activateSearch` → filtra el
+  board por nombre/proyecto/branch) pero como es un `<div>` sin handler de click parecía de adorno. Ahora el click
+  lo activa igual que `/`: `data-act="search"` en el `<div>` (chrome.js, atributo invisible de wiring) + caso
+  `act==='search'` en el dispatch de clicks de app.js + `cursor:pointer` (afordancia). NO se sacó: es parte del
+  design-reference (Hard Rule 1) y es funcional.
+
+---
+
+## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).
 - `card(d)` y `column(c)` **ya son data-driven** → alimentar con objetos vivos.

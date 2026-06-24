@@ -52,7 +52,7 @@
    counters y search se comprimen primero; controles secundarios se ocultan
    progresivamente (siguen accesibles por teclado/palette). Tamaños grandes intactos. */
 .topbar .counters{flex-shrink:1;min-width:0;overflow:hidden;}
-.topbar .search{flex-shrink:1;min-width:120px;}
+.topbar .search{flex-shrink:1;min-width:120px;cursor:pointer;}  /* clickeable: activa el buscador (igual que '/') */
 @media (max-width:1180px){ .topbar .seg{display:none;} }
 @media (max-width:1040px){ .topbar .counters{display:none;} .topbar .divider-v{display:none;} }
 @media (max-width:900px){ .topbar .search span{display:none;} .topbar .search{width:auto;min-width:0;} .topbar .search .kbd{display:none;} }
@@ -638,10 +638,11 @@ body.dk-dragging,body.dk-dragging *{cursor:grabbing !important;user-select:none 
 .chl-vrow{display:flex;align-items:center;gap:10px;margin-bottom:9px;}
 .chl-v{font-family:'Geist Mono',ui-monospace,monospace;font-size:16px;font-weight:600;letter-spacing:.2px;color:var(--text-1);}
 .chl-entry.latest .chl-v{color:var(--green);}
-/* inline-flex + align/justify-center + line-height:1 → centra "actual" VERTICAL y horizontalmente dentro del
-   pill (sin esto, las mayúsculas sin descendente quedaban pegadas arriba). padding-left 1px más que el derecho
-   compensa el aire que deja el letter-spacing:1px tras la última letra. */
-.chl-pill{display:inline-flex;align-items:center;justify-content:center;line-height:1;font-family:'Geist Mono',ui-monospace,monospace;font-size:8.5px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--green);border:1px solid rgba(74,222,128,.32);background:rgba(74,222,128,.09);padding:3px 6px 3px 7px;border-radius:5px;}
+/* Centrado del "actual" medido con métricas de fuente (Geist Mono vendorizada → estable):
+   VERTICAL — las mayúsculas son ink 7px TODO sobre la baseline (descent 0); con line-height:1 el ink queda
+   1px ARRIBA del centro de la caja → padding-top 1px MÁS que el bottom (4/2) lo baja exacto al centro (alto total igual).
+   HORIZONTAL — padding-left 1px más que el right (7/6) compensa el aire que el letter-spacing:1px deja tras la última letra. */
+.chl-pill{display:inline-flex;align-items:center;justify-content:center;line-height:1;font-family:'Geist Mono',ui-monospace,monospace;font-size:8.5px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--green);border:1px solid rgba(74,222,128,.32);background:rgba(74,222,128,.09);padding:4px 6px 2px 7px;border-radius:5px;}
 .chl-date{margin-left:auto;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;letter-spacing:.3px;color:var(--text-4);}
 .chl-etitle{font-size:13.5px;font-weight:500;color:var(--text-2);margin:0 0 12px;letter-spacing:.1px;}
 .chl-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;}

@@ -497,6 +497,10 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.2', date: '24 jun 2026', title: 'La etiqueta "actual" del changelog centrada + buscador clickeable', items: [
+      'En la pantalla de Changelog, la etiqueta "actual" quedó centrada (vertical y horizontalmente) dentro de su recuadro.',
+      'El buscador del topbar ahora se activa también con un click (antes era sólo con la tecla "/"). Filtra el tablero por nombre, proyecto o branch.',
+    ] },
     { v: '1.9.1', date: '24 jun 2026', title: 'Fixes visuales: la campanita, el botón Actualizar y el changelog', items: [
       'Volvió a verse el ícono de notificaciones (la campanita) y el botón de la paleta (⌘K) arriba a la derecha: quedaban tapados por los botones de la ventana (minimizar / maximizar / cerrar).',
       'El botón "Actualizar" ya no se choca con el borde de la ventana cuando hay una versión nueva.',
@@ -2196,6 +2200,8 @@
       if (act === 'lib-tour') { e.stopPropagation(); startLibraryTour(); return; }
       if (act === 'lib-import') { e.stopPropagation(); doImportLibrary(); return; }
       if (act === 'lib-export') { e.stopPropagation(); doExportLibrary(); return; }
+      // ── buscador del topbar: el click activa lo mismo que la tecla "/" (antes era sólo visual al click) ──
+      if (act === 'search') { e.stopPropagation(); activateSearch(); return; }
       // ── notificaciones + changelog ──
       if (act === 'notifs') { e.stopPropagation(); state.notifOpen ? closeNotifPanel() : openNotifPanel(); return; }
       if (act === 'notif-all') { e.stopPropagation(); closeNotifPanel(); openNotifHistory(); return; }
