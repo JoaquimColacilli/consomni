@@ -64,7 +64,11 @@
 /* ── F2 · title bar amena: la topbar ES la barra de título (arrastrable). Los botones nativos
    min/max/cerrar van overlayados a la derecha (titleBarOverlay), así que reservamos su ancho.
    Aditivo: sólo agrega drag-regions, no cambia apariencia (Hard Rule 1). */
-.topbar{ -webkit-app-region:drag; padding-right:148px; }
+/* ⚠️ app.css carga ANTES que tokens.css (ver index.html) → un `.topbar` simple lo pisa el `padding:0 16px`
+   de tokens. Por eso `header.topbar` (mayor especificidad: tipo+clase) para que el reserve GANE el cascade.
+   Ancho EXACTO de los botones nativos vía Window Controls Overlay (env titlebar-area-width) → no se tapan a
+   ningún DPI; fallback 148px si WCO no está. Era el bug: la campanita/⌘K/Actualizar quedaban bajo los botones. */
+header.topbar{ -webkit-app-region:drag; padding-right: calc(100vw - env(titlebar-area-width, calc(100vw - 148px)) + 10px); }
 .topbar button, .topbar input, .topbar .search, .topbar .seg, .topbar .seg span, .topbar .fpill,
 .topbar .tbtn, .topbar .cmdk, .topbar .upbtn, .topbar .iconbtn, .topbar .brand-changelog,
 .topbar .mode-pills span{ -webkit-app-region:no-drag; }
@@ -634,7 +638,10 @@ body.dk-dragging,body.dk-dragging *{cursor:grabbing !important;user-select:none 
 .chl-vrow{display:flex;align-items:center;gap:10px;margin-bottom:9px;}
 .chl-v{font-family:'Geist Mono',ui-monospace,monospace;font-size:16px;font-weight:600;letter-spacing:.2px;color:var(--text-1);}
 .chl-entry.latest .chl-v{color:var(--green);}
-.chl-pill{font-family:'Geist Mono',ui-monospace,monospace;font-size:8.5px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--green);border:1px solid rgba(74,222,128,.32);background:rgba(74,222,128,.09);padding:2px 6px;border-radius:5px;}
+/* inline-flex + align/justify-center + line-height:1 → centra "actual" VERTICAL y horizontalmente dentro del
+   pill (sin esto, las mayúsculas sin descendente quedaban pegadas arriba). padding-left 1px más que el derecho
+   compensa el aire que deja el letter-spacing:1px tras la última letra. */
+.chl-pill{display:inline-flex;align-items:center;justify-content:center;line-height:1;font-family:'Geist Mono',ui-monospace,monospace;font-size:8.5px;font-weight:600;letter-spacing:1px;text-transform:uppercase;color:var(--green);border:1px solid rgba(74,222,128,.32);background:rgba(74,222,128,.09);padding:3px 6px 3px 7px;border-radius:5px;}
 .chl-date{margin-left:auto;font-family:'Geist Mono',ui-monospace,monospace;font-size:10.5px;letter-spacing:.3px;color:var(--text-4);}
 .chl-etitle{font-size:13.5px;font-weight:500;color:var(--text-2);margin:0 0 12px;letter-spacing:.1px;}
 .chl-items{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:8px;}

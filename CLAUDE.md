@@ -1153,7 +1153,27 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
-## Diseño: qué parametrizar (sin cambiar markup ni clases)
+## v1.9.1 — Fixes visuales del topbar (campanita/⌘K/Actualizar tapados) + pill "actual" del changelog
+> Tres bugs visuales reportados por el usuario. Bump **1.9.0 → 1.9.1**. Aditivo, sólo CSS con tokens.
+
+- **⚠️ Causa raíz (importante para el futuro): `app.css` carga ANTES que `tokens.css`** (ver `index.html`:
+  "app.css primero (registra @font-face); tokens.css verbatim después"). Por eso un override de app.css con un
+  selector de **misma especificidad** que tokens (ej `.topbar`) **NO gana** el cascade (tokens viene después).
+  Los responsive de app.css andan porque usan selectores MÁS específicos (`.topbar .seg`, `body.light …`).
+- **Campanita + ⌘K + "Actualizar" tapados por los botones nativos de la ventana (#1 y #3, misma raíz):** la
+  regla `.topbar{padding-right:148px}` (que reserva el ancho de los botones min/max/cerrar del `titleBarOverlay`,
+  v1.8.0) la pisaba `tokens.css .topbar{padding:0 16px}` → el `padding-right` REAL era **16px** → los íconos de la
+  derecha quedaban DEBAJO de los botones nativos (verificado midiendo en vivo: bell en x≈1319, botones nativos
+  desde x≈1304). **Nunca funcionó desde la v1.8.0** (en los screenshots de dev no se ve porque `capturePage` no
+  dibuja los botones nativos del SO). **Fix:** `header.topbar` (tipo+clase → mayor especificidad, gana sí o sí) +
+  ancho EXACTO de los botones nativos vía **Window Controls Overlay** `padding-right: calc(100vw -
+  env(titlebar-area-width, calc(100vw - 148px)) + 10px)` (las env `titlebar-area-*` SÍ resuelven en Electron 29;
+  fallback 148px si WCO no está). Verificado: `padding-right` pasó a 146px y bell/⌘K/Actualizar quedan a la
+  izquierda de la región de los botones nativos.
+- **Pill "actual" del changelog descentrado (#2):** `.chl-pill` tiene `letter-spacing:1px`, que deja 1px de aire
+  DESPUÉS de la última letra (dentro de la caja) → la palabra se veía corrida a la izquierda. Fix: `padding`
+  asimétrico `2px 6px 2px 7px` (1px más a la izquierda) para compensar y centrar. (Nota: `text-indent` no servía,
+  el pill es `<span>` inline.) Verificado por zoom 14x.
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).
 - `card(d)` y `column(c)` **ya son data-driven** → alimentar con objetos vivos.

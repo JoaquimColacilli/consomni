@@ -497,6 +497,11 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.1', date: '24 jun 2026', title: 'Fixes visuales: la campanita, el botón Actualizar y el changelog', items: [
+      'Volvió a verse el ícono de notificaciones (la campanita) y el botón de la paleta (⌘K) arriba a la derecha: quedaban tapados por los botones de la ventana (minimizar / maximizar / cerrar).',
+      'El botón "Actualizar" ya no se choca con el borde de la ventana cuando hay una versión nueva.',
+      'En la pantalla de Changelog, la etiqueta "actual" quedó centrada dentro de su recuadro.',
+    ] },
     { v: '1.9.0', date: '24 jun 2026', title: 'Autocompletar con Tab, pegar largo que se resume y el contador de cambios sin commitear', items: [
       'Autocompletar con Tab en las terminales: mientras escribís, Consomni te sugiere en gris (pegado al cursor) el comando más reciente de tu historial que empieza igual. Apretás Tab y lo completa. La tecla es reconfigurable: clickeás el cartelito "Tab" al lado de la sugerencia y elegís otra (→, End, Ctrl+algo). Lo prendés y apagás desde Settings → Editor & Terminal. Por ahora funciona en terminales shell.',
       'Pegar textos largos en claude ahora se resume solo a "[Texto pegado]" en vez de volcar las 50 líneas en pantalla, y si lo pegás de nuevo se expande. Antes, en algunos casos, el pegado se duplicaba y eso hacía que se viera expandido; quedó resuelto para que siempre se pegue una sola vez.',
