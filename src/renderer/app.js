@@ -497,6 +497,9 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.7', date: '25 jun 2026', title: 'Actualizar salta directo a la última versión', items: [
+      'Al actualizar, la app avanzaba de a una versión por vez (si estabas varias atrás, tenías que actualizar varias veces seguidas). Ahora salta directo a la última versión disponible de una sola vez. Si por algún motivo no se puede averiguar cuál es la última (sin internet, etc.), sigue funcionando como antes — nunca te quedás sin poder actualizar.',
+    ] },
     { v: '1.9.6', date: '25 jun 2026', title: 'El ícono del escritorio no desaparece al actualizar + terminal de claude que ya no se duplica', items: [
       'Al actualizar la app, el acceso directo de Consomni en el escritorio desaparecía y no volvía. El instalador lo borraba en cada actualización en vez de mantenerlo. Ahora el acceso directo se conserva al actualizar (y si por alguna razón faltaba, se vuelve a crear solo y aparece al instante, sin tener que refrescar el escritorio).',
       'Terminal de claude duplicada: al minimizar una terminal y volver a abrirla/maximizarla, se duplicaba el principio de la conversación. Era un repintado de más que disparaba el cambio de tamaño aunque el tamaño no cambiara; ahora se evita ese repintado innecesario, así que no se duplica (y de paso el scroll queda más estable, sin saltar al fondo solo).',

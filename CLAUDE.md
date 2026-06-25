@@ -1447,6 +1447,58 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.7 — Auto-update salta DIRECTO a la última versión (no de a una)
+> Bug reportado por un usuario: al actualizar, avanzaba **de a una versión** en vez de saltar a la última (estás
+> en 1.9.3, le das Actualizar → te lleva a 1.9.4, y todavía queda otra). Bump **1.9.6 → 1.9.7**. Causa raíz
+> CONFIRMADA leyendo el source de electron-updater 6.8.9 + docs de GitHub + harness de verificación (8/8 tests).
+> Cambio acotado a `src/main/updates.ts`. Respeta las 4 Hard Rules (sólo GitHub read-only, sin token, sin telemetría).
+
+### Causa raíz (confirmada, no asumida)
+- electron-updater (`GitHubProvider.getLatestVersion()`, rama NO-prerelease — la nuestra: sin `allowPrerelease`,
+  sin `channel`) elige la versión con **`getLatestTagName()` → GET `github.com/.../releases/latest`** = el
+  **puntero "Latest" de GitHub**, y baja el `latest.yml` de ESE tag. El feed `releases.atom` (bien ordenado) se
+  usa SÓLO para las release notes, **nunca** para elegir la versión. No hay cómputo de "máxima versión" en ningún
+  lado del provider.
+- GitHub calcula `/releases/latest` por la **`created_at` = fecha del COMMIT** de la release (NO el orden de
+  publicación) + el flag `make_latest` (semver sólo como desempate en el modo legacy). Así, tras **varias releases
+  seguidas**, el puntero puede quedar **desfasado** apuntando a una versión intermedia → electron-updater ofrece esa
+  intermedia → se avanza de a una. (Verificado: el estado ESTÁTICO actual ya resuelve bien a v1.9.6 → el bug sólo
+  aparece en la ventana de releases rápidas, que es justo lo que pasó al sacar 1.9.4→1.9.5→1.9.6 en horas.)
+
+### Fix (`src/main/updates.ts`) — resolvemos NOSOTROS la versión máxima y apuntamos el feed ahí
+- `httpGetJson(path)`: GET liviano a `api.github.com` (read-only, sin token; mismo patrón que `checkForUpdate`),
+  resuelve JSON o **null** ante cualquier fallo (no-200/parse/timeout/red); NUNCA rechaza.
+- `resolveLatestRelease()`: `GET /repos/<repo>/releases?per_page=100` → filtra `!draft && !prerelease && tag semver`
+  (+ guard `!version.includes('-')`) → ordena por `isNewer` → **devuelve la de MAYOR semver** (independiente del
+  orden por `created_at` y del puntero "Latest"). null ante cualquier fallo.
+- `triggerAutoCheck()` ahora es **async**: antes de `checkForUpdates()`, si resolvió, hace
+  `autoUpdater.setFeedURL({ provider:'generic', url: '<repo>/releases/download/<tag>', channel:'latest',
+  useMultipleRangeRequest:false })` → el **generic provider** baja `<tag>/latest.yml` DIRECTO (saltea el puntero).
+  El `<tag>` se hornea en la baseURL al construir el provider → se **re-setea en CADA chequeo** (must-do).
+  Si `resolveLatestRelease()` devuelve null (offline/rate-limit) **NO** toca el feed → **fail-open** al provider
+  github default (1er chequeo) o al último pin bueno → las actualizaciones nunca se rompen.
+- **Notas:** el `latest.yml` no trae release notes y el generic provider no las sintetiza del atom → el handler
+  `update-available` usa el **`body` de la API** (gateado por versión: `lastResolved.version === info.version`) para
+  el modal de novedades.
+- **No se tocó:** `checkForUpdate()` (botón manual de Settings — sigue contra `/releases/latest`; display
+  secundario), `downloadUpdate()` (reusa el provider pineado), `electron-builder.yml`, ni el resto del flujo.
+- **Detalles load-bearing (verificados contra el source 6.8.9):** `setFeedURL` setea `clientPromise` y
+  `getUpdateInfoAndProvider` sólo rebuildea el provider si `clientPromise==null` → el pin persiste entre chequeos;
+  `useMultipleRangeRequest:false` (clave PÚBLICA, no `isUseMultipleRangeRequest`) iguala al provider github
+  (`isUseMultipleRangeRequest:false` hardcodeado) → evita multi-range sobre el CDN de GitHub; differential download
+  cae a descarga completa si falla (igual que hoy); `allowDowngrade=false` → nunca baja de versión aunque resuelva
+  mal por un instante; `channel:'latest'` (Windows usa `latest.yml` pelado).
+
+### Verificación
+- **Workflow de 4 agentes** (source-chain trace + semántica de GitHub/issue conocido por web + red-team del fix +
+  review adversaria final): root cause CONFIRMADA, fix correcto y seguro, **0 bloqueantes**.
+- **Harness `verify-resolve.js` (electron-as-node, 8/8 PASS):** test sintético con releases fuera de orden +
+  draft + prerelease → elige la máxima (1.9.6, ignora el `created` más nuevo de una menor); fail-open (vacío/null/
+  sólo-draft → null); repo REAL → resuelve 1.9.6 con body; URLs del feed (`<tag>/latest.yml` + `.exe`) → 302 OK.
+- TS compila limpio; `node --check` OK.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

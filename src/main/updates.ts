@@ -22,6 +22,10 @@ import { autoUpdater } from 'electron-updater';
 
 const REPO = 'JoaquimColacilli/consomni';
 const RELEASES_URL = 'https://github.com/' + REPO + '/releases';
+const API_HOST = 'api.github.com';
+// Carpeta de assets de una release puntual: <DL_BASE><tag>/latest.yml + el .exe. La usamos para
+// apuntar electron-updater DIRECTO a la release de mayor versión (ver resolveLatestRelease + triggerAutoCheck).
+const DL_BASE = 'https://github.com/' + REPO + '/releases/download/';
 
 export interface UpdateInfo {
   current: string;
@@ -103,6 +107,67 @@ export function checkForUpdate(): Promise<UpdateInfo> {
 
 /* ───────────────────────── auto-update (electron-updater) ───────────────────────── */
 
+/* ⚠️ Fix "actualiza de a UNA versión en vez de a la última" (bug reportado):
+   electron-updater (GitHubProvider, sin prerelease) elige la versión leyendo el puntero "Latest" de
+   GitHub (GET /releases/latest). GitHub calcula ese puntero por la FECHA DEL COMMIT de la release (no
+   por orden de publicación) + make_latest, así que tras varias releases seguidas puede quedar
+   DESFASADO apuntando a una intermedia → el updater ofrece esa intermedia → se avanza de a una.
+   Solución: resolvemos NOSOTROS la release de mayor versión (semver) vía la API y apuntamos
+   electron-updater DIRECTO a esa release con un generic provider (setFeedURL) → saltea el puntero.
+   Si la resolución falla (offline/rate-limit) NO tocamos el feed → queda el provider github default
+   (fail-open: las actualizaciones nunca se rompen). */
+
+interface ResolvedRelease { tag: string; version: string; body?: string; name?: string; }
+let lastResolved: ResolvedRelease | null = null;
+
+/** GET liviano a la API de GitHub (read-only, sin token, sin telemetría — excepción sancionada a HR3).
+ *  Resuelve el JSON parseado o null ante CUALQUIER fallo (no-200, parse, timeout, red). NUNCA rechaza. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function httpGetJson(path: string): Promise<any | null> {
+  return new Promise((resolve) => {
+    let settled = false;
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const finish = (v: any | null): void => { if (!settled) { settled = true; resolve(v); } };
+    const req = https.get(
+      { hostname: API_HOST, path, headers: { 'User-Agent': 'Consomni', Accept: 'application/vnd.github+json' }, timeout: 6000 },
+      (res) => {
+        if ((res.statusCode || 0) !== 200) { res.resume(); return finish(null); }
+        let body = '';
+        res.setEncoding('utf8');
+        res.on('data', (c) => { body += c; if (body.length > 1_000_000) req.destroy(); });
+        res.on('end', () => { try { finish(JSON.parse(body)); } catch { finish(null); } });
+      }
+    );
+    req.on('error', () => finish(null));
+    req.on('timeout', () => { req.destroy(); finish(null); });
+  });
+}
+
+/** Release de MAYOR versión semver, NO-draft NO-prerelease, computada por NOSOTROS (no por el puntero
+ *  "Latest" de GitHub). Devuelve null ante cualquier fallo → el caller hace fail-open al provider default. */
+async function resolveLatestRelease(): Promise<ResolvedRelease | null> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const arr: any = await httpGetJson('/repos/' + REPO + '/releases?per_page=100');   // 100 = máx de la API, holgura
+  if (!Array.isArray(arr)) return null;
+  const cands: ResolvedRelease[] = arr
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .filter((r: any) => r && !r.draft && !r.prerelease && typeof r.tag_name === 'string')
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    .map((r: any): ResolvedRelease => ({
+      tag: r.tag_name,
+      version: String(r.tag_name).replace(/^v/i, ''),
+      body: typeof r.body === 'string' ? r.body : undefined,
+      name: typeof r.name === 'string' ? r.name : undefined,
+    }))
+    // semver numérico válido y SIN sufijo de prerelease (parseVer descarta lo no-numérico → 1.9.7-beta
+    // parsearía igual que 1.9.7; el guard del '-' + el flag prerelease de la API lo cubren por las dudas)
+    .filter((r) => parseVer(r.version).length > 0 && !r.version.includes('-'));
+  if (!cands.length) return null;
+  // mayor versión primero — independiente del orden por fecha de commit / del puntero "Latest"
+  cands.sort((a, b) => (isNewer(a.version, b.version) ? -1 : (isNewer(b.version, a.version) ? 1 : 0)));
+  return cands[0];
+}
+
 let auWired = false;
 let auPoll: ReturnType<typeof setInterval> | null = null;
 let getWindow: () => BrowserWindow | null = () => null;
@@ -142,7 +207,13 @@ export function initAutoUpdate(winGetter: () => BrowserWindow | null, enabled: b
     auWired = true;
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     autoUpdater.on('update-available', (info: any) => {
-      send('consomni:update-available', { latest: info && info.version, current: app.getVersion(), url: RELEASES_URL, notes: normalizeNotes(info && info.releaseNotes), name: (info && info.releaseName) || undefined });
+      // El generic provider lee latest.yml, que NO trae release notes → usamos el body que resolvimos
+      // de la API (mismo tag), gateado por versión para que las notas nunca queden de otra versión.
+      const v = info && info.version;
+      const matched = (lastResolved && lastResolved.version === v) ? lastResolved : null;
+      const notes = normalizeNotes(info && info.releaseNotes) || (matched ? matched.body : undefined);
+      const name = (info && info.releaseName) || (matched ? matched.name : undefined);
+      send('consomni:update-available', { latest: v, current: app.getVersion(), url: RELEASES_URL, notes, name });
     });
     autoUpdater.on('update-not-available', () => send('consomni:update-none', {}));
     autoUpdater.on('download-progress', (p: { percent?: number; transferred?: number; total?: number; bytesPerSecond?: number }) => {
@@ -162,15 +233,33 @@ export function initAutoUpdate(winGetter: () => BrowserWindow | null, enabled: b
     autoUpdater.on('error', (err: Error) => { if (!suppressErr) send('consomni:update-error', { error: String((err && err.message) || err) }); });
   }
 
-  triggerAutoCheck();
+  void triggerAutoCheck();
   if (auPoll) clearInterval(auPoll);
-  auPoll = setInterval(triggerAutoCheck, POLL_MS);
+  auPoll = setInterval(() => { void triggerAutoCheck(); }, POLL_MS);
 }
 
 /** Chequeo silencioso (no descarga). Dispara update-available / update-none.
- *  Los errores NO se propagan al renderer (sin toast molesto en arranque/poll). */
-export function triggerAutoCheck(): void {
+ *  Los errores NO se propagan al renderer (sin toast molesto en arranque/poll).
+ *  ANTES de chequear, apunta el feed a la release de MAYOR versión (saltea el puntero "Latest" de
+ *  GitHub → siempre salta a la última, no de a una). El <tag> se hornea en la baseURL al construir el
+ *  provider, así que hay que re-setear en CADA chequeo. */
+export async function triggerAutoCheck(): Promise<void> {
   if (!app.isPackaged) return;
+  try {
+    const r = await resolveLatestRelease();
+    if (r) {
+      try {
+        // generic provider apuntado a <DL_BASE><tag>/ → electron-updater baja ESE latest.yml (versión
+        // exacta), sin consultar /releases/latest. useMultipleRangeRequest:false = mismo comportamiento
+        // que el provider github (evita multi-range sobre el CDN de GitHub). channel queda 'latest'.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        autoUpdater.setFeedURL({ provider: 'generic', url: DL_BASE + r.tag, channel: 'latest', useMultipleRangeRequest: false } as any);
+        lastResolved = r;
+      } catch { /* si setFeedURL falla, queda el provider github default (o el último pin bueno) */ }
+    }
+    // r == null (offline / rate-limit / sin candidato): NO seteamos feed → fail-open al provider github
+    // default (1er chequeo) o al último pin bueno (chequeos siguientes). Nunca deja sin actualizar.
+  } catch { /* la resolución NUNCA debe romper el chequeo */ }
   suppressErr = true;
   autoUpdater.checkForUpdates().catch(() => { /* offline / sin red: silencioso */ });
 }
