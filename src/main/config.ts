@@ -20,6 +20,7 @@ export interface AppConfig {
   approveBlocking: boolean;    // interceptación bloqueante de permisos (opt-in)
   checkUpdates: boolean;       // chequeo de updates al iniciar (sólo al repo del proyecto, opt-out)
   keptProjects: string[];      // proyectos "fijados" al sidebar (projKey) → no caen a archivados aunque no tengan sesiones activas
+  hiddenProjects: string[];    // proyectos marcados "esto NO es un proyecto" (projKey) → fuera del board, sidebar y archivados. reversible (Settings)
   confirmCloseTerminal: boolean; // avisar antes de cerrar una terminal viva (corta el proceso); "no volver a mostrar" lo apaga
   nlHelper: boolean;           // helper de comando por lenguaje natural en las terminales (claude local; opt-in, default off)
   nlModel: string;             // modelo para el helper NL ('haiku' por costo/latencia)
@@ -27,6 +28,7 @@ export interface AppConfig {
   theme: 'dark' | 'light';     // tema de la app (default oscuro)
   claudeConfigDir: string;     // perfil ACTIVO de Claude Code (config dir). '' = auto (env CLAUDE_CONFIG_DIR → ~/.claude). Multi-perfil (ej ~/.claude-max)
   claudeFullscreen: boolean;   // claude en modo "fullscreen" (input box ANCLADO abajo via alt-screen) en las terminales embebidas. inyecta CLAUDE_CODE_NO_FLICKER=1 (sólo env, no toca disco). default true
+  gpuRender: boolean;          // render por GPU (WebGL) en las terminales embebidas → mucho más fluido. default true; opt-out si una GPU rinde mal (cae al renderer DOM)
   seenProfileTour: boolean;    // ¿ya vio el tutorial de multi-perfil? (gate confiable bajo file://, no localStorage). Auto-salta 1 vez al actualizar
   seenWhatsNew18: boolean;     // ¿ya vio el tour de novedades v1.8.0? (gate confiable bajo file://). Auto-salta 1 vez tras actualizar
   autoStart: boolean;          // abrir Consomni al iniciar la PC (nativo: app.setLoginItemSettings → registro Run). Sólo aplica empaquetado
@@ -69,6 +71,7 @@ const DEFAULTS: AppConfig = {
   approveBlocking: false,
   checkUpdates: true,
   keptProjects: [],
+  hiddenProjects: [],
   confirmCloseTerminal: true,
   nlHelper: false,
   nlModel: 'haiku',
@@ -76,6 +79,7 @@ const DEFAULTS: AppConfig = {
   theme: 'dark',
   claudeConfigDir: '',
   claudeFullscreen: true,
+  gpuRender: true,
   seenProfileTour: false,
   seenWhatsNew18: false,
   autoStart: false,

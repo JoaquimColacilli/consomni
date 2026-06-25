@@ -262,7 +262,7 @@ if (!gotLock) {
 
     // lectura de un archivo para el VISOR embebido (click en una ruta del chat/terminal). GUARDADO:
     // solo dentro de los roots vigilados / projects del perfil / cwds de sesiones; cap 1MB; rechaza binarios.
-    ipcMain.handle('consomni:readFile', (_e, filePath: string) => {
+    ipcMain.handle('consomni:readFile', (_e, filePath: string, cwd?: string) => {
       try {
         const fp = path.resolve(String(filePath || ''));
         if (!fp) return { ok: false, error: 'sin ruta' };
@@ -271,8 +271,14 @@ if (!gotLock) {
           claudeProjectsPath(cfg),
           ...(Array.isArray(cfg.watchedDirs) ? cfg.watchedDirs : []),
           ...buildSnapshot().sessions.map((s) => s.cwd).filter(Boolean),
+          // cwd del panel que abrió el archivo: una terminal embebida cuyo cwd NO es una sesión JSONL
+          // trackeada hacía que un .md clickeado ahí se rechazara ("fuera del alcance" → "no se pudo leer").
+          ...(cwd ? [String(cwd)] : []),
         ].map((r) => path.resolve(String(r))).filter(Boolean);
-        const allowed = roots.some((root) => fp === root || fp.startsWith(root + path.sep));
+        // Windows: FS case-insensitive → comparar en minúsculas (si no, C:\ vs c:\ del cwd trackeado podía fallar el match)
+        const ci = process.platform === 'win32';
+        const fpc = ci ? fp.toLowerCase() : fp;
+        const allowed = roots.some((root) => { const r = ci ? root.toLowerCase() : root; return fpc === r || fpc.startsWith(r + path.sep); });
         if (!allowed) return { ok: false, error: 'fuera del alcance permitido' };
         const st = fs.statSync(fp);
         if (!st.isFile()) return { ok: false, error: 'no es un archivo' };

@@ -40,6 +40,7 @@
     paletteRows: [],
     detailId: null,
     keptProjects: [],            // proyectos fijados al sidebar (projKey) — persistido en config
+    hiddenProjects: [],          // proyectos marcados "esto no es un proyecto" (projKey) — fuera de board/sidebar/archivados; reversible
     confirmCloseTerminal: true,  // avisar antes de cerrar una terminal viva
     plansOpen: false,            // vista "Planes" (frentes: planes/specs/tareas detectados)
     frentes: {},                 // estado MANUAL por frente (projKey → {status,note}) — privado, persistido
@@ -192,8 +193,9 @@
     counts.tokens = formatTokens(totalTokens);
 
     // un proyecto "kept" (fijado) sigue en el sidebar aunque no tenga sesiones activas (no cae a archivados)
-    var liveGroups = groups.filter(function (g) { return g.active > 0 || g.fav || isKept(g.id); });
-    var archivedGroups = groups.filter(function (g) { return g.active === 0 && !g.fav && !isKept(g.id); });
+    // los marcados "no es un proyecto" (hidden) salen de TODO (board, sidebar y archivados)
+    var liveGroups = groups.filter(function (g) { return !isHidden(g.id) && (g.active > 0 || g.fav || isKept(g.id)); });
+    var archivedGroups = groups.filter(function (g) { return !isHidden(g.id) && g.active === 0 && !g.fav && !isKept(g.id); });
 
     var boardGroups = (state.activeProject === '__archived') ? archivedGroups
       : (state.activeProject !== 'all') ? groups.filter(function (g) { return g.id === state.activeProject; })
@@ -380,6 +382,26 @@
     applyUpdBtn(); applyUpdToast();
   }
   function startUpdateDownload() {
+    // Si hay una sesión de claude VIVA, avisar: actualizar baja + cierra la app y CORTA la sesión en vivo.
+    // (reusa el modal .cfm-* vía pendingClose; sin el checkbox cccDont → no toca confirmCloseTerminal)
+    try {
+      var T = window.ConsomniTerms;
+      if (T && T.hasActiveClaudeSessions && T.hasActiveClaudeSessions()) { confirmUpdateThenDownload(); return; }
+    } catch (e) {}
+    doUpdateDownload();
+  }
+  function confirmUpdateThenDownload() {
+    pendingClose = doUpdateDownload;
+    var html = '<div class="cfm-scrim" data-act="cfm-cancel"><div class="cfm-card" role="dialog" aria-modal="true">' +
+      '<div class="cfm-ttl">' + C.svg('warn', 16, 1.9) + ' ¿Actualizar ahora?</div>' +
+      '<div class="cfm-body">Tenés una <b>sesión de Claude activa</b>. Actualizar <b>cierra la app</b> y se <b>corta la sesión en vivo</b>. El transcript queda en disco — la reanudás después con <b>responder</b> (<code>claude --resume</code>).</div>' +
+      '<div class="cfm-btns">' +
+        '<button class="btn btn--sm" data-act="cfm-cancel">seguir trabajando</button>' +
+        '<button class="btn btn--sm btn--green" data-act="cfm-ok">actualizar ahora</button>' +
+      '</div></div></div>';
+    setOverlay(html);
+  }
+  function doUpdateDownload() {
     if (!api || !api.updateDownload) { if (state.update && state.update.url) openExternalUrl(state.update.url); return; }
     state.upd = { mode: 'downloading', label: '0%', pct: 0 };
     applyUpdBtn(); applyUpdToast();
@@ -497,6 +519,12 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.9', date: '25 jun 2026', title: 'Terminales mucho más fluidas + aviso al actualizar + abrir .md + "esto no es un proyecto"', items: [
+      'Terminales más fluidas: ahora se dibujan por GPU (WebGL), así que la consola de claude va mucho más suave —sobre todo cuando claude escribe mucho o redibuja la pantalla—. Si tu GPU llegara a renderizar raro, lo podés apagar en Settings → Editor & Terminal ("render por GPU").',
+      'Aviso al actualizar con claude abierto: si tenés una sesión de Claude activa y le das a Actualizar, ahora te pregunta antes (actualizar cierra la app y corta la sesión en vivo). Podés seguir trabajando o actualizar igual.',
+      'Abrir un .md: clickear un archivo .md para verlo en el panel ya no falla con "no se pudo leer" cuando lo abrís desde una terminal cuyo proyecto no estaba siendo seguido.',
+      'Marcar "esto no es un proyecto": pasá el mouse por un proyecto en el sidebar y tocá el ojo tachado para ocultarlo del board y del sidebar (útil para cosas que no son proyectos de verdad, o branches sueltos). Es reversible: lo volvés a mostrar desde Settings → "proyectos ocultos".',
+    ] },
     { v: '1.9.8', date: '25 jun 2026', title: 'Copiar con Ctrl+C ya no cambia la densidad sin querer', items: [
       'A veces al copiar (Ctrl+C) se cambiaba solo entre vista cómoda y compacta, y el copiar fallaba. Pasaba porque la tecla "c" era un atajo para alternar la densidad y se disparaba también con Ctrl+C. Se sacó ese atajo de teclado (la densidad se sigue cambiando con los botones cómodo/compacto de arriba), y además ningún atajo de una letra se dispara más cuando tenés Ctrl o Cmd apretado — así Ctrl+C, Ctrl+A, etc. hacen lo de siempre.',
     ] },
@@ -973,6 +1001,26 @@
     if (api && api.saveConfig) api.saveConfig({ keptProjects: state.keptProjects });
     if (state.activeProject === id) state.activeProject = 'all';
     render();
+  }
+  // ── "esto NO es un proyecto" (ocultos; persistidos en config.hiddenProjects) ──
+  // sacan el proyecto del board, del sidebar y de archivados. Reversible desde Settings → "proyectos ocultos".
+  function isHidden(id) { return state.hiddenProjects.indexOf(id) > -1; }
+  function hideProject(id) {
+    if (!id || id === 'all' || id === '__archived' || isHidden(id)) return;
+    state.hiddenProjects.push(id);
+    if (api && api.saveConfig) api.saveConfig({ hiddenProjects: state.hiddenProjects });
+    if (state.activeProject === id) state.activeProject = 'all';
+    var nm = ((lastView && lastView.liveGroups) || []).filter(function (g) { return g.id === id; })[0];
+    toast('ocultado' + (nm ? ' · ' + nm.name : '') + ' · lo mostrás de nuevo en Settings → proyectos ocultos');
+    render();
+  }
+  function unhideProject(id) {
+    var i = state.hiddenProjects.indexOf(id);
+    if (i < 0) return;
+    state.hiddenProjects.splice(i, 1);
+    if (api && api.saveConfig) api.saveConfig({ hiddenProjects: state.hiddenProjects });
+    render();
+    if (state.settingsOpen) openSettings();   // refrescar la lista en Settings → proyectos ocultos
   }
 
   // ── confirmación al cerrar una terminal VIVA (corta el proceso de claude/shell) ──
@@ -1947,6 +1995,15 @@
     var dirs = (cfg.watchedDirs || []).map(function (d) {
       return '<div class="set-dir"><span class="p">' + esc(d) + '</span><span class="rm" data-rmdir="' + esc(d) + '" title="quitar">' + C.svg('x', 12, 2) + '</span></div>';
     }).join('');
+    // PROYECTOS OCULTOS (marcados "esto no es un proyecto") → fila con nombre + "mostrar" para revertir
+    var hiddenRows = (state.hiddenProjects || []).map(function (id) {
+      var name = String(id).split('/').filter(Boolean).pop() || id;
+      return '<div class="set-dir"><span class="p">' + esc(name) + ' <span style="color:var(--text-4);font-size:10px">· ' + esc(id) + '</span></span><button class="btn btn--sm" data-show="' + esc(id) + '">' + C.svg('eye', 12, 1.9) + ' mostrar</button></div>';
+    }).join('');
+    var hiddenSec = (state.hiddenProjects && state.hiddenProjects.length)
+      ? '<div class="set-sec"><div class="lbl">PROYECTOS OCULTOS (no son proyectos)</div>' + hiddenRows +
+        '<div style="font-size:10px;color:var(--text-4);margin-top:4px">los marcaste con el ojo tachado en el sidebar · "mostrar" los devuelve al board y al sidebar</div></div>'
+      : '';
     var hk = !!(hooks && hooks.installed);
     // PERFIL DE CLAUDE (config dir) — filas seleccionables + ruta personalizada
     var curCfgDir = (cfg.claudeConfigDir || '').trim();
@@ -1969,6 +2026,8 @@
         '<div class="set-row"><span class="k">Ctrl+Espacio abre</span>' + seg2('quickTermKind', cfg.quickTermKind || 'claude-skip', [['shell', 'terminal'], ['claude', 'claude'], ['claude-skip', 'claude ⚡']]) + '</div>' +
         '<div class="set-row"><span class="k">claude: input anclado abajo <span style="color:var(--text-3)">· off = scroll nativo del historial</span></span>' + seg2('claudeFullscreen', cfg.claudeFullscreen !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
         '<div style="font-size:10px;color:var(--text-4);margin-top:4px">modo fullscreen de claude (alt-screen) → el input queda abajo de todo, como WezTerm · off = inline (input sigue al contenido, scrollback en el buffer) · aplica a terminales nuevas</div>' +
+        '<div class="set-row"><span class="k">render por GPU (terminal más fluida) <span style="color:var(--text-3)">· WebGL</span></span>' + seg2('gpuRender', cfg.gpuRender !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
+        '<div style="font-size:10px;color:var(--text-4);margin-top:4px">dibuja las terminales en la GPU (WebGL) → mucho más fluido, sobre todo en claude · off = renderer DOM (apagalo sólo si ves la terminal rara en tu GPU) · aplica a terminales nuevas</div>' +
         '<div class="set-row"><span class="k">autocompletar con Tab (terminal)</span>' + seg2('autosuggest', cfg.autosuggest !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
         '<div class="set-row"><span class="k">tecla para aceptar la sugerencia</span><span style="display:inline-flex;align-items:center;gap:8px"><code id="setSgKey" style="padding:2px 7px;border-radius:5px;background:var(--surface-input);border:1px solid var(--border);font-family:\'Geist Mono\',monospace;font-size:11px;color:var(--text-2)">' + esc(prettyAcceptKey(cfg.autosuggestAcceptKey || 'Tab')) + '</code><button class="btn btn--sm" id="setSgRebind">cambiar</button></span></div>' +
         '<div style="font-size:10px;color:var(--text-4);margin-top:4px">sugiere en gris (pegado al cursor) el comando más reciente de tu historial que empieza con lo que escribís · la tecla acepta SÓLO cuando hay sugerencia visible (si no, pasa al completado nativo) · sólo en terminales shell</div>' +
@@ -1981,6 +2040,7 @@
       '<div class="set-sec"><div class="lbl">DIRECTORIOS VIGILADOS EXTRA (read-only)</div>' + dirs +
         '<div class="set-row" style="margin-top:8px"><input class="set-inp" id="setDirAdd" style="flex:1;width:auto" placeholder="C:\\ruta\\.claude\\projects"><button class="btn btn--sm" id="setDirAddBtn">' + C.svg('plus', 12, 2) + ' agregar</button></div>' +
       '</div>' +
+      hiddenSec +
       '<div class="set-sec"><div class="lbl">MONITOREO</div>' +
         '<div class="set-row"><span class="k">umbral de aviso de contexto (%)</span><input class="set-inp" id="setCtx" type="number" min="50" max="100" value="' + cfg.ctxWarnThreshold + '"></div>' +
         '<div class="set-row"><span class="k">refresh del statusbar (s)</span><input class="set-inp" id="setRefresh" type="number" min="1" max="60" value="' + Math.round((cfg.refreshMs || 2000) / 1000) + '"></div>' +
@@ -2079,10 +2139,11 @@
           return;
         }
         var patch = {};
-        if (key === 'sounds' || key === 'checkUpdates' || key === 'claudeFullscreen' || key === 'autosuggest') patch[key] = (val === 'on'); else patch[key] = val;
+        if (key === 'sounds' || key === 'checkUpdates' || key === 'claudeFullscreen' || key === 'autosuggest' || key === 'gpuRender') patch[key] = (val === 'on'); else patch[key] = val;
         if (key === 'quickTermKind') state.quickTermKind = val;   // aplica sin reiniciar
         if (key === 'autosuggest') { state.autosuggest = (val === 'on'); pushAutosuggest(); }   // aplica en vivo a las terminales
         if (key === 'claudeFullscreen') { state.claudeFullscreen = (val === 'on'); if (window.ConsomniTerms && window.ConsomniTerms.setClaudeFullscreenDefault) window.ConsomniTerms.setClaudeFullscreenDefault(state.claudeFullscreen); }   // default para terminales claude NUEVAS
+        if (key === 'gpuRender') { state.gpuRender = (val === 'on'); if (window.ConsomniTerms && window.ConsomniTerms.setGpuRender) window.ConsomniTerms.setGpuRender(state.gpuRender); }   // aplica a terminales NUEVAS
         saveSetting(patch);
       });
     });
@@ -2100,6 +2161,11 @@
         if (!d.length) { toast('tiene que quedar al menos un directorio', 'warn'); return; }
         saveSetting({ watchedDirs: d });
       });
+    });
+    // "mostrar" un proyecto oculto → lo des-oculta y refresca el board + esta lista (listener directo: el
+    // scrim de Settings tiene data-act=close-settings, así que la delegación global devuelve antes de llegar acá)
+    Array.prototype.forEach.call(card.querySelectorAll('[data-show]'), function (el) {
+      el.addEventListener('click', function () { unhideProject(el.getAttribute('data-show')); });
     });
     // ── perfil de Claude (config dir) ──
     function applyProfile(dir) {
@@ -2269,6 +2335,9 @@
     if (t.closest && t.closest('.sb-add')) { addProjectViaPicker(); return; }
     var rmEl = t.closest && t.closest('[data-unkeep]');
     if (rmEl) { e.stopPropagation(); unkeepProject(rmEl.getAttribute('data-unkeep')); return; }
+    var hideEl = t.closest && t.closest('[data-hide]');
+    if (hideEl) { e.stopPropagation(); hideProject(hideEl.getAttribute('data-hide')); return; }
+    // (data-show = "mostrar" en Settings → listener directo en wireSettings; acá el scrim ya devolvió en close-settings)
     if (t.closest && t.closest('[data-act="home"]')) { state.activeProject = 'all'; state.plansOpen = false; state.libraryOpen = false; render(); if (window.ConsomniTerms) window.ConsomniTerms.home(); return; }
 
     // ── CARDS PRIMERO (van adentro de la columna, que tiene data-proj) ──
@@ -2530,6 +2599,7 @@
     if (api.getConfig) api.getConfig().then(function (cfg) {
       if (cfg) {
         state.keptProjects = Array.isArray(cfg.keptProjects) ? cfg.keptProjects.slice() : [];
+        state.hiddenProjects = Array.isArray(cfg.hiddenProjects) ? cfg.hiddenProjects.slice() : [];
         state.confirmCloseTerminal = cfg.confirmCloseTerminal !== false;
         state.frentes = (cfg.frentes && typeof cfg.frentes === 'object') ? cfg.frentes : {};
         state.quickTermKind = cfg.quickTermKind || 'claude-skip';
@@ -2537,8 +2607,10 @@
         state.autosuggest = cfg.autosuggest !== false;
         state.autosuggestAcceptKey = cfg.autosuggestAcceptKey || 'Tab';
         state.claudeFullscreen = cfg.claudeFullscreen !== false;
+        state.gpuRender = cfg.gpuRender !== false;
         pushAutosuggest();   // empujar la config del autosuggest a las terminales
         if (window.ConsomniTerms && window.ConsomniTerms.setClaudeFullscreenDefault) window.ConsomniTerms.setClaudeFullscreenDefault(state.claudeFullscreen);   // default de modo render para terminales claude nuevas
+        if (window.ConsomniTerms && window.ConsomniTerms.setGpuRender) window.ConsomniTerms.setGpuRender(state.gpuRender);   // default de render GPU/WebGL para terminales nuevas
         applyTheme();
       }
       render();

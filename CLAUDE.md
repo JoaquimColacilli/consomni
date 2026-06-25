@@ -1520,6 +1520,53 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.9 — Terminales por GPU (WebGL) + aviso al actualizar + fix abrir .md + "esto no es un proyecto"
+> Cuatro cosas (pedido de usuarios). Bump **1.9.8 → 1.9.9**. La performance de la terminal se investigó con un
+> workflow read-only (4 agentes) + verificación de versiones de los addons contra el xterm vendorizado. Respeta
+> las 4 Hard Rules (addon vendorizado offline; CSP `connect-src 'self'` intacta; cero API; cero atribución a IA).
+
+### 1) Render por GPU (WebGL) — terminal MUCHO más fluida (headline)
+- **Causa de la lentitud:** xterm usaba el **renderer DOM** (default) — reconstruye el DOM por frame. Con claude
+  (que repinta full-screen en alt-screen) se sentía lento/tosco.
+- **Fix:** **`@xterm/addon-webgl`** (renderer GPU) vendorizado offline. El addon dibuja las celdas en la GPU →
+  5-10× más rápido en los repaints pesados. **Versión CLAVE:** `@xterm/addon-webgl@0.19.0` (publicada
+  2025-12-22, **51s después de `@xterm/xterm@6.0.0`** = misma ola de release que `addon-fit@0.11.0`/
+  `addon-web-links@0.12.0`; las 0.20.0-beta piden xterm 6.1-beta → NO). Vendorizado como los otros addons:
+  `cp node_modules/@xterm/addon-webgl/lib/addon-webgl.js src/renderer/assets/xterm/` + `<script>` en `index.html`.
+  Global UMD **`WebglAddon`** (ojo: `Webgl`, no `WebGL`).
+- **Carga (`terminals-ui.js`, DESPUÉS de `term.open`):** `new WebglNS.WebglAddon()` en try/catch +
+  `onContextLoss → dispose()` (xterm vuelve solo al renderer DOM). Si la GPU no está / el contexto se pierde →
+  cae a DOM **sin regresión** (la terminal anda igual que antes). Gateado por `config.gpuRender` (default true).
+- **Toggle (`config.ts gpuRender:true` + Settings → Editor & Terminal "render por GPU" + bridge
+  `ConsomniTerms.setGpuRender`):** opt-out por si una GPU rinde mal. Aplica a terminales NUEVAS.
+- **Límite:** el render GPU no se puede verificar headless (sin display). El try/catch + DOM fallback + la
+  versión exacta (0.19.0 = ola de xterm 6.0.0) lo hacen seguro; el usuario confirma la fluidez en vivo.
+
+### 2) Aviso al actualizar si hay una sesión de claude activa (`app.js`)
+- `startUpdateDownload()` ahora, si `ConsomniTerms.hasActiveClaudeSessions()` (panel `data-kind=claude` con `tid`,
+  no minimizado, no `dead`), muestra un modal `.cfm-*` ("se corta tu sesión de claude activa") antes de bajar +
+  cerrar. Reusa el `pendingClose` del modal de cerrar-terminal (sin el checkbox `cccDont` → no toca
+  `confirmCloseTerminal`). Cancelar = "seguir trabajando"; confirmar = `doUpdateDownload()`.
+
+### 3) Fix ".md no se pudo leer" (`terminals-ui.js` + `preload.ts` + `index.ts`)
+- **Causa:** el allowlist de `consomni:readFile` sólo permite archivos bajo `claudeProjectsPath`/`watchedDirs`/
+  cwds de sesiones JSONL. Un `.md` abierto desde una **terminal embebida** cuyo cwd NO es una sesión trackeada se
+  rechazaba (`fuera del alcance` → "no se pudo leer"). El cwd del panel estaba pero NO se mandaba al IPC.
+- **Fix:** `refreshFile` pasa `pane.dataset.cwd` → `api.readFile(fpath, cwd)` (preload) → el handler suma el cwd
+  (resuelto) al allowlist. Scope seguro: el cwd donde el usuario está trabajando (no FS arbitrario).
+
+### 4) "Esto NO es un proyecto" — ocultar proyectos (`config.ts` + `app.js` + `chrome.js` + `app.css`)
+- **Qué:** botón **ojo-tachado** (icono `eyeOff` nuevo) en hover sobre un proyecto del sidebar (`sbItem`,
+  `data-hide`) → lo saca del **board, sidebar y archivados**. Para cosas que no son proyectos reales / branches sueltos.
+- **Modelo:** `config.hiddenProjects: string[]` (projKey; espejo de `keptProjects`). `state.hiddenProjects` +
+  `isHidden/hideProject/unhideProject`. `liveGroups`/`archivedGroups` filtran `!isHidden(g.id)`. Persistido a config.
+- **Reversible:** Settings → **"PROYECTOS OCULTOS"** lista cada uno con "mostrar" (`data-show`). ⚠️ El botón vive
+  DENTRO del scrim de Settings (`data-act=close-settings`) → la delegación global devuelve antes; por eso el
+  "mostrar" usa **listener directo en `wireSettings`** (como `data-rmdir`), no la delegación. El `data-hide` del
+  sidebar SÍ va por delegación (no está en un overlay). `hideProject` avisa por toast dónde des-ocultarlo.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

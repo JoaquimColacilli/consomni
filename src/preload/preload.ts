@@ -58,9 +58,9 @@ const api = {
       terminal `claude`: la ruta se inserta por bracketed paste y claude la convierte en [Image #N]). */
   clipboardImageToTempPng: (): Promise<{ ok: boolean; file?: string; reason?: string; width?: number; height?: number; bytes?: number }> =>
     ipcRenderer.invoke('consomni:clipboardImageToTempPng'),
-  /** Lee un archivo (visor embebido); guardado a los roots vigilados / cwds de sesión, cap 1MB, sin binarios. */
-  readFile: (p: string): Promise<{ ok: boolean; content?: string; error?: string; truncated?: boolean }> =>
-    ipcRenderer.invoke('consomni:readFile', p),
+  /** Lee un archivo (visor embebido); guardado a los roots vigilados / cwds de sesión + el cwd del panel, cap 1MB, sin binarios. */
+  readFile: (p: string, cwd?: string): Promise<{ ok: boolean; content?: string; error?: string; truncated?: boolean }> =>
+    ipcRenderer.invoke('consomni:readFile', p, cwd),
   /** Lista archivos del cwd (picker flotante de @); guardado a los roots vigilados; walk acotado. */
   listFiles: (dir: string): Promise<{ ok: boolean; files?: string[]; error?: string; truncated?: boolean }> =>
     ipcRenderer.invoke('consomni:listFiles', dir),

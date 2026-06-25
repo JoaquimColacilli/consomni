@@ -55,6 +55,7 @@
     grid:   '<rect x="3" y="3" width="7" height="7" rx="1"/><rect x="14" y="3" width="7" height="7" rx="1"/><rect x="3" y="14" width="7" height="7" rx="1"/><rect x="14" y="14" width="7" height="7" rx="1"/>',
     dispatch:'<polyline points="4 7 8 11 4 15"/><line x1="10" y1="16" x2="15" y2="16"/><path d="M18.5 3.5l.9 2.1 2.1.9-2.1.9-.9 2.1-.9-2.1-2.1-.9 2.1-.9z"/>',
     eye:    '<path d="M2 12s4-7 10-7 10 7 10 7-4 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',
+    eyeOff: '<path d="M9.9 4.2A10.9 10.9 0 0 1 12 4c6 0 10 8 10 8a18 18 0 0 1-2.4 3.3M6.1 6.1A18 18 0 0 0 2 12s4 8 10 8a10.9 10.9 0 0 0 4.1-.8"/><path d="M9.9 9.9a3 3 0 0 0 4.2 4.2"/><line x1="3" y1="3" x2="21" y2="21"/>',
     download:'<path d="M12 3v12"/><polyline points="7 11 12 16 17 11"/><path d="M5 20h14"/>',
     tasks:  '<polyline points="3.5 7 5.5 9 8.5 5"/><polyline points="3.5 16 5.5 18 8.5 14"/><line x1="11" y1="7" x2="20" y2="7"/><line x1="11" y1="17" x2="20" y2="17"/>',
     book:   '<path d="M4 19.5A2.5 2.5 0 0 1 6.5 17H20"/><path d="M6.5 2H20v20H6.5A2.5 2.5 0 0 1 4 19.5v-15A2.5 2.5 0 0 1 6.5 2z"/>',
@@ -201,7 +202,7 @@
 
     return '<header class="topbar">' +
       '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span>' +
-        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.9.8') + '</span>' +
+        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.9.9') + '</span>' +
         '<button class="brand-changelog" data-act="changelog-all" title="ver todas las novedades">' + svg('sparkles', 10, 1.7) + '<span>Changelog</span></button></span></div>' +
       '<div class="divider-v"></div>' +
       '<div class="counters">' +
@@ -261,8 +262,10 @@
     const nmStyle = it.dim ? ' style="color:#a8a8ae"' : '';
     // proyecto "fijado" sin sesiones activas → 'x' (en hover) para quitarlo del sidebar
     const rmX = it.finished ? '<button class="sb-x" data-unkeep="' + esc(it.id || it.name) + '" title="quitar del sidebar">' + svg('x', 11, 2.2) + '</button>' : '';
+    // "esto NO es un proyecto" → ocultarlo del board/sidebar/archivados (reversible en Settings). En hover.
+    const hideB = '<button class="sb-x sb-hide" data-hide="' + esc(it.id || it.name) + '" title="esto no es un proyecto · ocultar (reversible en Settings)">' + svg('eyeOff', 11, 2) + '</button>';
     let html = '<div class="sb-item' + (it.active ? ' active' : '') + '"' + dp + '>' + lead +
-      '<span class="nm"' + nmStyle + '>' + esc(it.name) + '</span>' + minis(it.minis) + rmX + '</div>';
+      '<span class="nm"' + nmStyle + '>' + esc(it.name) + '</span>' + minis(it.minis) + hideB + rmX + '</div>';
     if (it.sub && it.sub.length) html += it.sub.map(function (s) { return sbItem(s, true); }).join('');
     return html;
   }
@@ -339,7 +342,7 @@
         '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
         '<button class="sbtn" data-act="theme" title="' + (o.light ? 'modo oscuro' : 'modo claro') + '">' + svg(o.light ? 'moon' : 'sun', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v1.9.8') + '</span></div>' +
+        '<span class="ver">' + esc(o.version || 'v1.9.9') + '</span></div>' +
     '</aside>';
   }
 

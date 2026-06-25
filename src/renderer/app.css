@@ -238,6 +238,8 @@ body.view-archived .board{ flex-wrap: wrap; align-content: flex-start; overflow-
 .sb-item .sb-x{margin-left:6px;width:18px;height:18px;display:inline-flex;align-items:center;justify-content:center;flex:none;border:none;border-radius:5px;background:transparent;color:var(--text-4);opacity:0;cursor:pointer;transition:.12s;}
 .sb-item:hover .sb-x{opacity:.6;}
 .sb-item .sb-x:hover{opacity:1;color:var(--error);background:rgba(239,68,68,.12);}
+.sb-item .sb-hide{margin-left:2px;}
+.sb-item .sb-hide:hover{opacity:1;color:var(--amber);background:rgba(245,158,11,.13);}
 
 /* modal de confirmación al cerrar una terminal viva (corta el proceso) */
 .cfm-scrim{position:fixed;inset:0;z-index:60;background:rgba(6,6,8,.6);backdrop-filter:blur(2px);display:flex;align-items:center;justify-content:center;animation:paletteIn .16s ease both;}

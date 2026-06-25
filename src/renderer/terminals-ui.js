@@ -19,7 +19,8 @@
    ════════════════════════════════════════════════════════════════ */
 (function (g) {
   'use strict';
-  var C = g.Chrome, api = g.consomni, Terminal = g.Terminal, FitNS = g.FitAddon, WebLinksNS = g.WebLinksAddon;
+  var C = g.Chrome, api = g.consomni, Terminal = g.Terminal, FitNS = g.FitAddon, WebLinksNS = g.WebLinksAddon, WebglNS = g.WebglAddon;
+  var gpuRender = true;   // render por GPU (WebGL) — mucho más fluido en claude; opt-out por si una GPU rinde mal (lo empuja app.js)
 
   var host = null, rootEl = null, poolEl = null, dropInd = null, countEl = null, sessBarEl = null;
   var lastSnap = null;         // último snapshot (para el badge de diff del dock)
@@ -312,7 +313,9 @@
   }
   function refreshFile(pane, fpath, body, isMd, isInitial) {
     if (!api || !api.readFile) { if (isInitial) { var p0 = body.querySelector('.dk-fv-pre'); if (p0) p0.textContent = 'lector de archivos no disponible'; } return; }
-    api.readFile(fpath).then(function (r) { applyFileRead(pane, body, r, isMd, isInitial); })
+    // pasamos el cwd del panel → el main lo suma al allowlist (un .md abierto desde una terminal cuyo cwd
+    // no es una sesión JSONL trackeada se rechazaba con "fuera del alcance" → "no se pudo leer"). Bug fix.
+    api.readFile(fpath, (pane && pane.dataset.cwd) || '').then(function (r) { applyFileRead(pane, body, r, isMd, isInitial); })
       .catch(function () { if (isInitial) { var pre = body.querySelector('.dk-fv-pre'); if (pre) pre.textContent = '✗ error al leer'; } });
   }
   function startFilePoll(pane, fpath, body, isMd) {
@@ -1297,6 +1300,13 @@
     persist();
   }
   function setClaudeFullscreenDefault(on) { claudeFsDefault = (on !== false); }
+  function setGpuRender(on) { gpuRender = (on !== false); }   // aplica a terminales NUEVAS (las abiertas siguen con su renderer)
+  // ¿hay una sesión de claude VIVA (PTY viva, no minimizada, no finalizada)? → para avisar antes de actualizar (corta la sesión)
+  function hasActiveClaudeSessions() {
+    return allPanes().some(function (p) {
+      return p && p.dataset.kind === 'claude' && p.dataset.tid && p.dataset.min !== '1' && !p.classList.contains('dead');
+    });
+  }
 
   // menú contextual (copiar/pegar/seleccionar todo) sobre la terminal. Vive en document.body (fuera de
   // #terminals) → no lo traga el handler global de clicks de app.js.
@@ -1621,6 +1631,20 @@
       }
     } catch (e) {}
     term.open(body);
+    // RENDER POR GPU (WebGL): el renderer DOM de xterm reconstruye el DOM por frame → con claude (que
+    // repinta full-screen en alt-screen) se siente lento/tosco. El addon WebGL dibuja las celdas en la GPU
+    // → mucho más fluido. Carga DESPUÉS de term.open (necesita el canvas montado). Si la GPU no está / el
+    // contexto se pierde → dispose → xterm vuelve solo al renderer DOM (sin regresión). 100% offline (HR3).
+    if (gpuRender) {
+      try {
+        if (WebglNS && WebglNS.WebglAddon) {
+          var wgl = new WebglNS.WebglAddon();
+          try { wgl.onContextLoss(function () { try { wgl.dispose(); } catch (e) {} }); } catch (e) {}   // contexto perdido → DOM
+          term.loadAddon(wgl);
+          pane._gpu = 1;
+        }
+      } catch (e) { /* WebGL no disponible (GPU vieja/sandbox) → DOM built-in, igual que antes */ }
+    }
     // rutas de archivo clickeables: además del addon web-links (URLs), un link provider propio detecta
     // rutas y las abre (click → panel, Ctrl/Cmd+click → editor). Resuelve contra el cwd del panel.
     try {
@@ -2214,6 +2238,7 @@
     setEditorOpener: setEditorOpener, setQuickTermHook: setQuickTermHook,
     setHomeProjects: setHomeProjects,
     setClaudeFullscreenDefault: setClaudeFullscreenDefault,
+    setGpuRender: setGpuRender, hasActiveClaudeSessions: hasActiveClaudeSessions,
     setAutosuggest: setAutosuggest, setAutosuggestRebinder: setAutosuggestRebinder,
     openTourDemo: openTourDemo, closeTourDemo: closeTourDemo,
     openFilePanel: openFilePanel, activeTermCwd: activeTermCwd
