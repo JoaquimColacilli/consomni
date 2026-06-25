@@ -497,6 +497,9 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.8', date: '25 jun 2026', title: 'Copiar con Ctrl+C ya no cambia la densidad sin querer', items: [
+      'A veces al copiar (Ctrl+C) se cambiaba solo entre vista cómoda y compacta, y el copiar fallaba. Pasaba porque la tecla "c" era un atajo para alternar la densidad y se disparaba también con Ctrl+C. Se sacó ese atajo de teclado (la densidad se sigue cambiando con los botones cómodo/compacto de arriba), y además ningún atajo de una letra se dispara más cuando tenés Ctrl o Cmd apretado — así Ctrl+C, Ctrl+A, etc. hacen lo de siempre.',
+    ] },
     { v: '1.9.7', date: '25 jun 2026', title: 'Actualizar salta directo a la última versión', items: [
       'Al actualizar, la app avanzaba de a una versión por vez (si estabas varias atrás, tenías que actualizar varias veces seguidas). Ahora salta directo a la última versión disponible de una sola vez. Si por algún motivo no se puede averiguar cuál es la última (sin internet, etc.), sigue funcionando como antes — nunca te quedás sin poder actualizar.',
     ] },
@@ -1914,7 +1917,7 @@
     ['↵', 'expandir detalle'], ['space', 'peek'], ['esc', 'cerrar'], ['o', 'abrir VSCode'],
     ['t', 'terminal embebida'], ['⇧T', 'workspace terminales'], ['y / Y', 'copiar path / branch'], ['r', 'responder'],
     ['a / d', 'aprobar / denegar'], ['p', 'pin'], ['x', 'multi-select'], ['X', 'cerrar sesión'], ['⌘↵', 'dispatch claude'],
-    ['⌘1..9', 'saltar a proyecto'], ['f', 'filtro de modo'], ['s', 'orden'], ['c', 'densidad'],
+    ['⌘1..9', 'saltar a proyecto'], ['f', 'filtro de modo'], ['s', 'orden'],
     ['m', 'mute'], ['g a', 'ir a atención'], ['?', 'esta ayuda']
   ];
   function openHelp() {
@@ -2377,6 +2380,11 @@
     // ⌘1..9 saltar a proyecto
     if (meta && e.key >= '1' && e.key <= '9') { e.preventDefault(); var gi = +e.key - 1; var lg = lastView ? lastView.liveGroups : []; if (lg[gi]) setActiveProject(lg[gi].id); return; }
 
+    // Ctrl/Cmd + tecla NO dispara los atajos de UNA letra: Ctrl+C (copiar), Ctrl+A, Ctrl+F, etc. deben
+    // hacer lo del sistema, no acciones del board. Los atajos meta legítimos (⌘K, ⌘1-9, Ctrl+Espacio) ya
+    // se manejaron arriba y retornaron. (Era el bug: Ctrl+C cambiaba la densidad y rompía el copiar.)
+    if (meta) return;
+
     switch (e.key) {
       case '/': e.preventDefault(); activateSearch(); break;
       case 'k': moveFocus(-1); break;
@@ -2397,7 +2405,6 @@
       case 'X': dispatchAction('archive', state.focusSid); break;
       case 'f': cycleMode(); break;
       case 's': cycleSort(); break;
-      case 'c': toggleDensity(); break;
       case 'm': toggleMute(); break;
       case '?': openHelp(); break;
       default: break;

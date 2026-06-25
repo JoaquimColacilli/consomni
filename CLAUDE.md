@@ -1499,6 +1499,27 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.8 — Ctrl+C ya no cambia la densidad (atajo de teclado de cómodo/compacto sacado)
+> Bug reportado por un usuario: a veces el **copiar** fallaba porque la tecla `c` era atajo de densidad
+> (cómodo↔compacto) y se disparaba también con **Ctrl+C**. Bump **1.9.7 → 1.9.8**. Cambio acotado a
+> `src/renderer/app.js`. Respeta las 4 Hard Rules.
+
+- **Causa raíz** (`app.js`, handler global de `keydown`): `var meta = e.metaKey || e.ctrlKey`, pero el
+  `switch (e.key)` de los atajos de UNA letra **no chequeaba `meta`** → con texto seleccionado, **Ctrl+C**
+  llegaba al `case 'c': toggleDensity()` → alternaba la densidad y el re-render (`render()`) pisaba la
+  selección → el copiar fallaba. (Lo mismo aplicaba a Ctrl+A→'a' aprobar, Ctrl+F→'f' filtro, etc.)
+- **Fix (dos partes):**
+  1. **Se quitó el atajo de densidad por completo**: borrado el `case 'c': toggleDensity()` del switch y la
+     fila `['c', 'densidad']` de la ayuda (`?`). La densidad se sigue cambiando con el **segmentado
+     cómodo/compacto del topbar** (click handler `.seg span[data-density]` → `setDensity`, intacto).
+     `toggleDensity` queda exportado en `__consomni` para QA, pero sin tecla.
+  2. **Guard `if (meta) return;` ANTES del switch** (después de los atajos meta legítimos —⌘K, ⌘1-9,
+     Ctrl+Espacio, Shift+T— que se manejan y retornan arriba): ningún atajo de una letra se dispara con
+     Ctrl/Cmd apretado → **Ctrl+C / Ctrl+A / Ctrl+F / Ctrl+P** hacen lo del sistema, no acciones del board.
+- Verificado: `node --check` + `tsc` limpios; la densidad sigue cambiándose por los botones del topbar.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).
