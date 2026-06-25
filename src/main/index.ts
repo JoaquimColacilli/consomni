@@ -152,6 +152,18 @@ if (!gotLock) {
     try { if (app.isPackaged) app.setLoginItemSettings({ openAtLogin: !!cfg.autoStart, path: process.execPath }); } catch { /* noop */ }
 
     ipcMain.handle('consomni:ping', () => 'pong');
+    // Build de Windows (síncrono) para el preload sandboxed → xterm windowsPty.buildNumber (ConPTY reflow).
+    ipcMain.on('consomni:winBuild', (e) => {
+      let b = 0;
+      try {
+        if (process.platform === 'win32') {
+          // eslint-disable-next-line @typescript-eslint/no-var-requires
+          const m = /^\d+\.\d+\.(\d+)/.exec(require('os').release());
+          b = m ? Number(m[1]) : 0;
+        }
+      } catch { /* noop */ }
+      e.returnValue = b;
+    });
     ipcMain.handle('consomni:getSnapshot', () => buildSnapshot());
     ipcMain.handle('consomni:rescan', () => rescanNow());
     ipcMain.handle('consomni:getSessionDetail', (_e, id: string) => getDetail(String(id)));
@@ -188,7 +200,7 @@ if (!gotLock) {
 
     // ── terminales embebidas (PTYs reales; ver terminals.ts) ──
     ipcMain.handle('consomni:termAvailable', () => terminalsAvailable());
-    ipcMain.handle('consomni:termCreate', (_e, opts: { cwd?: string; kind?: 'shell' | 'claude'; cols?: number; rows?: number; resume?: string; skip?: boolean; pick?: boolean }) => createTerm(opts || {}));
+    ipcMain.handle('consomni:termCreate', (_e, opts: { cwd?: string; kind?: 'shell' | 'claude'; cols?: number; rows?: number; resume?: string; skip?: boolean; pick?: boolean; fullscreen?: boolean }) => createTerm(opts || {}));
     ipcMain.on('consomni:termWrite', (_e, arg: { id: string; data: string }) => writeTerm(String(arg?.id), String(arg?.data ?? '')));
     ipcMain.on('consomni:termResize', (_e, arg: { id: string; cols: number; rows: number }) => resizeTerm(String(arg?.id), Number(arg?.cols), Number(arg?.rows)));
     ipcMain.handle('consomni:termKill', (_e, id: string) => { killTerm(String(id)); return true; });

@@ -497,6 +497,11 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.5', date: '25 jun 2026', title: 'La terminal de claude deja de "romperse" al scrollear/redimensionar + abrir claude es más rápido', items: [
+      'Scroll del historial arreglado: en las terminales de claude el historial se "rompía" —texto viejo superpuesto, partes cortadas, y no se podía scrollear hacia arriba para leer el principio—, sobre todo en sesiones largas y al minimizar/agrandar/achicar. Eran dos cosas: (1) claude corría en modo "pantalla completa", que NO tiene scroll de terminal (por eso no llegabas al principio), y la rueda del mouse scrolleaba lentísimo (1 línea por vez); ahora la rueda anda fluida y, si preferís el scroll de toda la vida, hay un botón nuevo en la cabecera de la terminal para pasar a "scroll nativo" (scrolleás hacia arriba como cualquier terminal). (2) El reflow de las líneas al cambiar el tamaño se corrompía sobre Windows; ahora la terminal sabe que está sobre ConPTY y reacomoda el texto bien al redimensionar.',
+      'Botón claude más inteligente: el botón "claude" de arriba ya no abre una terminal nueva cada vez (no más juntar 5 pestañas). Si ya hay un claude abierto en la vista, lo enfoca; para abrir uno nuevo a propósito, hacé Shift+click (o usá "claude ⚡").',
+      'Abrir claude en un proyecto, de un toque: al entrar a un proyecto que no tiene terminales abiertas, ahora aparece un botón "abrir claude" (y "terminal") destacado para arrancar claude directo en su carpeta, sin tener que ir a buscarlo.',
+    ] },
     { v: '1.9.4', date: '24 jun 2026', title: 'Pegar imágenes, seleccionar lo que escribís, y ver los archivos que genera claude en vivo', items: [
       'Pegar imágenes: pegar una imagen en una terminal de claude antes fallaba seguido en el primer intento ("no hay nada en el portapapeles") y había que pegarla de nuevo. Es un problema del propio claude en Windows (pasa igual en Warp): lee la imagen en un formato que su decodificador no soporta. Ahora Consomni la lee él mismo, la guarda como archivo temporal y se la pasa a claude por su ruta → la toma a la primera, siempre, y la ves al instante como "[Image #N]". Funciona con Alt+V y con Ctrl+V (si hay imagen la pega como imagen; si hay texto, pega el texto).',
       'Seleccionar tu input: en las terminales de claude podés seleccionar el texto que estás escribiendo y copiarlo con Ctrl+C. Como la interfaz de claude no permite seleccionar su propio input, lo resuelve Consomni: activá el botón "selección" en la cabecera de la terminal y arrastrá con el mouse para seleccionar (al desactivarlo, el mouse vuelve a ser de claude). Y Ctrl+A selecciona TODO tu prompt de una; para ir al inicio de la línea quedó Home.',
@@ -1951,7 +1956,7 @@
         '<div class="set-row"><span class="k">editor preferido</span>' + seg2('editor', cfg.editor, [['code', 'VS Code'], ['cursor', 'Cursor']]) + '</div>' +
         '<div class="set-row"><span class="k">terminal preferida</span>' + seg2('terminal', cfg.terminal, [['wt', 'Win Terminal'], ['powershell', 'PowerShell']]) + '</div>' +
         '<div class="set-row"><span class="k">Ctrl+Espacio abre</span>' + seg2('quickTermKind', cfg.quickTermKind || 'claude-skip', [['shell', 'terminal'], ['claude', 'claude'], ['claude-skip', 'claude ⚡']]) + '</div>' +
-        '<div class="set-row"><span class="k">claude: input box anclado abajo</span>' + seg2('claudeFullscreen', cfg.claudeFullscreen !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
+        '<div class="set-row"><span class="k">claude: input anclado abajo <span style="color:var(--text-3)">· off = scroll nativo del historial</span></span>' + seg2('claudeFullscreen', cfg.claudeFullscreen !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
         '<div style="font-size:10px;color:var(--text-4);margin-top:4px">modo fullscreen de claude (alt-screen) → el input queda abajo de todo, como WezTerm · off = inline (input sigue al contenido, scrollback en el buffer) · aplica a terminales nuevas</div>' +
         '<div class="set-row"><span class="k">autocompletar con Tab (terminal)</span>' + seg2('autosuggest', cfg.autosuggest !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
         '<div class="set-row"><span class="k">tecla para aceptar la sugerencia</span><span style="display:inline-flex;align-items:center;gap:8px"><code id="setSgKey" style="padding:2px 7px;border-radius:5px;background:var(--surface-input);border:1px solid var(--border);font-family:\'Geist Mono\',monospace;font-size:11px;color:var(--text-2)">' + esc(prettyAcceptKey(cfg.autosuggestAcceptKey || 'Tab')) + '</code><button class="btn btn--sm" id="setSgRebind">cambiar</button></span></div>' +
@@ -2066,6 +2071,7 @@
         if (key === 'sounds' || key === 'checkUpdates' || key === 'claudeFullscreen' || key === 'autosuggest') patch[key] = (val === 'on'); else patch[key] = val;
         if (key === 'quickTermKind') state.quickTermKind = val;   // aplica sin reiniciar
         if (key === 'autosuggest') { state.autosuggest = (val === 'on'); pushAutosuggest(); }   // aplica en vivo a las terminales
+        if (key === 'claudeFullscreen') { state.claudeFullscreen = (val === 'on'); if (window.ConsomniTerms && window.ConsomniTerms.setClaudeFullscreenDefault) window.ConsomniTerms.setClaudeFullscreenDefault(state.claudeFullscreen); }   // default para terminales claude NUEVAS
         saveSetting(patch);
       });
     });
@@ -2515,7 +2521,9 @@
         state.theme = (cfg.theme === 'light') ? 'light' : 'dark';
         state.autosuggest = cfg.autosuggest !== false;
         state.autosuggestAcceptKey = cfg.autosuggestAcceptKey || 'Tab';
+        state.claudeFullscreen = cfg.claudeFullscreen !== false;
         pushAutosuggest();   // empujar la config del autosuggest a las terminales
+        if (window.ConsomniTerms && window.ConsomniTerms.setClaudeFullscreenDefault) window.ConsomniTerms.setClaudeFullscreenDefault(state.claudeFullscreen);   // default de modo render para terminales claude nuevas
         applyTheme();
       }
       render();

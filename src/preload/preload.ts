@@ -7,8 +7,23 @@ import { contextBridge, ipcRenderer } from 'electron';
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 type Snapshot = any;
 
+// Build de Windows (sincrónico, como `platform`). xterm lo necesita al CONSTRUIR el Terminal
+// (windowsPty:{backend:'conpty',buildNumber}) para aplicar la detección de líneas envueltas
+// ConPTY-aware y reflowear bien al hacer resize. El preload está SANDBOXED → NO podemos `require('os')`
+// (crashea el preload); lo pedimos a main por IPC síncrono (el handler ya está registrado antes de cargar
+// la ventana). os.release() en Win11 → "10.0.26200" → 26200.
+const WIN_BUILD: number = (() => {
+  try {
+    if (process.platform !== 'win32') return 0;
+    const v = ipcRenderer.sendSync('consomni:winBuild');
+    return (typeof v === 'number' && v > 0) ? v : 0;
+  } catch { return 0; }
+})();
+
 const api = {
   platform: process.platform as NodeJS.Platform,
+  /** Build de Windows (0 si no es win32) → xterm windowsPty.buildNumber. */
+  winBuild: WIN_BUILD,
   ping: (): Promise<string> => ipcRenderer.invoke('consomni:ping'),
 
   /** Snapshot actual (el renderer lo pide al cargar). */

@@ -340,6 +340,10 @@ body.view-archived .board{ flex-wrap: wrap; align-content: flex-start; overflow-
 .dk-pane-sel.on{color:var(--green);border-color:var(--green);background:var(--surface-input);}
 .dk-pane-sel.on svg{stroke:var(--green);}
 .dk-pane-sel.on:hover{color:var(--green);border-color:var(--green);}
+/* toggle scroll del historial (sólo claude): verde cuando está en SCROLL NATIVO (clásico) */
+.dk-pane-scroll.on{color:var(--green);border-color:var(--green);background:var(--surface-input);}
+.dk-pane-scroll.on svg{stroke:var(--green);}
+.dk-pane-scroll.on:hover{color:var(--green);border-color:var(--green);}
 .dk-pane-body{flex:1;min-height:0;min-width:0;position:relative;overflow:hidden;}
 /* xterm en ABSOLUTE: llena el body (flex) sin inflarlo con su contenido (rows*cellHeight).
    Esto hace que el panel respete SIEMPRE el alto del contenedor (como la terminal de VS Code). */
@@ -364,6 +368,13 @@ body.view-archived .board{ flex-wrap: wrap; align-content: flex-start; overflow-
 .dk-ph-pbtn svg{color:var(--text-4);}
 .dk-ph-pbtn:hover{border-color:var(--green);color:var(--green);}
 .dk-ph-pbtn:hover svg{color:var(--green);}
+/* claude = acción primaria/destacada del chip y del proyecto vacío (one-click claude) */
+.dk-ph-pbtn--claude{border-color:var(--green);color:var(--green);}
+.dk-ph-pbtn--claude svg{color:var(--green);}
+.dk-ph-pbtn--claude:hover{background:var(--surface-input);}
+/* fila de acciones del placeholder de un proyecto vacío */
+.dk-ph-actions{display:inline-flex;gap:8px;margin-top:14px;}
+.dk-ph-actions .dk-ph-pbtn{height:30px;padding:0 14px;font-size:12px;}
 
 /* panel de SESIÓN = conversación read-only */
 .dk-pane--session .dk-pane-body{display:flex;flex-direction:column;}

@@ -45,6 +45,7 @@
   var editorOpener = null;     // abre un cwd en el editor (lo inyecta app.js → api.action('ext',{cwd}))
   var quickTermHook = null;    // CTRL+ESPACIO dentro de un xterm → abre una terminal nueva (lo inyecta app.js)
   var homeProjects = null;     // provider de proyectos para el inicio (lo inyecta app.js) → [{id,name,cwd,fav}]
+  var claudeFsDefault = true;  // default global config.claudeFullscreen (lo empuja app.js); fullscreen=input anclado abajo
   function isMaximized() { return !!host && host.classList.contains('maximized'); }
   function notifyMax() { try { maxObserver(isMaximized()); } catch (e) {} }
 
@@ -67,6 +68,7 @@
     var d = el.dataset, o = { kind: d.kind || 'shell' };
     if (d.kind === 'session') { o.sid = d.sid; o.name = d.sname || ''; }
     else { o.cwd = d.cwd || ''; if (d.resume) o.resume = d.resume; if (d.skip === '1') o.skip = 1; }
+    if (d.kind === 'claude' && (d.fullscreen === '0' || d.fullscreen === '1')) o.fullscreen = d.fullscreen === '1' ? 1 : 0;   // modo render elegido por-panel (scroll nativo vs anclado)
     if (d.proj) o.proj = d.proj;
     if (d.projname) o.projname = d.projname;
     if (d.pinned === '1') o.pinned = 1;
@@ -83,6 +85,7 @@
     if (o.min) pane.dataset.min = '1';   // F6: restaura minimizada (queda en el pool, viva)
     if (kind === 'session') { pane.dataset.sid = o.sid || ''; pane.dataset.sname = o.name || ''; }
     else { if (o.cwd) pane.dataset.cwd = o.cwd; if (o.resume) pane.dataset.resume = o.resume; if (o.skip) pane.dataset.skip = '1'; }
+    if (kind === 'claude' && (o.fullscreen === 0 || o.fullscreen === 1)) pane.dataset.fullscreen = o.fullscreen ? '1' : '0';
     return pane;
   }
   // compat v1: el dock viejo guardaba un árbol {layout}; extraemos sus paneles (como fijados).
@@ -372,7 +375,7 @@
         '<span class="dk-tb-title">' + (C ? C.eye(20, false) : '') + '<span class="dk-tb-label">TERMINALES</span><span class="dk-count"></span></span>' +
         '<span class="dk-tb-actions">' +
           '<button class="dk-newbtn dk-new-term" title="nueva terminal">' + svg('term', 12, 2) + ' terminal</button>' +
-          '<button class="dk-newbtn dk-new-claude" title="nueva sesión claude">' + svg('dispatch', 12, 2) + ' claude</button>' +
+          '<button class="dk-newbtn dk-new-claude" title="claude: enfoca el activo si hay (Shift+click = uno nuevo)">' + svg('dispatch', 12, 2) + ' claude</button>' +
           '<button class="dk-newbtn dk-new-claude-skip" title="claude SIN permisos (--dangerously-skip-permissions)">' + svg('dispatch', 12, 2) + ' claude ⚡</button>' +
           '<span class="dk-div"></span>' +
           '<button class="dk-newbtn dk-new-cmd" title="comandos rápidos: atajos (crear carpeta, git status…) + describilo en castellano y lo traduce tu claude">' + svg('dispatch', 12, 2) + ' comandos</button>' +
@@ -400,7 +403,11 @@
       else { setFocus(pane); try { var pt = paneTerm(pane); if (pt) pt.focus(); } catch (e2) {} renderSessionBar(); }
     });
     host.querySelector('.dk-new-term').addEventListener('click', function () { spawn('shell'); });
-    host.querySelector('.dk-new-claude').addEventListener('click', function () { spawn('claude'); });
+    // claude: REUSA el activo de la vista si hay (en vez de abrir otro y llenar de tabs). Shift/Alt+click = uno nuevo.
+    host.querySelector('.dk-new-claude').addEventListener('click', function (ev) {
+      if (!ev.shiftKey && !ev.altKey) { var ex = findActiveClaude(); if (ex) { focusClaudePane(ex); notifier('claude activo — enfocado (Shift+click = uno nuevo)'); return; } }
+      spawn('claude');
+    });
     host.querySelector('.dk-new-claude-skip').addEventListener('click', function () { spawn('claude', null, null, { skip: true }); });
     host.querySelector('.dk-new-cmd').addEventListener('click', openQuickCommands);
     host.querySelector('.dk-new-proj').addEventListener('click', function (e) {
@@ -523,6 +530,7 @@
   function restorePane(pane) {
     if (!pane) return;
     pane.removeAttribute('data-min');
+    pane._ptySize = '';   // estuvo oculta (sin resize) → forzar un SIGWINCH fresco al re-mostrarse (showView ya lo hace; belt-and-suspenders)
     show();
     showView(view);   // re-incluye la terminal en el tiling de la vista
     setFocus(pane);
@@ -549,8 +557,8 @@
             return '<div class="dk-ph-proj" title="' + esc(p.cwd) + '">' +
               '<span class="dk-ph-pname">' + svg(p.fav ? 'star' : 'folder', 13, 1.7) + esc(p.name) + '</span>' +
               '<span class="dk-ph-pacts">' +
+                '<button class="dk-ph-pbtn dk-ph-pbtn--claude" data-home-open="claude" data-cwd="' + esc(p.cwd) + '">' + svg('dispatch', 11, 2) + ' claude</button>' +
                 '<button class="dk-ph-pbtn" data-home-open="shell" data-cwd="' + esc(p.cwd) + '">' + svg('term', 11, 2) + ' terminal</button>' +
-                '<button class="dk-ph-pbtn" data-home-open="claude" data-cwd="' + esc(p.cwd) + '">' + svg('dispatch', 11, 2) + ' claude</button>' +
               '</span></div>';
           }).join('') + '</div>';
       }
@@ -562,7 +570,11 @@
     }
     return '<div class="dk-placeholder">' + svg('term', 38, 1.5) +
       '<div class="dk-ph-title">Sin terminales en este proyecto</div>' +
-      '<div class="dk-ph-text">Abrí una con <b>terminal</b> / <b>claude</b> de arriba — arranca en la carpeta del proyecto. Fijala con ★ para tenerla también en inicio.</div>' +
+      '<div class="dk-ph-text">Abrí claude (o una terminal) en la carpeta del proyecto. Fijala con ★ para tenerla también en inicio.</div>' +
+      (viewCwd ? '<div class="dk-ph-actions">' +
+        '<button class="dk-ph-pbtn dk-ph-pbtn--claude" data-home-open="claude" data-cwd="' + esc(viewCwd) + '">' + svg('dispatch', 12, 2) + ' abrir claude</button>' +
+        '<button class="dk-ph-pbtn" data-home-open="shell" data-cwd="' + esc(viewCwd) + '">' + svg('term', 12, 2) + ' terminal</button>' +
+      '</div>' : '') +
       '</div>';
   }
   // re-arma rootEl en FILA simple con los paneles que matchean la vista (el resto al pool)
@@ -588,7 +600,14 @@
       rootEl.appendChild(split);
     }
     if (!focused || !rootEl.contains(focused)) setFocus(match[0]);
-    updateCount(); renderSessionBar(); refitSoon();
+    // los paneles que recién (re)entran a la vista estuvieron ocultos en el pool → su PTY pudo quedar con dims
+    // viejas (syncTerm saltea ocultos; pushPty dedupea por dims). Reseteamos la cache → el refit garantiza un
+    // SIGWINCH fresco → claude/ConPTY re-anclan bien (raíz del "corrupto tras minimizar/restaurar").
+    match.forEach(function (p) { p._ptySize = ''; });
+    updateCount(); renderSessionBar();
+    // doble pase: el primero por rAF + uno extra cuando el layout se asienta (mismo patrón que el post-create)
+    refitSoon();
+    if (g.requestAnimationFrame) g.requestAnimationFrame(function () { g.requestAnimationFrame(refitAll); });
   }
   function setView(v, cwd, name) {
     ensureDock();
@@ -803,6 +822,28 @@
     var p = (isTerm(focused) && rootEl && rootEl.contains(focused)) ? focused : null;
     if (!p) { var ts = panesOf().filter(isTerm); p = ts.length ? ts[ts.length - 1] : null; }
     return (p && p.dataset.cwd) || '';
+  }
+
+  // claude ACTIVO en la vista actual (PTY viva, no minimizado, no finalizado) → para REUSAR en vez de
+  // abrir uno nuevo cada vez (Facundo terminaba con 5 tabs). Prioriza el enfocado; si no, el último de la
+  // vista (visible o, en su defecto, minimizado). Scopeado por vista (matchesView): inicio reusa el de
+  // inicio/fijados; un proyecto reusa el SUYO (no te arrastra a otro). null si no hay ninguno.
+  function findActiveClaude() {
+    var ok = function (pp) { return pp && pp.dataset.kind === 'claude' && pp.dataset.tid && pp.dataset.min !== '1' && !pp.classList.contains('dead'); };
+    if (ok(focused) && rootEl && rootEl.contains(focused) && matchesView(focused, view)) return focused;
+    var inView = allPanes().filter(function (pp) { return ok(pp) && matchesView(pp, view); });
+    if (!inView.length) return null;
+    var vis = inView.filter(function (pp) { return rootEl && rootEl.contains(pp); });
+    return vis.length ? vis[vis.length - 1] : inView[inView.length - 1];
+  }
+  // enfocar un claude existente (espejo del tail de openSession): traerlo a la vista si hace falta + foco
+  function focusClaudePane(pane) {
+    if (!pane) return;
+    show();
+    if (!rootEl.contains(pane)) { if (pane.dataset.min === '1') pane.removeAttribute('data-min'); showView(view); }
+    setFocus(pane);
+    try { var t = paneTerm(pane); if (t) t.focus(); } catch (e) {}
+    refitSoon();
   }
 
   /* ════════ PICKER FLOTANTE de @ (estilo Warp) ════════
@@ -1216,6 +1257,46 @@
     if (vb) btns.insertBefore(sb, vb); else if (x) btns.insertBefore(sb, x); else btns.appendChild(sb);
   }
 
+  // toggle "scroll del historial" en la cabecera de una terminal CLAUDE. Cambia entre:
+  //   - ANCLADO (fullscreen/alt-screen): el input queda abajo, pero la terminal NO scrollea hacia arriba
+  //     (claude scrollea adentro con PgUp/Ctrl+Inicio/rueda; Ctrl+O = modo transcripción + búsqueda).
+  //   - NATIVO (clásico): claude escribe en la terminal normal → scrolleás hacia arriba con la rueda como
+  //     cualquier terminal y leés todo el historial (el input deja de quedar anclado abajo).
+  // Usa el comando NATIVO de claude (/tui default | /tui fullscreen): relanza su renderer CONSERVANDO la
+  // conversación. Idempotente.
+  function ensureScrollBtn(pane) {
+    var btns = pane.querySelector('.dk-pane-btns');
+    if (!btns || btns.querySelector('.dk-pane-scroll')) return;
+    var rb = document.createElement('button');
+    rb.className = 'dk-pbtn dk-pane-scroll';
+    rb.innerHTML = svg('scroll', 12, 1.9);
+    rb.addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); setPaneScrollMode(pane, pane.dataset.fullscreen === '1'); });
+    var sel = btns.querySelector('.dk-pane-sel'), vb = btns.querySelector('.dk-pane-vscode'), x = btns.querySelector('.dk-pane-x');
+    if (sel) btns.insertBefore(rb, sel); else if (vb) btns.insertBefore(rb, vb); else if (x) btns.insertBefore(rb, x); else btns.appendChild(rb);
+    updateScrollBtn(pane);
+  }
+  function updateScrollBtn(pane) {
+    var btn = pane.querySelector('.dk-pane-scroll'); if (!btn) return;
+    var nativo = pane.dataset.fullscreen === '0';   // clásico = scroll nativo activo
+    btn.classList.toggle('on', nativo);
+    btn.title = nativo
+      ? 'scroll nativo ON — leé el historial scrolleando con la rueda · click para volver al input anclado abajo'
+      : 'historial: el input está anclado abajo (scrollealo con PgUp/Ctrl+Inicio/rueda o Ctrl+O) · click para SCROLL NATIVO de la terminal';
+  }
+  // pasa el panel claude a scroll NATIVO (native=true) o ANCLADO (native=false), en VIVO via /tui.
+  function setPaneScrollMode(pane, native) {
+    if (!pane || pane.dataset.kind !== 'claude') return;
+    pane.dataset.fullscreen = native ? '0' : '1';
+    var tid = pane.dataset.tid;
+    if (tid && api && api.term && api.term.write) {
+      try { api.term.write(tid, (native ? '/tui default' : '/tui fullscreen') + '\r'); } catch (e) {}
+    }
+    updateScrollBtn(pane);
+    notifier(native ? 'claude: scroll nativo (historial con la rueda)' : 'claude: input anclado abajo');
+    persist();
+  }
+  function setClaudeFullscreenDefault(on) { claudeFsDefault = (on !== false); }
+
   // menú contextual (copiar/pegar/seleccionar todo) sobre la terminal. Vive en document.body (fuera de
   // #terminals) → no lo traga el handler global de clicks de app.js.
   function closeTermCtx() {
@@ -1495,21 +1576,31 @@
     if (skip) pane.dataset.skip = '1'; else pane.removeAttribute('data-skip');
     pane.classList.remove('dk-pane--session', 'dk-pane--shell', 'dk-pane--claude');
     pane.classList.add('dk-pane--' + kind);
+    // modo render del panel claude: '1'=fullscreen (input anclado abajo) · '0'=clásico (scroll nativo del
+    // historial). Si no está fijado (panel nuevo), tomar el default global. El restore/toggle ya lo dejan seteado.
+    if (kind === 'claude' && pane.dataset.fullscreen !== '0' && pane.dataset.fullscreen !== '1') pane.dataset.fullscreen = claudeFsDefault ? '1' : '0';
     var ic = kind === 'claude' ? '<span class="dk-tdot"></span>' : svg('term', 11, 2);
     var lbl = kind === 'claude' ? ((resume || pick) ? 'claude ↻…' : (skip ? 'claude ⚡…' : 'claude…')) : 'shell…';
     setPaneMeta(pane, ic, lbl, projLabel(pane));
     updatePinUI(pane);
     ensureVscodeBtn(pane);   // botón VSCode en la cabecera de la terminal (abre su cwd en el editor)
     if (kind === 'shell') ensureCdBtn(pane);   // botón "cd" sólo en shells (cambiar de dir sin teclear cd a mano)
-    if (kind === 'claude') ensureSelBtn(pane);   // botón "selección" sólo en claude (la TUI de claude no tiene selección propia)
+    if (kind === 'claude') { ensureSelBtn(pane); ensureScrollBtn(pane); }   // claude: selección + toggle scroll nativo/anclado
     var body = pane.querySelector('.dk-pane-body');
     body.innerHTML = '';
 
-    var term = new Terminal({
+    var termOpts = {
       fontFamily: "'Geist Mono', ui-monospace, 'Cascadia Mono', monospace",
       fontSize: 12.5, lineHeight: 1.15, cursorBlink: true, cursorStyle: 'bar',
-      allowProposedApi: true, scrollback: 6000, theme: THEME
-    });
+      allowProposedApi: true, scrollback: 12000, theme: THEME
+    };
+    // ConPTY-aware: en Windows xterm necesita saber que el backend es ConPTY para detectar bien las
+    // líneas ENVUELTAS y NO doble-reflowear al hacer resize (xterm + ConPTY reflowean distinto → el
+    // texto viejo se superponía/cortaba tras achicar/agrandar — el bug de Franco). buildNumber gatea la
+    // heurística por versión de Windows. Si no hay build válido NO se setea (no regresiona vs antes).
+    var WIN_BUILD = (api && typeof api.winBuild === 'number') ? api.winBuild : 0;
+    if (api && api.platform === 'win32' && WIN_BUILD) termOpts.windowsPty = { backend: 'conpty', buildNumber: WIN_BUILD };
+    var term = new Terminal(termOpts);
     var fit = new FitNS.FitAddon();
     term.loadAddon(fit);
     // links clickeables: une filas envueltas (la URL de login de claude entra en 3 filas) → abre la URL ENTERA
@@ -1692,7 +1783,8 @@
       // hidden mount: NO medir (proposeDimensions daría NaN) → el PTY nace en 80x24 y se corrige al mostrarse
       if (pane.offsetParent !== null) { try { fit.fit(); } catch (e) {} }
       var bootCols = term.cols || 80, bootRows = term.rows || 24;
-      api.term.create({ cwd: cwd, kind: kind, cols: bootCols, rows: bootRows, resume: resume, skip: skip, pick: pick }).then(function (res) {
+      var fsOpt = (kind === 'claude') ? (pane.dataset.fullscreen === '1') : undefined;   // claude: modo elegido; shell: undefined → default global
+      api.term.create({ cwd: cwd, kind: kind, cols: bootCols, rows: bootRows, resume: resume, skip: skip, pick: pick, fullscreen: fsOpt }).then(function (res) {
         if (!res || !res.ok) { term.write('\r\n  \x1b[31m' + ((res && res.error) || 'no se pudo abrir') + '\x1b[0m\r\n'); return; }
         pane.dataset.tid = res.id;
         pane.dataset.cwd = res.cwd || cwd || '';
@@ -2011,12 +2103,19 @@
   var fitTimer = null, liveRaf = null;
   function nearBottom(term) { try { var b = term.buffer.active; return (b.baseY - b.viewportY) <= 1; } catch (e) { return true; } }
   // empuje al PTY con dedupe por dims (evita SIGWINCH redundante: onResize + syncTerm + drags por frame)
+  // + DEBOUNCE (80ms): durante un drag llegan decenas de dims por frame; ConPTY se corrompe con resizes
+  // rápidos (truncado/overlap). El fit de xterm sigue EN VIVO (visual); al PTY le mandamos sólo la ÚLTIMA
+  // dimensión cuando el drag se asienta. 80ms es imperceptible y deja a claude re-anclar el alt-screen rápido.
   function pushPty(pane, tid, cols, rows) {
     if (!tid || !api || !api.term || !api.term.resize || !(cols > 0) || !(rows > 0)) return;
     var key = cols + 'x' + rows;
     if (pane._ptySize === key) return;   // el PTY ya está en estas dims → no re-empujar
     pane._ptySize = key;
-    api.term.resize(tid, cols, rows);
+    if (pane._ptyResizeT) clearTimeout(pane._ptyResizeT);
+    pane._ptyResizeT = setTimeout(function () {
+      pane._ptyResizeT = null;
+      try { api.term.resize(tid, cols, rows); } catch (e) {}
+    }, 80);
   }
   // fit del xterm + empuje ATÓMICO al PTY de sus dims REALES (no de proposeDimensions, que es unclamped
   // y NaN si está oculto). Salta paneles ocultos (offsetParent null): ahí fit() es no-op por NaN y
@@ -2106,6 +2205,7 @@
     setNlEnabled: setNlEnabled, insertIntoFocused: insertIntoFocused,
     setEditorOpener: setEditorOpener, setQuickTermHook: setQuickTermHook,
     setHomeProjects: setHomeProjects,
+    setClaudeFullscreenDefault: setClaudeFullscreenDefault,
     setAutosuggest: setAutosuggest, setAutosuggestRebinder: setAutosuggestRebinder,
     openTourDemo: openTourDemo, closeTourDemo: closeTourDemo,
     openFilePanel: openFilePanel, activeTermCwd: activeTermCwd

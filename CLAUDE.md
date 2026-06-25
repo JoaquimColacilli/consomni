@@ -1340,6 +1340,65 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.5 — Terminal de claude: scroll del historial arreglado (regresión de v1.8.2 + ConPTY) + abrir claude más rápido
+> Bug de Franco (alta prioridad) + feature de Facundo/Franco. Bump **1.9.4 → 1.9.5** (`package.json` + fallbacks
+> `brand-ver`/`.ver` en `chrome.js` + entrada en `CHANGELOG` de `app.js`). Causa raíz CONFIRMADA por los docs de Anthropic
+> + harness PTY headless. Aditivo, respeta las 4 Hard Rules (cero API: sólo env vars sólo-claude + opciones de xterm +
+> `os.release()` en main; CSS con tokens; responsive; cero atribución a IA).
+
+### Causa raíz de Franco (dos problemas que se suman)
+1. **"No puedo scrollear al principio / el historial desaparece" = REGRESIÓN de v1.8.2.** El `CLAUDE_CODE_NO_FLICKER=1`
+   (default-on) mete a claude en **alternate-screen** (como vim/htop), que **NO tiene scrollback de terminal** → una vez
+   que el output supera el viewport no se puede scrollear hacia arriba. CONFIRMADO por los [docs fullscreen de Claude]
+   (code.claude.com/docs/en/fullscreen) + [issue #42670] + harness PTY headless (con `NO_FLICKER=1` el stream emite
+   `\x1b[?1049h`; con `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` NO → renderer clásico con scrollback). Y la **rueda del mouse
+   en xterm.js (igual que la terminal de VS Code) manda 1 evento por notch → claude scrollea 1 línea por notch (lentísimo)**
+   → se siente "no puedo scrollear"; el fix es `CLAUDE_CODE_SCROLL_SPEED=3` (default de vim, recomendado por los docs para
+   terminales xterm.js).
+2. **"Texto viejo superpuesto / cortado tras resize" = corrupción ConPTY↔xterm.** El `new Terminal({...})` NO seteaba
+   `windowsPty` → xterm doble-reflowea al hacer resize (xterm + ConPTY reflowean distinto). Cross-terminal (también rompe
+   Warp). Fix: `windowsPty:{backend:'conpty',buildNumber}`.
+
+### Fixes (decisión del usuario: mantener fullscreen default + scroll que anda + toggle por terminal)
+- **L1 — `windowsPty` (sin trade-off)** (`terminals-ui.js` ctor de xterm): `windowsPty:{backend:'conpty',buildNumber:<build
+  de Windows>}` + `scrollback 6000→12000`. El build de Windows lo expone el **preload** (`api.winBuild`, sincrónico para
+  el ctor de xterm). **⚠️ Gotcha (fijado): el preload está `sandbox:true`** → NO se puede `require('os')` (crashea el preload
+  → `window.consomni` no se expone → la app cae a la data MOCK de chrome.js y las terminales "no disponibles"). Se obtiene
+  con `ipcRenderer.sendSync('consomni:winBuild')` (el handler en `index.ts` se registra ANTES de `createWindow`). Verificado:
+  build=26200 (≥21376 → xterm habilita reflow ConPTY-aware).
+- **L2 — resize hygiene** (`terminals-ui.js`): `pushPty` ahora **debounce 80ms** del SIGWINCH (ConPTY se corrompe con resizes
+  rápidos; el fit de xterm sigue en vivo); `showView`/`restorePane` resetean `pane._ptySize=''` al re-mostrar un panel (estuvo
+  oculto en el pool sin resize → fuerza un SIGWINCH fresco) + 2º pase de `refitAll` por rAF al asentar el layout.
+- **L3a — `CLAUDE_CODE_SCROLL_SPEED=3`** (`terminals.ts` `applyClaudeFullscreenEnv`, sólo en modo fullscreen): la rueda en
+  xterm.js pasa de 1 línea/notch a fluida (el user afina con `/scroll-speed` de claude).
+- **L3b — toggle "scroll nativo" por panel** (botón `scroll` en la cabecera de cada terminal claude, ícono nuevo en
+  `chrome.js`): `setPaneScrollMode` escribe `/tui default` (→ clásico, scroll nativo, conserva la conversación) o
+  `/tui fullscreen` (→ input anclado) a la PTY. El modo se persiste por panel (`dataset.fullscreen` → `serializePane`/
+  `buildPane` → `dock.json`) y fluye al spawn: `applyClaudeFullscreenEnv(env, want)` setea `NO_FLICKER=1` (fullscreen) o
+  `CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1` (clásico) — `createTerm` recibe `fullscreen?` vía IPC. El default global sigue
+  siendo `config.claudeFullscreen` (Settings, relabel "input anclado abajo · off = scroll nativo"), empujado a `ConsomniTerms.
+  setClaudeFullscreenDefault` al boot + al cambiarlo.
+
+### Abrir claude más rápido (Facundo + Franco)
+- **Reusar el claude activo** (`terminals-ui.js`): el botón **claude** del toolbar del dock ahora **enfoca** el claude activo
+  de la vista si hay uno (`findActiveClaude`: PTY viva, no minimizado, no `dead`, scopeado por `matchesView`; `focusClaudePane`
+  espeja el tail de `openSession`) en vez de abrir otro (Facundo terminaba con 5 tabs). **Shift/Alt+click = uno nuevo**;
+  `claude ⚡` sigue siempre-nueva.
+- **Botón claude de un toque al entrar a un proyecto** (`placeholderHTML`): el placeholder de un proyecto SIN terminales ahora
+  muestra botones **abrir claude** (destacado) / **terminal** en su cwd (`viewCwd`), reusando el handler `[data-home-open]`
+  (spawnea en la vista actual = el proyecto). Los chips del inicio también ponen **claude primero**. Sin spawn no pedido.
+- CSS aditivo (`app.css`): `.dk-pane-scroll.on` (verde = scroll nativo), `.dk-ph-pbtn--claude` (acción primaria), `.dk-ph-actions`.
+
+### Verificación
+- **Harness PTY headless** (electron-as-node + node-pty ABI v121): `NO_FLICKER=1` → `?1049h` SÍ ; `DISABLE_ALTERNATE_SCREEN=1`
+  → `?1049h` NO. PASS. **En vivo** (screenshot): app arranca con `windowsPty` sin romper, claude resume con el input anclado
+  abajo (fullscreen), `winBuild=26200` llega al renderer, el botón `scroll` está en la cabecera (`scrollBtn=1`), v1.9.5 en topbar/
+  sidebar, diff badges OK. TS compila limpio; `node --check` OK en los 3 .js del renderer.
+- **Límite del sandbox/medio:** el arrastre de selección, el scroll de la rueda EN VIVO y el reflow visual al redimensionar son
+  DOM/interacción → el usuario debe probarlos en vivo (la lógica + el mecanismo de env vars están verificados).
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

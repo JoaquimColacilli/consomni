@@ -30,8 +30,25 @@ function applyClaudeProfileEnv(env: NodeJS.ProcessEnv): void {
     Rule 3) y no afecta a otros procesos del shell. Verificado en PTY real: con esto claude entra a
     alt-screen y fija el input a la última fila. Opt-out con claudeFullscreen:false. Sólo en las
     terminales INTERACTIVAS embebidas (NO en el helper NL `claude -p`, que parsea JSON de stdout). */
-function applyClaudeFullscreenEnv(env: NodeJS.ProcessEnv): void {
-  if (loadConfig().claudeFullscreen !== false) env.CLAUDE_CODE_NO_FLICKER = '1';
+// `want` override POR-PANEL (toggle "scroll nativo" en la cabecera del panel claude):
+//   true      → fullscreen: CLAUDE_CODE_NO_FLICKER=1 (input anclado abajo, alt-screen, SIN scrollback nativo).
+//   false     → clásico: CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN=1 → claude escribe en la main buffer →
+//               la terminal SÍ scrollea hacia arriba (historial completo). (Sólo NO setear NO_FLICKER no
+//               alcanza si el setting `tui` guardado de claude es fullscreen — por eso seteamos el disable.)
+//   undefined → sigue el default global config.claudeFullscreen.
+function applyClaudeFullscreenEnv(env: NodeJS.ProcessEnv, want?: boolean): void {
+  const on = (want === undefined) ? (loadConfig().claudeFullscreen !== false) : want;
+  if (on) {
+    env.CLAUDE_CODE_NO_FLICKER = '1';
+    // xterm.js (igual que la terminal de VS Code) manda 1 evento de rueda por "notch" → claude scrollea
+    // 1 LÍNEA por notch en fullscreen = lentísimo, se siente "no puedo scrollear" (el síntoma de Franco).
+    // El multiplicador 3 (default de vim, recomendado por los docs de claude justo para terminales xterm.js)
+    // lo hace usable. Respetamos el valor si el user ya lo seteó; afinable en vivo con /scroll-speed.
+    if (!env.CLAUDE_CODE_SCROLL_SPEED) env.CLAUDE_CODE_SCROLL_SPEED = '3';
+  } else {
+    // Clásico: claude escribe en la main buffer → la terminal SÍ scrollea hacia arriba (historial completo).
+    env.CLAUDE_CODE_DISABLE_ALTERNATE_SCREEN = '1';
+  }
 }
 
 // Tipos mínimos (evita acoplar el build al .d.ts del fork).
@@ -101,7 +118,7 @@ function resolveShell(): { file: string; args: string[]; label: string } {
 
 export interface CreateResult { ok: boolean; id?: string; title?: string; cwd?: string; kind?: TermKind; error?: string; }
 
-export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number; rows?: number; resume?: string; skip?: boolean; pick?: boolean }): CreateResult {
+export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number; rows?: number; resume?: string; skip?: boolean; pick?: boolean; fullscreen?: boolean }): CreateResult {
   const mod = getPty();
   if (!mod) return { ok: false, error: 'node-pty no disponible: ' + (ptyError || 'binario nativo ausente') };
 
@@ -116,8 +133,8 @@ export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number;
   delete env.ELECTRON_RUN_AS_NODE;
   // Perfil activo de Claude Code (multi-perfil): cualquier `claude` adentro usa este config dir.
   applyClaudeProfileEnv(env);
-  // Input box anclado abajo (fullscreen/alt-screen) para cualquier `claude` de esta terminal embebida.
-  applyClaudeFullscreenEnv(env);
+  // Input box anclado abajo (fullscreen/alt-screen) vs scroll nativo (clásico). Override por-panel; sin él, el default global.
+  applyClaudeFullscreenEnv(env, opts.fullscreen);
 
   // ¿qué comando tipear cuando el shell muestre el prompt?
   // claude normal, o `claude --resume <id>` para CONTINUAR esa conversación (interactiva).
