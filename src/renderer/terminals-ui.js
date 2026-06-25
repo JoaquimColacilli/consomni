@@ -46,6 +46,7 @@
   var quickTermHook = null;    // CTRL+ESPACIO dentro de un xterm → abre una terminal nueva (lo inyecta app.js)
   var homeProjects = null;     // provider de proyectos para el inicio (lo inyecta app.js) → [{id,name,cwd,fav}]
   var claudeFsDefault = true;  // default global config.claudeFullscreen (lo empuja app.js); fullscreen=input anclado abajo
+  var claudeHistHintShown = false;  // tip "Ctrl+O = historial completo" una sola vez por sesión (al retomar un claude en fullscreen)
   function isMaximized() { return !!host && host.classList.contains('maximized'); }
   function notifyMax() { try { maxObserver(isMaximized()); } catch (e) {} }
 
@@ -288,7 +289,7 @@
   }
 
   /* ── sync en VIVO del visor: re-lee el archivo mientras el panel está abierto y actualiza si cambió
-     (pedido de Franco/Facundo: "real en tiempo real", sin tener que cerrar y reabrir el panel). Pollea
+     (pedido de usuarios: "real en tiempo real", sin tener que cerrar y reabrir el panel). Pollea
      (no fs.watch → robusto cross-platform), salta si el panel está oculto/minimizado, preserva el scroll
      (y hace "tail" si estabas abajo), y NO pisa el contenido bueno ante un error transitorio (archivo a
      medio escribir). El lector (api.readFile) lee FRESCO del disco en cada llamada → siempre el último estado. ── */
@@ -825,7 +826,7 @@
   }
 
   // claude ACTIVO en la vista actual (PTY viva, no minimizado, no finalizado) → para REUSAR en vez de
-  // abrir uno nuevo cada vez (Facundo terminaba con 5 tabs). Prioriza el enfocado; si no, el último de la
+  // abrir uno nuevo cada vez (se terminaba con 5 tabs). Prioriza el enfocado; si no, el último de la
   // vista (visible o, en su defecto, minimizado). Scopeado por vista (matchesView): inicio reusa el de
   // inicio/fijados; un proyecto reusa el SUYO (no te arrastra a otro). null si no hay ninguno.
   function findActiveClaude() {
@@ -1280,8 +1281,8 @@
     var nativo = pane.dataset.fullscreen === '0';   // clásico = scroll nativo activo
     btn.classList.toggle('on', nativo);
     btn.title = nativo
-      ? 'scroll nativo ON — leé el historial scrolleando con la rueda · click para volver al input anclado abajo'
-      : 'historial: el input está anclado abajo (scrollealo con PgUp/Ctrl+Inicio/rueda o Ctrl+O) · click para SCROLL NATIVO de la terminal';
+      ? 'scroll nativo ON — leé el historial con la rueda · ojo: claude puede pisar líneas mientras escribe (limitación del modo) · click = volver al input anclado abajo (recomendado)'
+      : 'input anclado abajo (render limpio). Para leer TODO el historial sin cortes: Ctrl+O (modo transcripción + búsqueda de claude) · o scrolleá con la rueda/PgUp · click = scroll nativo de la terminal';
   }
   // pasa el panel claude a scroll NATIVO (native=true) o ANCLADO (native=false), en VIVO via /tui.
   function setPaneScrollMode(pane, native) {
@@ -1292,7 +1293,7 @@
       try { api.term.write(tid, (native ? '/tui default' : '/tui fullscreen') + '\r'); } catch (e) {}
     }
     updateScrollBtn(pane);
-    notifier(native ? 'claude: scroll nativo (historial con la rueda)' : 'claude: input anclado abajo');
+    notifier(native ? 'claude: scroll nativo (historial con la rueda)' : 'claude: input anclado abajo · Ctrl+O = historial completo + búsqueda');
     persist();
   }
   function setClaudeFullscreenDefault(on) { claudeFsDefault = (on !== false); }
@@ -1586,6 +1587,13 @@
     ensureVscodeBtn(pane);   // botón VSCode en la cabecera de la terminal (abre su cwd en el editor)
     if (kind === 'shell') ensureCdBtn(pane);   // botón "cd" sólo en shells (cambiar de dir sin teclear cd a mano)
     if (kind === 'claude') { ensureSelBtn(pane); ensureScrollBtn(pane); }   // claude: selección + toggle scroll nativo/anclado
+    // Al RETOMAR un claude en fullscreen, el historial vive en el alt-screen (sin scrollback nativo) → el modo
+    // confiable para leerlo/buscarlo entero es Ctrl+O (transcripción de claude). Lo avisamos UNA vez por sesión
+    // (justo cuando lo necesitás: retomaste un chat y querés releer). El toggle "scroll nativo" sigue disponible.
+    if (kind === 'claude' && (resume || pick) && pane.dataset.fullscreen === '1' && !claudeHistHintShown) {
+      claudeHistHintShown = true;
+      setTimeout(function () { try { notifier('retomada: Ctrl+O abre el historial completo (+ búsqueda)'); } catch (e) {} }, 1200);
+    }
     var body = pane.querySelector('.dk-pane-body');
     body.innerHTML = '';
 
@@ -1596,7 +1604,7 @@
     };
     // ConPTY-aware: en Windows xterm necesita saber que el backend es ConPTY para detectar bien las
     // líneas ENVUELTAS y NO doble-reflowear al hacer resize (xterm + ConPTY reflowean distinto → el
-    // texto viejo se superponía/cortaba tras achicar/agrandar — el bug de Franco). buildNumber gatea la
+    // texto viejo se superponía/cortaba tras achicar/agrandar — bug reportado). buildNumber gatea la
     // heurística por versión de Windows. Si no hay build válido NO se setea (no regresiona vs antes).
     var WIN_BUILD = (api && typeof api.winBuild === 'number') ? api.winBuild : 0;
     if (api && api.platform === 'win32' && WIN_BUILD) termOpts.windowsPty = { backend: 'conpty', buildNumber: WIN_BUILD };
@@ -1763,7 +1771,7 @@
     // que TAMBIÉN escribe el bracketed-paste a la PTY (verificado por test). Nuestro Ctrl+V hace
     // preventDefault para matarlo, pero eso es frágil: si el paste nativo igual se cuela, claude recibe
     // el MISMO paste DOS veces → colapsa con el 1º y el 2º (idéntico) lo EXPANDE → se ve "[...] paste again
-    // to expand" con el texto entero (= el bug que reportó Franco). Guard en CAPTURA: si nuestro paste
+    // to expand" con el texto entero (= el bug reportado). Guard en CAPTURA: si nuestro paste
     // acaba de correr, tragamos el paste nativo → claude recibe UNO solo → colapsa y queda colapsado.
     // Sin guard reciente (pegar por menú del SO sobre el textarea) dejamos pasar el nativo (no rompe nada).
     try { body.addEventListener('paste', function (ev) {

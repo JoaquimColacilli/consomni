@@ -41,7 +41,7 @@ function applyClaudeFullscreenEnv(env: NodeJS.ProcessEnv, want?: boolean): void 
   if (on) {
     env.CLAUDE_CODE_NO_FLICKER = '1';
     // xterm.js (igual que la terminal de VS Code) manda 1 evento de rueda por "notch" → claude scrollea
-    // 1 LÍNEA por notch en fullscreen = lentísimo, se siente "no puedo scrollear" (el síntoma de Franco).
+    // 1 LÍNEA por notch en fullscreen = lentísimo, se siente "no puedo scrollear" (síntoma reportado).
     // El multiplicador 3 (default de vim, recomendado por los docs de claude justo para terminales xterm.js)
     // lo hace usable. Respetamos el valor si el user ya lo seteó; afinable en vivo con /scroll-speed.
     if (!env.CLAUDE_CODE_SCROLL_SPEED) env.CLAUDE_CODE_SCROLL_SPEED = '3';
@@ -181,7 +181,16 @@ export function writeTerm(id: string, data: string): void {
 
 export function resizeTerm(id: string, cols: number, rows: number): void {
   const t = terms.get(id);
-  if (t && cols > 0 && rows > 0) { try { t.proc.resize(cols, rows); t.cols = cols; t.rows = rows; } catch { /* noop */ } }
+  if (!t || !(cols > 0) || !(rows > 0)) return;
+  // ⚠️ NO-OP GUARD: ConPTY REPINTA su pantalla en CADA ResizePseudoConsole, INCLUSO si las dims no cambian.
+  // En el modo clásico/scroll-nativo de claude (main buffer) ese repintado RE-EMITE la pantalla visible →
+  // xterm la agrega de nuevo → "duplicado lo del principio" (bug reportado). El renderer fuerza re-empujes
+  // (reset de _ptySize en restore/showView, para re-anclar el alt-screen tras minimizar), y sin este guard
+  // esos re-empujes llegan acá con las MISMAS dims → repintado espurio. Un resize genuino (achicar/maximizar)
+  // sí cambia las dims → pasa el guard → claude re-ancla bien. Sólo bloqueamos el no-op (que igual no hace nada
+  // útil) → mata la duplicación Y estabiliza el scroll del alt-screen (que el repintado reseteaba al fondo).
+  if (t.cols === cols && t.rows === rows) return;
+  try { t.proc.resize(cols, rows); t.cols = cols; t.rows = rows; } catch { /* noop */ }
 }
 
 export function killTerm(id: string): void {

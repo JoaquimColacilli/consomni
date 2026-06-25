@@ -497,6 +497,11 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.6', date: '25 jun 2026', title: 'El ícono del escritorio no desaparece al actualizar + terminal de claude que ya no se duplica', items: [
+      'Al actualizar la app, el acceso directo de Consomni en el escritorio desaparecía y no volvía. El instalador lo borraba en cada actualización en vez de mantenerlo. Ahora el acceso directo se conserva al actualizar (y si por alguna razón faltaba, se vuelve a crear solo y aparece al instante, sin tener que refrescar el escritorio).',
+      'Terminal de claude duplicada: al minimizar una terminal y volver a abrirla/maximizarla, se duplicaba el principio de la conversación. Era un repintado de más que disparaba el cambio de tamaño aunque el tamaño no cambiara; ahora se evita ese repintado innecesario, así que no se duplica (y de paso el scroll queda más estable, sin saltar al fondo solo).',
+      'Leer el historial completo de claude: cuando el input queda anclado abajo, la forma confiable de leer (y buscar) toda la conversación es Ctrl+O (modo transcripción de claude). Ahora te lo avisamos al retomar un chat y está explicado en el botón de scroll de la cabecera de la terminal.',
+    ] },
     { v: '1.9.5', date: '25 jun 2026', title: 'La terminal de claude deja de "romperse" al scrollear/redimensionar + abrir claude es más rápido', items: [
       'Scroll del historial arreglado: en las terminales de claude el historial se "rompía" —texto viejo superpuesto, partes cortadas, y no se podía scrollear hacia arriba para leer el principio—, sobre todo en sesiones largas y al minimizar/agrandar/achicar. Eran dos cosas: (1) claude corría en modo "pantalla completa", que NO tiene scroll de terminal (por eso no llegabas al principio), y la rueda del mouse scrolleaba lentísimo (1 línea por vez); ahora la rueda anda fluida y, si preferís el scroll de toda la vida, hay un botón nuevo en la cabecera de la terminal para pasar a "scroll nativo" (scrolleás hacia arriba como cualquier terminal). (2) El reflow de las líneas al cambiar el tamaño se corrompía sobre Windows; ahora la terminal sabe que está sobre ConPTY y reacomoda el texto bien al redimensionar.',
       'Botón claude más inteligente: el botón "claude" de arriba ya no abre una terminal nueva cada vez (no más juntar 5 pestañas). Si ya hay un claude abierto en la vista, lo enfoca; para abrir uno nuevo a propósito, hacé Shift+click (o usá "claude ⚡").',
@@ -709,7 +714,7 @@
   /* ════════ TUTORIAL (coachmark spotlight) ════════
      Resalta UN elemento con un recorte EXACTO (box-shadow gigante que opaca el
      resto) y una tarjeta al lado, paso a paso, con "saltar". Responsive: reencuadra
-     en resize y en cada re-render. Explica el tablero de Planes (idea de Facundo). */
+     en resize y en cada re-render. Explica el tablero de Planes. */
   var TOUR = { active: false, steps: [], idx: 0, doneKey: 'consomni.tour.plans', onDone: null, onEnd: null };
   var tourEls = { host: null, spot: null, pop: null };
 

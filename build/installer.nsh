@@ -48,10 +48,15 @@
     ${NSD_GetState} $ConsomniDtCheckbox $ConsomniCreateDesktop
   FunctionEnd
 
-  ; Crear el acceso del escritorio sólo si quedó tildado.
+  ; Crear el acceso del escritorio si quedó tildado (instalación fresca) O si es un update.
+  ; En un auto-update el desinstalador VIEJO (sin el guard de abajo) ya borró el .lnk, así que
+  ; acá lo (re)creamos sí o sí (${isUpdated}) para que el ícono no desaparezca, y refrescamos el
+  ; shell con SHChangeNotify (si no, aunque el .lnk exista, el escritorio no lo redibuja → "no vuelve").
   !macro customInstall
     ${If} $ConsomniCreateDesktop == ${BST_CHECKED}
+    ${OrIf} ${isUpdated}
       CreateShortcut "$DESKTOP\${PRODUCT_FILENAME}.lnk" "$INSTDIR\${APP_EXECUTABLE_FILENAME}"
+      System::Call 'Shell32::SHChangeNotify(i 0x8000000, i 0, i 0, i 0)'
     ${EndIf}
   !macroend
 
@@ -75,6 +80,12 @@
 !endif
 
 ; Al desinstalar, sacar el acceso del escritorio si existe (corre en el pass del uninstaller).
+; ⚠️ SÓLO en una desinstalación REAL: durante un auto-update electron-builder corre este
+; desinstalador con --keep-shortcuts (${isKeepShortcuts} == true) para que los accesos directos
+; SOBREVIVAN al update (igual que el borrado built-in del template, guardado por el mismo predicado).
+; Sin este guard, cada update borraba el ícono del escritorio (bug histórico).
 !macro customUnInstall
-  Delete "$DESKTOP\${PRODUCT_FILENAME}.lnk"
+  ${ifNot} ${isKeepShortcuts}
+    Delete "$DESKTOP\${PRODUCT_FILENAME}.lnk"
+  ${endIf}
 !macroend

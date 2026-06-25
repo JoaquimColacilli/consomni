@@ -1399,6 +1399,54 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.6 — Ícono del escritorio en updates + terminal de claude que no se duplica + scrub de nombres
+> Tres fixes (reportes de usuarios). Bump **1.9.5 → 1.9.6** (`package.json` + fallbacks `brand-ver`/`.ver` en `chrome.js` +
+> entrada en `CHANGELOG` de `app.js`). Causa raíz de la duplicación **confirmada por harness PTY headless**. Aditivo, respeta
+> las 4 Hard Rules.
+
+### 1) El acceso directo del escritorio desaparecía tras un auto-update (`build/installer.nsh`)
+- **Causa raíz** (trazando los templates NSIS de electron-builder 25.1.8 en `node_modules/`): en un auto-update electron-updater
+  corre el desinstalador VIEJO con `--keep-shortcuts` para que los accesos directos SOBREVIVAN; el borrado built-in está
+  guardado por `${ifNot} ${isKeepShortcuts}`. **Pero el `customUnInstall` custom borraba `$DESKTOP\…lnk` SIN condición** → cada
+  update lo mataba.
+- **Fix:** `customUnInstall` → `${ifNot} ${isKeepShortcuts}` (no borra en updates; sí en uninstall real). `customInstall` → crea
+  si el checkbox quedó tildado **o** `${isUpdated}`, + `SHChangeNotify` para refrescar el escritorio al instante.
+- **NO** se tocó: `electron-builder.yml` (`createDesktopShortcut` queda `false` — el ícono es 100% custom por el checkbox de
+  v1.2.0; `"always"` rompería el opt-out y NO arregla el update porque el recreate built-in está guardado por `${ifNot}
+  ${isUpdated}`), `appId` (`com.ironidevz.consomni`, estable git-confirmado), ni el esquema de instalación. Versiones fuera del
+  rango de la regresión conocida (eb 26.7.0 / eu 6.7.3).
+
+### 2) Terminal de claude duplicaba "el principio" al minimizar→restaurar→maximizar (`src/main/terminals.ts`)
+- **Causa raíz CONFIRMADA por harness PTY headless** (electron-as-node + node-pty ABI v121 contra `claude.exe` real, stream
+  alimentado a `@xterm/headless`): **ConPTY REPINTA su pantalla en CADA `ResizePseudoConsole`, INCLUSO al MISMO tamaño** — medido:
+  un resize no-op (100x24 → 100x24) hace re-emitir **4211 bytes** (repintado completo). El `_ptySize=''` que v1.9.5 reseteaba en
+  `restore`/`showView` (para "re-anclar") forzaba justo ese resize de mismas dims en cada restore/maximize → el repintado se
+  agregaba al scrollback → "duplicado lo del principio".
+- **Fix:** **guard no-op en `resizeTerm`** — si `cols`/`rows` no cambian respecto del PTY actual, NO se llama a `t.proc.resize`. Un
+  resize genuino sí pasa (claude re-ancla bien). Mata la duplicación Y estabiliza el scroll (los repintados espurios lo saltaban
+  al fondo). Comprehensivo: cubre cualquier re-empuje espurio (RO/fonts/foco/doble-rAF/minimize-restore), en streaming o no.
+- **Verificado headless:** el stream clásico de claude alimentado a xterm da buffer LIMPIO (números 1..40 una sola vez); el no-op
+  resize SÍ re-emite 4211 bytes. claude en modo clásico (DISABLE_ALTERNATE_SCREEN) NO usa alt-screen pero redibuja su TUI con
+  **posicionamiento ABSOLUTO** (`\x1b[fila;colH`) + `\x1b[2J` → render full-screen que en main buffer ensucia el scrollback.
+
+### 3) Leer el historial de claude (la "superposición mientras streamea")
+- **Decisión del usuario:** mantener **fullscreen como default** (render limpio: alt-screen aísla los redibujos full-screen de
+  claude). La superposición que aparece en modo **scroll-nativo/clásico** es inherente a cómo claude redibuja (absoluto +
+  full-screen) sobre el scrollback de ConPTY → no hay fix limpio a nivel app; por eso fullscreen sigue de default.
+- **Surfaceo de Ctrl+O** (`terminals-ui.js`): el modo confiable para leer/buscar TODO el historial en fullscreen es **Ctrl+O**
+  (transcripción de claude). Se avisa en el tooltip del botón de scroll, en el toast del toggle, y un aviso **una vez por sesión**
+  al RETOMAR un claude (`claudeHistHintShown`). El toggle "scroll nativo" sigue, con su tooltip avisando que claude puede pisar
+  líneas mientras escribe.
+
+### 4) Cero nombres de terceros en lo que ve el usuario (pedido del usuario)
+- Se sacaron los nombres de personas de **las release notes** (se editó el cuerpo del GitHub Release **v1.9.5** vía
+  `gh release edit`) y de los **comentarios de código** que se empaquetan en el asar (`src/renderer/*.js`, `src/main/*.ts` →
+  "reportado por usuarios"/"pedido de usuarios"). El changelog in-app (`CHANGELOG` de `app.js`) ya estaba limpio. **Regla de acá
+  en más:** ni release notes, ni changelog in-app, ni notificaciones llevan nombres de quien reportó/pidió algo. La atribución de
+  AUTORÍA del mantenedor (`by Joaquim Colacilli`, repo `JoaquimColacilli/consomni`) es legítima y se mantiene.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).
