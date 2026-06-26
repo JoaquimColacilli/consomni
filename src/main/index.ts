@@ -12,7 +12,7 @@ import { runAction, type ActionPayload } from './actions';
 import { startHooksServer, stopHooksServer, isServerListening } from './hooks-server';
 import { install as installHooks, uninstall as uninstallHooks, getStatus as getHooksStatus, isInstalled } from './hooks-install';
 import { loadConfig, saveConfig, setLocalState, loadDock, saveDock, loadLibrary, saveLibrary, loadNotifications, saveNotifications, loadTermHistory, saveTermHistory, detectClaudeProfiles, claudeProjectsPath, resolveClaudeDir, type AppConfig } from './config';
-import { checkForUpdate, initAutoUpdate, triggerAutoCheck, downloadUpdate } from './updates';
+import { checkForUpdate, initAutoUpdate, triggerAutoCheck, downloadUpdate, getUpdateStatus } from './updates';
 import { setTerminalWindow, createTerm, writeTerm, resizeTerm, killTerm, listTerms, killAllTerms, terminalsAvailable, nlToCommand } from './terminals';
 import type { Snapshot, LocalSessionState } from './types';
 
@@ -196,7 +196,9 @@ if (!gotLock) {
     ipcMain.handle('consomni:checkUpdate', () => checkForUpdate());
     // auto-update (electron-updater): re-chequeo manual + iniciar descarga
     ipcMain.on('consomni:updateCheck', () => triggerAutoCheck());
-    ipcMain.on('consomni:updateDownload', () => downloadUpdate());
+    ipcMain.on('consomni:updateDownload', () => { void downloadUpdate(); });
+    // estado del update pendiente (el renderer lo re-consulta al boot → re-muestra el botón tras recargar)
+    ipcMain.handle('consomni:getUpdateStatus', () => getUpdateStatus());
 
     // ── terminales embebidas (PTYs reales; ver terminals.ts) ──
     ipcMain.handle('consomni:termAvailable', () => terminalsAvailable());

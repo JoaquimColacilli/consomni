@@ -361,23 +361,52 @@
       t = document.createElement('div');
       t.className = 'cns-toast update';
       t.setAttribute('data-upd', '1');
-      t.addEventListener('click', function () { if (state.upd && state.upd.mode === 'show') startUpdateDownload(); });
+      t.addEventListener('click', function () {
+        if (!state.upd) return;
+        // tras un error de descarga: el click abre la release de GitHub (instalador oficial) → nunca trabado.
+        if (state.upd.err) { openExternalUrl((state.update && state.update.url) || 'https://github.com/JoaquimColacilli/consomni/releases'); return; }
+        if (state.upd.mode === 'show') startUpdateDownload();
+      });
       w.appendChild(t);
     }
     var ver = (state.update && state.update.latest) ? ('v' + state.update.latest + ' ') : '';
     var label, icon = 'download', clickable = false;
-    if (u.mode === 'show') { label = '⬆ Consomni ' + ver + '— Actualizar'; clickable = true; }
+    if (u.err) { label = '⬆ Consomni ' + ver + '— no se pudo descargar · bajar instalador'; clickable = true; }
+    else if (u.mode === 'show') { label = '⬆ Consomni ' + ver + '— Actualizar'; clickable = true; }
     else if (u.mode === 'downloading') { label = 'Descargando actualización… ' + (u.pct != null ? u.pct + '%' : ''); }
     else { label = 'Actualización lista · reiniciando…'; icon = 'check'; }
     t.style.cursor = clickable ? 'pointer' : 'default';
     t.innerHTML = '<span class="tdot"></span><span>' + esc(label) + '</span><span class="tx-go">' + C.svg(icon, 12, 2) + '</span>';
   }
-  // available → (click en botón o toast) → progress* → downloaded → relanza. error → vuelve a "Actualizar".
+  // semver compare local (espeja parseVer/isNewer del main; '1.9.10' > '1.9.9' lexicográfico daría false).
+  function isNewerVer(latest, current) {
+    function pv(v) { return String(v || '').replace(/^v/i, '').split(/[.\-+]/).map(function (n) { return parseInt(n, 10); }).filter(function (n) { return !isNaN(n); }); }
+    var a = pv(latest), b = pv(current), len = Math.max(a.length, b.length);
+    for (var i = 0; i < len; i++) { var x = a[i] || 0, y = b[i] || 0; if (x > y) return true; if (x < y) return false; }
+    return false;
+  }
+  // ÚNICO punto que prende el botón "Actualizar": setea state.upd (lo que gobierna applyUpdBtn) + guarda
+  // el update + notifica. Idempotente (addNotif dedupea por id). Lo usan TODOS los caminos (auto, "buscar"
+  // de Settings, click en la notificación, re-pull al boot) → ninguno queda como callejón sin salida.
+  function markUpdateAvailable(data) {
+    if (!data || !data.latest) return;
+    state.update = data;
+    state.upd = { mode: 'show', label: 'Actualizar' };
+    addUpdateNotif(data);
+    applyUpdBtn(); applyUpdToast();
+  }
+  // available → (click en botón o toast) → progress* → downloaded → relanza. error → "Actualizar" + fallback.
   function onUpdatePhase(phase, data) {
-    if (phase === 'available') { state.update = data; state.upd = { mode: 'show', label: 'Actualizar' }; addUpdateNotif(data); }
+    if (phase === 'available') {
+      // ignorar el available redundante mientras ya bajamos/instalamos (el check interno de downloadUpdate
+      // re-dispara update-available → sin esto el estado "downloading" se resetearía a "Actualizar").
+      if (state.upd && (state.upd.mode === 'downloading' || state.upd.mode === 'installing')) return;
+      markUpdateAvailable(data); return;
+    }
     else if (phase === 'progress') { state.upd = { mode: 'downloading', label: (data && data.percent != null ? data.percent + '%' : 'Descargando…'), pct: data && data.percent }; }
     else if (phase === 'downloaded') { state.upd = { mode: 'installing', label: 'Reiniciando…' }; }
-    else if (phase === 'error') { state.upd = { mode: 'show', label: 'Actualizar' }; toast('update: ' + ((data && data.error) || 'error'), 'err'); }
+    // error: queda accionable → reintentar la descarga in-app O bajar el instalador (red de seguridad).
+    else if (phase === 'error') { state.upd = { mode: 'show', label: 'Actualizar', err: true }; toast('No se pudo descargar · podés bajar el instalador', 'err'); }
     else if (phase === 'none') { return; }
     applyUpdBtn(); applyUpdToast();
   }
@@ -500,16 +529,22 @@
     var ver = data.latest ? ('v' + data.latest) : '';
     var notes = data.notes ? notesToHtml(data.notes) : '<p class="cl-p cl-empty">Sin notas de versión publicadas todavía. Mirá el detalle en GitHub.</p>';
     var canDownload = !!(api && api.updateDownload) && state.upd && (state.upd.mode === 'show' || state.upd.mode === 'downloading');
+    var hasErr = !!(state.upd && state.upd.err);   // última descarga in-app falló → ofrecer el instalador
+    var dlUrl = esc(data.url || 'https://github.com/JoaquimColacilli/consomni/releases');
+    // Red de seguridad: si falló la descarga, el link de la izquierda pasa a "descargar instalador"
+    // (release oficial de GitHub) — bajada segura desde adentro, sin tener que buscar el bundle a mano.
+    var leftBtn = hasErr
+      ? '<a class="btn btn--ghost btn--sm" data-href="' + dlUrl + '">' + C.svg('download', 12, 2) + ' descargar instalador</a>'
+      : '<a class="btn btn--ghost btn--sm" data-href="' + dlUrl + '">' + C.svg('ext', 12, 2) + ' ver en GitHub</a>';
     var html = '<div class="cl-scrim" data-act="close-changelog"><div class="cl-card" role="dialog" aria-modal="true">' +
       '<div class="cl-head"><span class="cl-eye">' + C.eye(22, false) + '</span>' +
         '<div class="cl-hh"><span class="cl-ttl">Novedades ' + esc(ver) + '</span>' +
           '<span class="cl-sub">' + esc(data.name ? data.name : 'Consomni') + '</span></div>' +
         '<button class="iconbtn" style="width:28px;height:28px" data-act="close-changelog">' + C.svg('x', 14, 2) + '</button></div>' +
       '<div class="cl-body">' + notes + '</div>' +
-      '<div class="cl-foot">' +
-        '<a class="btn btn--ghost btn--sm" data-href="' + esc(data.url || 'https://github.com/JoaquimColacilli/consomni/releases') + '">' + C.svg('ext', 12, 2) + ' ver en GitHub</a>' +
+      '<div class="cl-foot">' + leftBtn +
         '<span style="flex:1"></span>' +
-        (canDownload ? '<button class="btn btn--green btn--sm" data-act="changelog-update">' + C.svg('download', 13, 2) + ' Actualizar ahora</button>' : '<button class="btn btn--sm" data-act="close-changelog">listo</button>') +
+        (canDownload ? '<button class="btn btn--green btn--sm" data-act="changelog-update">' + C.svg('download', 13, 2) + (hasErr ? ' Reintentar' : ' Actualizar ahora') + '</button>' : '<button class="btn btn--sm" data-act="close-changelog">listo</button>') +
       '</div></div></div>';
     setOverlay(html);
   }
@@ -519,6 +554,12 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.11', date: '26 jun 2026', title: 'El botón "Actualizar" vuelve a funcionar (y nunca quedás trabado)', items: [
+      'Se arregló el bug en el que la app avisaba que había una versión nueva pero no te dejaba actualizar. Ahora, detectar una versión nueva SIEMPRE te da el botón para descargar e instalar.',
+      'El botón aparece en los tres lugares: en la barra de arriba, en "Novedades", y al tocar la notificación de "nueva versión". Antes desde Settings → "buscar" sólo te mostraba el changelog, sin opción de bajar.',
+      'Aunque recargues la ventana, el botón "Actualizar" se vuelve a mostrar solo (antes se perdía al recargar).',
+      'Red de seguridad: si la descarga falla por algún motivo, la app te ofrece bajar el instalador oficial desde GitHub con un clic — sin tener que buscarlo a mano.',
+    ] },
     { v: '1.9.10', date: '25 jun 2026', title: 'Terminal más estable + se puede tipear @ siempre + menos tooltips + la selección ya no pisa el portapapeles', items: [
       'Texto de la terminal más estable: se arregló el texto que se rompía o se duplicaba (letras dobladas) al scrollear o redimensionar la consola de claude. Si igual lo notaras, podés cambiar a renderer clásico en Settings → Editor & Terminal ("render por GPU").',
       'Se puede tipear @ siempre: el selector flotante de @ ya no te deja trabado si no puede listar los archivos — si falla, el @ va directo a claude y seguís escribiendo normal. El @ además sólo abre la cajita al empezar una palabra (no en medio de un "user@host"). Si preferís, lo podés apagar del todo en Settings ("selector flotante de @ y /").',
@@ -2209,7 +2250,7 @@
         if (!msg) return;
         if (!u) { msg.textContent = 'no se pudo comprobar'; return; }
         if (u.error) { msg.textContent = 'sin conexión / sin releases (v' + u.current + ')'; }
-        else if (u.hasUpdate) { state.update = u; addUpdateNotif(u); msg.innerHTML = 'v' + esc(u.latest) + ' disponible · <a data-act="show-changelog" style="color:var(--green);cursor:pointer">ver novedades</a>'; }
+        else if (u.hasUpdate) { markUpdateAvailable(u); msg.innerHTML = 'v' + esc(u.latest) + ' disponible · <a data-act="show-changelog" style="color:var(--green);cursor:pointer">ver novedades</a>'; }
         else if (u.latest) { msg.textContent = 'estás al día (v' + u.current + ')'; }
         else { msg.textContent = 'sin releases publicadas aún (v' + u.current + ')'; }
       }).catch(function () { ub.disabled = false; if (msg) msg.textContent = 'error al comprobar'; });
@@ -2262,7 +2303,12 @@
     if (tourBtn) { e.preventDefault(); e.stopPropagation(); var ta = tourBtn.getAttribute('data-tour'); if (ta === 'next') tourNext(); else if (ta === 'prev') tourPrev(); else endTour(true); return; }
     // ── fila de notificación → changelog (desde el panel o el historial) ──
     var nrow = t.closest && t.closest('.ntf-row[data-notif]');
-    if (nrow) { e.stopPropagation(); var nn = notifById(nrow.getAttribute('data-notif')); closeNotifPanel(); state.notifHistoryOpen = false; if (nn && nn.kind === 'update') openChangelog(nn.data); return; }
+    if (nrow) { e.stopPropagation(); var nn = notifById(nrow.getAttribute('data-notif')); closeNotifPanel(); state.notifHistoryOpen = false; if (nn && nn.kind === 'update') {
+      // notif vigente (versión > la instalada) → habilita "Actualizar ahora"; notif vieja → cae a "listo".
+      var cur = state.snapshot && state.snapshot.appVersion;
+      if (nn.data && nn.data.latest && (!cur || isNewerVer(nn.data.latest, cur))) markUpdateAvailable(nn.data);
+      openChangelog(nn.data);
+    } return; }
 
     // links externos (autor / github / releases) → navegador del SO
     var href = t.closest && t.closest('[data-href]');
@@ -2647,6 +2693,10 @@
     }).catch(function () {});
     if (api.onJump) api.onJump(function (sid) { state.split = false; state.activeProject = 'all'; state.focusSid = sid; render(); openDetail(sid); });
     if (api.onUpdateEvent) api.onUpdateEvent(onUpdatePhase);
+    // Re-pull del estado de update al boot: si el main ya detectó una versión nueva pero el renderer se
+    // recargó (perdiendo el evento update-available), re-mostramos el botón. El main sólo expone una
+    // versión genuinamente mayor (sale del evento de electron-updater con allowDowngrade=false).
+    if (api.getUpdateStatus) api.getUpdateStatus().then(function (it) { if (it && it.latest) markUpdateAvailable(it); }).catch(function () {});
     maybeOnboard();
   } else {
     render();
@@ -2662,6 +2712,7 @@
     toggleDensity: toggleDensity, showOnboarding: showOnboarding,
     enterSplit: enterSplit, exitSplit: exitSplit, dispatchAction: dispatchAction,
     firstSid: function () { var l = (state.snapshot && state.snapshot.sessions) || []; return l.length ? l[0].id : null; },
-    simulateUpdate: onUpdatePhase,   // QA: __consomni.simulateUpdate('available'|'progress'|'downloaded', {…})
+    simulateUpdate: onUpdatePhase,   // QA: __consomni.simulateUpdate('available'|'progress'|'downloaded'|'error', {…})
+    markUpdate: markUpdateAvailable, // QA: __consomni.markUpdate({latest:'1.9.99', name:'v1.9.99', url:'…'}) → prende el botón como lo haría "buscar"/la notif
   };
 })();

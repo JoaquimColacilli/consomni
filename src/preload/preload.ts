@@ -119,6 +119,9 @@ const api = {
   // dispara un re-chequeo / inicia la descarga de la versión detectada.
   updateCheck: (): void => ipcRenderer.send('consomni:updateCheck'),
   updateDownload: (): void => ipcRenderer.send('consomni:updateDownload'),
+  // estado del update pendiente (re-consulta al boot → re-muestra el botón aunque se recargue el renderer)
+  getUpdateStatus: (): Promise<{ latest: string; current: string; url: string; notes?: string; name?: string } | null> =>
+    ipcRenderer.invoke('consomni:getUpdateStatus'),
   // eventos del flujo: available → (click) → progress* → downloaded → (relanza)
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   onUpdateEvent: (cb: (phase: string, data: any) => void): (() => void) => {

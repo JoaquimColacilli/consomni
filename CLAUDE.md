@@ -1621,6 +1621,58 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.11 — El botón "Actualizar" vuelve a funcionar (detectar versión nueva SIEMPRE deja actualizar)
+> Bug reportado por un usuario (estaba en v1.9.6): la app avisa que hay una versión nueva pero **no aparece el
+> botón para actualizar** y, desde Settings → "buscar", sólo ofrece "ver novedades" (changelog) sin opción de
+> bajar → terminaba bajando el instalador a mano (frágil/confuso). Bump **1.9.10 → 1.9.11** (`package.json` +
+> fallbacks `brand-ver`/`.ver` en `chrome.js` + entrada en `CHANGELOG` de `app.js`). Causa raíz confirmada en
+> código + verificada contra el source de electron-updater 6.8.9. Aditivo, respeta las 4 Hard Rules (sólo GitHub
+> read-only, sin token/telemetría; sin atribución a IA).
+
+### Causa raíz (el bug es del RENDERER, NO del canal de releases)
+- Las releases de GitHub están SANAS: `/releases/latest` apunta a la última y cada release tiene `latest.yml` +
+  Setup `.exe` + blockmap. El "actualiza de a una versión" ya se arregló en v1.9.7 (`resolveLatestRelease`) y queda intacto.
+- El botón "Actualizar" del topbar lo gobierna **sólo** `state.upd` (`applyUpdBtn`), que se seteaba a `{mode:'show'}`
+  **únicamente** en el camino automático (`onUpdatePhase('available')`). De ahí 3 callejones sin salida + 1 hueco:
+  1. **Settings "buscar"** (`api.checkUpdate()`): seteaba `state.update`+notif pero **NO `state.upd`** → botón oculto;
+     "ver novedades" → `openChangelog` cuyo `canDownload` exige `state.upd` → sólo "listo".
+  2. **Click en la notificación persistida** → `openChangelog(nn.data)` con `state.upd` nulo en sesión fresca → "listo".
+  3. **Recargar el renderer** (el "Ctrl+Shift+R" que se intentó): `state.upd` vive en memoria y el evento
+     `update-available` NO se re-emite al recargar → se pierde el botón. (Recargar el renderer ≠ reiniciar el main.)
+  4. **`downloadUpdate()` del main** exige un `checkForUpdates()` exitoso previo (electron-updater lee
+     `updateInfoAndProvider`; si es null rechaza con "Please check update first") → el camino "buscar" (que NO pasa
+     por electron-updater) no podría bajar aunque mostráramos el botón.
+
+### Fix
+- **`src/main/updates.ts`:** estado `lastAvailable` (último update detectado, lo setea el handler `update-available`)
+  + flag `downloading`. El send de `update-available` se **gatea con `!downloading`** (el check interno de
+  `downloadUpdate` re-dispara el evento → sin el gate, resetearía el estado "downloading" del renderer → flicker).
+  Se limpia `downloading` en `update-downloaded`/`error` y `lastAvailable` en `update-downloaded`/`update-not-available`.
+  Se extrajo `ensureFeed()` (el `resolveLatestRelease`+`setFeedURL` de v1.9.7, **movido sin cambios**, fail-open intacto).
+  **`downloadUpdate()` ahora es async y auto-suficiente:** `ensureFeed() → checkForUpdates() → downloadUpdate()`
+  (anda aunque el botón se haya prendido por "buscar"). Nuevo `getUpdateStatus()` → `lastAvailable`.
+- **`src/main/index.ts`:** import + `ipcMain.handle('consomni:getUpdateStatus', …)`; `updateDownload` ahora `void`-ea la promesa.
+- **`src/preload/preload.ts`:** bridge `getUpdateStatus()`.
+- **`src/renderer/app.js`:** helper único **`markUpdateAvailable(data)`** (setea `state.upd`+`state.update`+notif, idempotente)
+  usado por **TODOS** los caminos: auto (`onUpdatePhase('available')`, con guard que ignora el available redundante mientras
+  baja/instala), **"buscar"** de Settings, **click en la notif** (gateado por `isNewerVer` nuevo —semver real, no
+  lexicográfico— para que una notif vieja caiga a "listo"), y **re-pull al boot** (`api.getUpdateStatus()` tras
+  `onUpdateEvent` → cierra el hueco de la recarga). **Red de seguridad:** si la descarga in-app falla
+  (`onUpdatePhase('error')` → `state.upd.err`), el toast y el changelog ofrecen **"descargar instalador"**
+  (release oficial de GitHub vía `data-href`/`openExternalUrl`) + "Reintentar" → nunca quedás trabado.
+- QA: `__consomni.simulateUpdate('available'|'progress'|'downloaded'|'error', …)` + `__consomni.markUpdate({latest,name,url})`.
+
+### Verificación
+- TS compila limpio; `node --check` OK en `app.js`/`chrome.js`. Camino automático sano sin regresión (primer
+  `update-available` con `downloading=false` se envía igual que hoy).
+- **Límite del entorno:** el flujo REAL de electron-updater es `app.isPackaged`-gated → la descarga/instalación
+  end-to-end sólo se valida en app empaquetada (el usuario, al sacar la próxima versión). En dev se valida con los
+  hooks de QA (botón del topbar + "Actualizar ahora" del changelog + toast + re-pull al boot).
+- **Workaround para los ya trabados (pre-1.9.11):** cerrar Consomni del todo y reabrir (no recargar) → el auto-check
+  fresco contra el `/releases/latest` sano vuelve a disparar el botón; si no, una instalación manual única los lleva a 1.9.11.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

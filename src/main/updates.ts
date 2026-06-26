@@ -120,6 +120,16 @@ export function checkForUpdate(): Promise<UpdateInfo> {
 interface ResolvedRelease { tag: string; version: string; body?: string; name?: string; }
 let lastResolved: ResolvedRelease | null = null;
 
+/* Update DETECTADO y pendiente (la versión nueva real). Lo seteamos en el handler `update-available`
+   y lo expone getUpdateStatus() → el renderer lo re-consulta al boot (cierra el hueco "recargué el
+   renderer y se perdió el evento → no aparece el botón"). null cuando no hay nada pendiente. */
+interface PendingUpdate { latest: string; current: string; url: string; notes?: string; name?: string; }
+let lastAvailable: PendingUpdate | null = null;
+/* true mientras corre una descarga iniciada por el usuario. Sirve para SUPRIMIR el `update-available`
+   redundante que dispara el checkForUpdates() interno de downloadUpdate() → sin esto, el renderer
+   resetearía el estado "downloading" a "Actualizar" a mitad de descarga (flicker). */
+let downloading = false;
+
 /** GET liviano a la API de GitHub (read-only, sin token, sin telemetría — excepción sancionada a HR3).
  *  Resuelve el JSON parseado o null ante CUALQUIER fallo (no-200, parse, timeout, red). NUNCA rechaza. */
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -213,9 +223,13 @@ export function initAutoUpdate(winGetter: () => BrowserWindow | null, enabled: b
       const matched = (lastResolved && lastResolved.version === v) ? lastResolved : null;
       const notes = normalizeNotes(info && info.releaseNotes) || (matched ? matched.body : undefined);
       const name = (info && info.releaseName) || (matched ? matched.name : undefined);
-      send('consomni:update-available', { latest: v, current: app.getVersion(), url: RELEASES_URL, notes, name });
+      const payload: PendingUpdate = { latest: v, current: app.getVersion(), url: RELEASES_URL, notes, name };
+      lastAvailable = payload;   // queda disponible para getUpdateStatus() (re-pull del renderer al boot)
+      // Durante una descarga, downloadUpdate() re-chequea y esto re-dispara → NO reenviar al renderer
+      // (mantendría el botón en "downloading"); el payload igual se refrescó arriba.
+      if (!downloading) send('consomni:update-available', payload);
     });
-    autoUpdater.on('update-not-available', () => send('consomni:update-none', {}));
+    autoUpdater.on('update-not-available', () => { lastAvailable = null; send('consomni:update-none', {}); });
     autoUpdater.on('download-progress', (p: { percent?: number; transferred?: number; total?: number; bytesPerSecond?: number }) => {
       send('consomni:update-progress', {
         percent: Math.max(0, Math.min(100, Math.round(p.percent || 0))),
@@ -223,6 +237,7 @@ export function initAutoUpdate(winGetter: () => BrowserWindow | null, enabled: b
       });
     });
     autoUpdater.on('update-downloaded', (info: { version?: string }) => {
+      downloading = false; lastAvailable = null;   // update consumido → se aplica e instala
       send('consomni:update-downloaded', { latest: info && info.version });
       // aplicar y relanzar (un toque después para que el renderer muestre "reiniciando…").
       // isSilent=true  → instala EN SILENCIO, sin abrir el panel del instalador (era el bug:
@@ -230,7 +245,7 @@ export function initAutoUpdate(winGetter: () => BrowserWindow | null, enabled: b
       // isForceRunAfter=true → relanza la app sola al terminar.
       setTimeout(() => { try { autoUpdater.quitAndInstall(true, true); } catch { /* noop */ } }, 1200);
     });
-    autoUpdater.on('error', (err: Error) => { if (!suppressErr) send('consomni:update-error', { error: String((err && err.message) || err) }); });
+    autoUpdater.on('error', (err: Error) => { downloading = false; if (!suppressErr) send('consomni:update-error', { error: String((err && err.message) || err) }); });
   }
 
   void triggerAutoCheck();
@@ -245,6 +260,16 @@ export function initAutoUpdate(winGetter: () => BrowserWindow | null, enabled: b
  *  provider, así que hay que re-setear en CADA chequeo. */
 export async function triggerAutoCheck(): Promise<void> {
   if (!app.isPackaged) return;
+  await ensureFeed();
+  suppressErr = true;
+  autoUpdater.checkForUpdates().catch(() => { /* offline / sin red: silencioso */ });
+}
+
+/** Apunta el feed a la release de MAYOR versión (saltea el puntero "Latest" de GitHub → siempre salta a
+ *  la última, no de a una). El <tag> se hornea en la baseURL al construir el provider, así que hay que
+ *  re-setear en CADA chequeo/descarga. Fail-open: si la resolución falla, deja el provider github default
+ *  (1er chequeo) o el último pin bueno → las actualizaciones nunca se rompen. NUNCA tira. */
+async function ensureFeed(): Promise<void> {
   try {
     const r = await resolveLatestRelease();
     if (r) {
@@ -257,17 +282,29 @@ export async function triggerAutoCheck(): Promise<void> {
         lastResolved = r;
       } catch { /* si setFeedURL falla, queda el provider github default (o el último pin bueno) */ }
     }
-    // r == null (offline / rate-limit / sin candidato): NO seteamos feed → fail-open al provider github
-    // default (1er chequeo) o al último pin bueno (chequeos siguientes). Nunca deja sin actualizar.
+    // r == null (offline / rate-limit / sin candidato): NO seteamos feed → fail-open al provider github.
   } catch { /* la resolución NUNCA debe romper el chequeo */ }
-  suppressErr = true;
-  autoUpdater.checkForUpdates().catch(() => { /* offline / sin red: silencioso */ });
 }
 
-/** Descarga la actualización ya detectada (emite download-progress → update-downloaded).
- *  Iniciada por el usuario → los errores SÍ se muestran. */
-export function downloadUpdate(): void {
+/** Descarga la actualización (emite download-progress → update-downloaded). Iniciada por el usuario →
+ *  los errores SÍ se muestran. AUTO-SUFICIENTE: re-apunta el feed y hace un check ANTES de bajar, porque
+ *  electron-updater exige un checkForUpdates() exitoso previo (downloadUpdate() rechaza con "Please check
+ *  update first" si no hay updateInfoAndProvider). Así anda incluso si el botón se mostró por el camino
+ *  "buscar" de Settings (que NO pasa por electron-updater). El flag downloading suprime el update-available
+ *  redundante que dispara el check (no parpadea el estado). */
+export async function downloadUpdate(): Promise<void> {
   if (!app.isPackaged) return;
   suppressErr = false;
-  autoUpdater.downloadUpdate().catch(() => { /* el evento 'error' ya avisa al renderer */ });
+  downloading = true;
+  try {
+    await ensureFeed();
+    await autoUpdater.checkForUpdates();   // puebla updateInfoAndProvider (suprimido en el renderer por downloading)
+    await autoUpdater.downloadUpdate();
+  } catch {
+    downloading = false;                   // el evento 'error' ya avisó al renderer
+  }
 }
+
+/** Última versión nueva detectada (o null). El renderer lo re-consulta al boot para re-mostrar el botón
+ *  aunque se haya recargado el renderer y perdido el evento update-available. */
+export function getUpdateStatus(): PendingUpdate | null { return lastAvailable; }
