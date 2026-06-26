@@ -1711,6 +1711,43 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.14 — Selección por teclado del input de claude (Shift+flechas) + Ctrl+X corta
+> Pedido de usuarios: en la terminal embebida con `claude`, poder **seleccionar el texto del input con
+> Shift+flechas** (Ctrl+Shift+flecha = palabra, Shift+Home/End) y que **Ctrl+X corte** (Ctrl+C ya copia).
+> Bump **1.9.13 → 1.9.14**. Aditivo, scopeado a paneles `claude`, sin romper nada. Verificado con harness
+> PTY headless contra `claude.exe` + test headless de la lógica de selección.
+
+- **Por qué a nivel xterm (host):** la TUI de claude no tiene selección de su input (v1.9.4: su Ctrl+A es
+  "inicio de línea", Shift+flechas mueven el cursor). Se hace con `term.select` (igual que el `selectClaudeInput`
+  de Ctrl+A). Las flechas se **interceptan** (claude no las recibe → no repinta el input → el highlight queda
+  estable). Tradeoff querido: en claude, Shift+flecha pasa a SELECCIONAR; las flechas sin shift siguen moviendo el cursor.
+- **Implementación** (`terminals-ui.js`, todo aditivo, scopeado a `kind==='claude'`): estado `pane._kbSel`
+  `{anchorLin, focusLin}` (lin = `row*cols+col`, row absoluto). Ancla en el cursor del input (borde derecho) y
+  mueve un focus DENTRO de la región del input (via `computeInputSelection`, reusado). Helpers nuevos
+  `kbWordBoundary`/`kbSelMove`/`kbRenderSel`/`kbCutEdge`/`kbCut`/`kbSelReset`. El render usa la MISMA fórmula
+  `(eLin-sLin)` que `computeInputSelection`. Reset de `_kbSel` al tipear / flecha sin shift / Enter / Ctrl+A /
+  Ctrl+C (tras copiar) / minimizar / cerrar panel.
+- **Ctrl+X (corte) SEGURO:** copia (como `termCopy`) y borra sólo si es seguro: cursor en el **borde derecho**
+  → `\x7f`×N (Backspace); **borde izquierdo** → `\x1b[3~`×N (forward-delete); **multi-línea** o cursor en
+  ningún borde → **copy-only** (nunca corrompe el input). `N = [...getSelection()].length` (code points).
+  Detección de borde: `_kbSel` (anchor=cursor) o `getSelectionPosition()` **convertido 1-based→0-based**
+  (cuidado: `term.select` es 0-based, `getSelectionPosition` es 1-based). Ctrl+X sin selección → pasa como siempre.
+- **Colocación en el handler:** el branch de selección va después del bloque `_inputDirty` (tras el gate
+  `ev.type!=='keydown'` y DESPUÉS de los checks de los pickers `@`/`/` que hacen `return false` cuando están
+  abiertos → un Shift+flecha con un picker abierto va al picker). El branch Ctrl+X va antes de Ctrl+Shift+C.
+  Guards: selección exige `shiftKey` (Ctrl+Shift+C = KeyC queda excluido → sigue copiando); Ctrl+X exige
+  `KeyX` + `!shift`. **Shell intacto** (todo gateado a claude; ahí PSReadLine hace su propia selección).
+- **Verificación:** harness PTY headless (`electron-as-node` + `@homebridge/node-pty-prebuilt-multiarch` ABI
+  v121, `delete ELECTRON_RUN_AS_NODE` antes de spawnear) contra `claude.exe` real → **2/2**: "abcdef"+`\x7f`×3
+  → "abc" (Backspace), "abcdef"+Ctrl+A+`\x1b[3~`×3 → "def" (forward-delete). Test headless de la lógica de
+  selección (réplica de las funciones sobre `@xterm/headless`) → **9/9** (rango de Shift+Left/Home, palabra con
+  Ctrl+Shift+Left, shrink con Right, sin-prompt→no-selecciona, word-boundary). `tsc`/`node --check` limpios; la
+  app arranca OK. **Límite del medio:** el render del highlight + el flujo de teclas EN VIVO en un panel claude
+  real lo confirma el usuario (no se puede inyectar teclado a xterm headless). El `@xterm/headless` se usó sólo
+  para los tests (devDep temporal, sacado antes del release; el harness queda fuera del repo).
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

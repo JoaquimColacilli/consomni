@@ -529,6 +529,7 @@
     if (!pane || pane.dataset.min === '1') return;
     pane.dataset.min = '1';
     if (focused === pane) focused = null;
+    var _mt = terms.get(pane.dataset.tid); if (_mt && _mt.term) kbSelReset(_mt.term, pane); else pane._kbSel = null;   // soltar selección por teclado al minimizar
     if (pane._sgGhost) hideShellGhost(pane);   // que el ghost del autosuggest no quede flotando sobre el board
     showView(view);   // re-arma el tiling SIN ésta (queda viva en el pool) + refresca la barra
     persist();
@@ -766,6 +767,7 @@
   function killPaneContent(pane) {
     if (pane._atp) closeAtPicker(pane);   // cerrar el picker flotante de @ si quedó abierto
     if (pane._slp) closeSlashPicker(pane);   // ídem el picker de '/'
+    pane._kbSel = null;   // soltar la selección por teclado (el term se dispone abajo)
     if (pane._filePoll) stopFilePoll(pane);   // visor de archivo: cortar el sync en vivo
     if (pane._sgRaf) { try { g.cancelAnimationFrame(pane._sgRaf); } catch (e) {} pane._sgRaf = 0; }   // autosuggest: cancelar rAF pendiente
     if (pane._sgGhost) { try { if (pane._sgGhost.parentNode) pane._sgGhost.parentNode.removeChild(pane._sgGhost); } catch (e) {} pane._sgGhost = null; pane._sgGhostVisible = false; }   // y quitar el ghost
@@ -1250,6 +1252,97 @@
       term.select(sel.startCol, sel.startRow, sel.length);
       try { term.focus(); } catch (e2) {}
       return !!(term.hasSelection && term.hasSelection());
+    } catch (e) { return false; }
+  }
+
+  /* ── Selección por TECLADO del input de claude (Shift+flechas / Ctrl+Shift+flechas / Shift+Home/End) ──
+     Ancla en el cursor del input (= borde DERECHO del input) y mueve un "focus" hacia la izquierda DENTRO de
+     la región del input (prompt → cursor). Es selección VISUAL de xterm (no toca a claude). Las flechas se
+     interceptan en el handler → claude no las recibe → no repinta → el highlight queda estable (igual que el
+     Ctrl+A / selectClaudeInput de arriba). Coords en "lin" = row*cols+col (row ABSOLUTO, incluye baseY). */
+  function kbWordBoundary(text, col, dir) {
+    var isW = function (ch) { return /[A-Za-z0-9_]/.test(ch); };
+    var n = text.length, i;
+    if (dir > 0) {
+      i = col;
+      while (i < n && !isW(text.charAt(i))) i++;   // saltar no-palabra
+      while (i < n && isW(text.charAt(i))) i++;     // consumir la palabra
+      return Math.min(i, n);
+    }
+    i = col - 1;
+    while (i >= 0 && !isW(text.charAt(i))) i--;
+    while (i >= 0 && isW(text.charAt(i))) i--;
+    return Math.max(i + 1, 0);
+  }
+  function kbLineText(buf, row) { var l = buf.getLine(row); return l ? l.translateToString(true) : ''; }
+  // mueve la selección por teclado; devuelve true si quedó una selección activa (→ consumir la tecla)
+  function kbSelMove(term, pane, code, word) {
+    try {
+      var buf = term.buffer && term.buffer.active; if (!buf) return false;
+      var cols = term.cols || 0; if (!cols) return false;
+      var sel = computeInputSelection(buf, cols); if (!sel) return false;         // sin prompt → no seleccionar
+      var curLin = ((buf.baseY || 0) + (buf.cursorY || 0)) * cols + (buf.cursorX || 0);
+      var inStartLin = sel.startRow * cols + sel.startCol;                        // inicio del input (post-prompt)
+      var inEndLin = curLin;                                                      // fin del input = cursor (ancla)
+      // (re)anclar si no había selección o si el cursor se movió (drift por redibujo async) → auto-sana
+      var kb = pane._kbSel;
+      if (!kb || kb.anchorLin !== inEndLin) { kb = pane._kbSel = { anchorLin: inEndLin, focusLin: inEndLin }; }
+      var f = kb.focusLin, fRow = Math.floor(f / cols), fCol = f % cols;
+      if (code === 'ArrowLeft') { f = word ? (fRow * cols + kbWordBoundary(kbLineText(buf, fRow), fCol, -1)) : (f - 1); if (word && f === kb.focusLin) f = kb.focusLin - 1; }
+      else if (code === 'ArrowRight') { f = word ? (fRow * cols + kbWordBoundary(kbLineText(buf, fRow), fCol, 1)) : (f + 1); if (word && f === kb.focusLin) f = kb.focusLin + 1; }
+      else if (code === 'Home') { f = inStartLin; }
+      else if (code === 'End') { f = inEndLin; }
+      else if (code === 'ArrowUp') { f = f - cols; }
+      else if (code === 'ArrowDown') { f = f + cols; }
+      else return false;
+      if (f < inStartLin) f = inStartLin;                                         // clamp a la región del input
+      if (f > inEndLin) f = inEndLin;
+      kb.focusLin = f;
+      return kbRenderSel(term, kb, cols);
+    } catch (e) { return false; }
+  }
+  function kbRenderSel(term, kb, cols) {
+    try {
+      var sLin = Math.min(kb.anchorLin, kb.focusLin), length = Math.max(kb.anchorLin, kb.focusLin) - sLin;
+      try { term.clearSelection(); } catch (e) {}
+      if (length > 0) { term.select(sLin % cols, Math.floor(sLin / cols), length); return true; }
+      return false;
+    } catch (e) { return false; }
+  }
+  function kbSelReset(term, pane) {
+    if (pane && pane._kbSel) { pane._kbSel = null; try { term.clearSelection(); } catch (e) {} }
+  }
+  // ¿en qué borde de la selección está el cursor de claude? (decide Backspace vs forward-delete; o copy-only)
+  function kbCutEdge(term, pane) {
+    try {
+      var buf = term.buffer && term.buffer.active; if (!buf) return null;
+      var cols = term.cols || 0; if (!cols) return null;
+      var curLin = ((buf.baseY || 0) + (buf.cursorY || 0)) * cols + (buf.cursorX || 0), sLin, eLin;
+      if (pane._kbSel) { sLin = Math.min(pane._kbSel.anchorLin, pane._kbSel.focusLin); eLin = Math.max(pane._kbSel.anchorLin, pane._kbSel.focusLin); }
+      else {
+        var p = term.getSelectionPosition && term.getSelectionPosition(); if (!p) return null;
+        // getSelectionPosition es 1-based (x,y) → a 0-based para comparar con el cursor (term.select es 0-based)
+        sLin = (p.start.y - 1) * cols + (p.start.x - 1); eLin = (p.end.y - 1) * cols + (p.end.x - 1);
+      }
+      return { atRight: curLin === eLin, atLeft: curLin === sLin, multiLine: Math.floor(sLin / cols) !== Math.floor(eLin / cols) };
+    } catch (e) { return null; }
+  }
+  // Ctrl+X: copia la selección y, si es SEGURO, la borra del input de claude. Devuelve true si había selección.
+  function kbCut(term, pane) {
+    try {
+      if (!(term.hasSelection && term.hasSelection())) return false;
+      var text = term.getSelection() || '';
+      if (api && api.action) api.action('copyText', { text: text }).catch(function () {});   // copia siempre
+      var edge = kbCutEdge(term, pane), n = text ? Array.from(text).length : 0;               // n = code points
+      if (edge && !edge.multiLine && n > 0) {                                                  // sólo borra si es seguro
+        var tid = pane.dataset.tid, bytes = null;
+        if (edge.atRight) bytes = '\x7f'.repeat(n);            // cursor a la DERECHA → Backspace×N
+        else if (edge.atLeft) bytes = '\x1b[3~'.repeat(n);    // cursor a la IZQUIERDA → forward-delete×N
+        if (bytes && tid && api.term && api.term.write) api.term.write(tid, bytes);
+      }
+      try { term.clearSelection(); } catch (e) {}
+      pane._kbSel = null;
+      return true;
     } catch (e) { return false; }
   }
 
@@ -1747,9 +1840,23 @@
         // heurística para el picker de '/': el input está "sucio" si tipeaste algo desde el último Enter/Ctrl+C/Ctrl+U.
         // (las teclas interceptadas arriba —pickers, Shift+Enter— ya hicieron return; acá sólo pasan las que van a claude)
         if (pane.dataset.kind === 'claude') {
-          if (ev.code === 'Enter' && !ev.shiftKey) { pane._inputDirty = false; pane._lastWasSpace = false; }
+          if (ev.code === 'Enter' && !ev.shiftKey) { pane._inputDirty = false; pane._lastWasSpace = false; kbSelReset(term, pane); }
           else if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && (ev.code === 'KeyC' || ev.code === 'KeyU')) { pane._inputDirty = false; pane._lastWasSpace = false; }
-          else if (ev.key && ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { pane._inputDirty = true; pane._lastWasSpace = (ev.key === ' '); }
+          else if (ev.key && ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { pane._inputDirty = true; pane._lastWasSpace = (ev.key === ' '); kbSelReset(term, pane); }
+          // flecha/Home/End SIN shift (el cursor se mueve) → soltar la selección por teclado
+          else if (!ev.shiftKey && (ev.code === 'ArrowLeft' || ev.code === 'ArrowRight' || ev.code === 'ArrowUp' || ev.code === 'ArrowDown' || ev.code === 'Home' || ev.code === 'End')) { kbSelReset(term, pane); }
+        }
+        // SELECCIÓN por teclado del input (SÓLO claude): Shift+flechas / Ctrl+Shift+Left|Right (palabra) /
+        // Shift+Home|End. Intercepta la tecla → claude no la recibe (no repinta su input, el highlight queda
+        // estable). Ctrl+Shift+C (KeyC) NO entra acá (no es flecha) → sigue copiando en su branch de abajo.
+        if (pane.dataset.kind === 'claude' && ev.shiftKey && !ev.altKey && !ev.metaKey) {
+          var isArrowNav = (ev.code === 'ArrowLeft' || ev.code === 'ArrowRight' || ev.code === 'ArrowUp' || ev.code === 'ArrowDown' || ev.code === 'Home' || ev.code === 'End');
+          var isWordNav = ev.ctrlKey && (ev.code === 'ArrowLeft' || ev.code === 'ArrowRight');
+          if (isArrowNav && (!ev.ctrlKey || isWordNav)) {
+            var moved = kbSelMove(term, pane, ev.code, isWordNav);
+            if (moved || pane._kbSel) return false;   // gesto de selección activo → consumir (claude no ve la flecha)
+            return true;                               // sin input seleccionable → dejar pasar (claude mueve el cursor)
+          }
         }
         // AUTOSUGGEST (ghost text, sólo SHELL): trackea el buffer sombra y, si aceptás la sugerencia, consume la tecla
         if (pane.dataset.kind === 'shell' && shellAutosuggestKey(pane, ev)) return false;
@@ -1766,12 +1873,18 @@
         // Ctrl+A en claude → SELECCIONAR todo el input que escribiste (a nivel xterm; la TUI de claude NO tiene
         // selección de su input — verificado: su Ctrl+A es "inicio de línea", que queda en Home). Luego Ctrl+C copia.
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey && ev.code === 'KeyA' && pane.dataset.kind === 'claude') {
+          pane._kbSel = null;                          // Ctrl+A re-selecciona todo el input → soltar el gesto de teclado
           if (selectClaudeInput(term)) return false;   // seleccionó el input → consumir
           return true;                                  // input vacío / sin prompt → dejar pasar (claude: inicio de línea)
         }
+        // Ctrl+X en claude → CORTAR: copia la selección (como Ctrl+C) y la BORRA del input mandando deletes al PTY.
+        if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey && ev.code === 'KeyX' && pane.dataset.kind === 'claude') {
+          if (kbCut(term, pane)) return false;   // había selección → copió (+borró si fue seguro) → consumir
+          return true;                            // sin selección → dejar pasar (comportamiento de siempre)
+        }
         if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') { termCopy(term); return false; }              // copiar siempre
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.code === 'KeyC') {
-          if (termCopy(term)) return false;   // había selección → copió + limpió → no mandar nada
+          if (termCopy(term)) { pane._kbSel = null; return false; }   // había selección → copió + limpió → no mandar nada
           return true;                        // sin selección → la shell recibe SIGINT (\x03)
         }
         if (ev.ctrlKey && ev.code === 'KeyV') {                                  // pegar (Ctrl+V/Ctrl+Shift+V); guard + listener de captura matan el paste NATIVO de xterm → NUNCA se duplica (ver de-dup abajo)

@@ -556,6 +556,11 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.14', date: '26 jun 2026', title: 'Seleccionar el texto del input de claude con Shift+flechas + Ctrl+X corta', items: [
+      'En la terminal de claude ahora podés SELECCIONAR con el teclado lo que estás escribiendo: Shift+flechas (carácter por carácter), Ctrl+Shift+flecha (de a palabras) y Shift+Inicio/Fin (hasta el principio o el fin de lo tipeado). Después Ctrl+C lo copia.',
+      'Ctrl+X CORTA: copia la selección y la borra del input de una.',
+      'Sólo aplica a la terminal de claude; en la consola normal (PowerShell) Shift+flechas sigue funcionando como siempre.',
+    ] },
     { v: '1.9.13', date: '26 jun 2026', title: 'Barra de scroll visible en la conversación', items: [
       'La conversación de una sesión (el panel read-only del dock) ahora muestra una barra de scroll vertical clara para moverte por los mensajes largos. Antes la barra estaba casi invisible, aunque ya podías scrollear con la rueda del mouse.',
     ] },
