@@ -1698,6 +1698,19 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.13 — Scrollbar visible en la conversación del dock
+> Pedido del usuario: en el panel de sesión read-only (`.dk-convo`) "no se veía" la barra de scroll. Bump
+> **1.9.12 → 1.9.13**. Aditivo, respeta las 4 Hard Rules.
+- **Causa:** el scrollbar global de `tokens.css` (verbatim, HR1) tiene el thumb en `rgba(255,255,255,.08)`
+  (8% blanco) → casi invisible sobre fondo oscuro. El scroll YA funcionaba (`overflow:auto` + rueda), sólo no
+  se veía la barra.
+- **Fix** (`app.css`, aditivo, NO toca `tokens.css`): `.dk-convo::-webkit-scrollbar{width:11px}` + thumb
+  `rgba(255,255,255,.22)` (hover `.34`) con `border:2px transparent` + `background-clip:padding-box` (look
+  inset). Mismo patrón que el override existente del `.xterm-viewport`. **Scopeado a la conversación a pedido
+  del usuario** (el global sutil del design-reference se mantiene en el resto de la app → sin drift, HR1).
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

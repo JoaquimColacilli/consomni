@@ -556,6 +556,9 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.13', date: '26 jun 2026', title: 'Barra de scroll visible en la conversación', items: [
+      'La conversación de una sesión (el panel read-only del dock) ahora muestra una barra de scroll vertical clara para moverte por los mensajes largos. Antes la barra estaba casi invisible, aunque ya podías scrollear con la rueda del mouse.',
+    ] },
     { v: '1.9.12', date: '26 jun 2026', title: 'Limpieza de notificaciones de "nueva versión" inválidas', items: [
       'Se quita sola cualquier notificación de "nueva versión" que no correspondía (por ejemplo una versión que en realidad no existe, o una que ya tenías instalada).',
       'Refuerzo interno para que esas notificaciones inválidas no se vuelvan a guardar.',

@@ -997,6 +997,12 @@ body.light .tour-spot{box-shadow:0 0 0 9999px rgba(28,28,34,.26),0 0 0 1.5px var
 /* ── scrollbar + selección (tokens.css es verbatim → override aditivo) ── */
 body.light ::-webkit-scrollbar-thumb{background:rgba(18,18,26,.18);}
 body.light ::-webkit-scrollbar-thumb:hover{background:rgba(18,18,26,.28);}
+/* conversación read-only (panel de sesión del dock): el scrollbar global de tokens es muy sutil
+   (thumb 8% blanco) → casi invisible. Acá lo hacemos visible (el dock es SIEMPRE oscuro, también en
+   modo claro → white-alpha sirve en ambos temas). Aditivo, no toca tokens.css (HR1). */
+.dk-convo::-webkit-scrollbar{width:11px;}
+.dk-convo::-webkit-scrollbar-thumb{background:rgba(255,255,255,.22);border-radius:6px;border:2px solid transparent;background-clip:padding-box;}
+.dk-convo::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.34);background-clip:padding-box;}
 body.light ::selection{background:rgba(239,68,68,.20);color:#1a1a1f;}
 /* botón "Actualizar" (verde) sobre claro: el fondo bright-green tint sigue ok; aseguramos borde */
 body.light .upbtn{border-color:rgba(22,163,74,.45);}
