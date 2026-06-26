@@ -556,6 +556,10 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.16', date: '26 jun 2026', title: 'Copiar (Ctrl+C) más confiable en la terminal de claude', items: [
+      'Si seleccionabas texto en la terminal de claude y al copiar con Ctrl+C "a veces copiaba y a veces no" (y encima te saltaba el aviso de cerrar claude): ahora, si claude redibujó y se borró el resaltado, Ctrl+C igual copia lo último que habías seleccionado. Ctrl+C sin nada seleccionado sigue interrumpiendo claude como siempre.',
+      'Tip: para seleccionar en la terminal de claude, arrastrá con Shift apretado, o usá el botón de "modo selección" (el del cursor de texto) en la barra del panel. Ctrl+Shift+C copia siempre.',
+    ] },
     { v: '1.9.15', date: '26 jun 2026', title: 'Pegar que no envía + Ctrl+Inicio/Fin en el input + scroll más estable', items: [
       'Arreglado: a veces al pegar (Ctrl+V o clic derecho → Pegar) en la terminal de claude se ENVIABA el mensaje en vez de pegar el texto — pasaba sobre todo cuando lo copiado tenía un salto de línea al final, y después de minimizar/restaurar. Ahora pega siempre, sin enviar.',
       'Ctrl+Inicio / Ctrl+Fin sobre el input de claude ahora van al principio / al final de lo que estás escribiendo (antes scrolleaban la conversación y quedaba raro).',

@@ -1790,6 +1790,31 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.16 — Copiar (Ctrl+C) más confiable en la terminal de claude
+> Reporte de Facundo (el "pendiente" anotado en v1.9.15): "Ctrl+C a veces copia y a veces no · parece que
+> intenta cerrar claude". Bump **1.9.15 → 1.9.16**. Aditivo, scopeado a claude, sin tocar la semántica del
+> SIGINT (interrumpir claude).
+
+- **Causa (caso confirmable):** `termCopy` copia si `term.hasSelection()`; si no, Ctrl+C cae a SIGINT
+  (claude muestra "Press Ctrl-C again to exit" → "intenta cerrar claude"). En claude, un **redibujo** (que
+  streamea seguido) **borra el resaltado de xterm** entre que seleccionás y apretás Ctrl+C → `hasSelection`
+  da false → SIGINT en vez de copiar. (El otro motivo, que el arrastre normal no seleccione por el
+  mouse-tracking de claude, se resuelve con **Shift+arrastre** —que xterm fuerza nativamente— o el botón
+  "modo selección"; no requiere código.)
+- **Fix (`terminals-ui.js`) — rescate de la última selección:** `term.onSelectionChange` guarda
+  `pane._lastSel` (la última selección no vacía, sólo claude). `termCopy(term, pane)`: si hay selección viva
+  → copia esa (como antes); **si no, pero hay `_lastSel` (claude)** → copia esa y la consume (un 2º Ctrl+C ya
+  cae a SIGINT → NO rompe el interrumpir). Se invalida `_lastSel` al **tipear/Enter** (una vez que escribís,
+  Ctrl+C vuelve a su comportamiento normal). Se enrutó por `termCopy(term, pane)` el Ctrl+C, Ctrl+Shift+C y el
+  "Copiar" del menú contextual (que además se habilita si hay `_lastSel`). **Shell sin cambios.**
+- **Seguridad:** sin selección NUNCA hecha → `_lastSel` null → Ctrl+C = SIGINT inmediato (como hoy). El único
+  cambio de conducta: una selección "recordada" se copia en el 1er Ctrl+C (antes, si el redibujo la borró,
+  ese Ctrl+C era SIGINT); el 2º Ctrl+C sigue siendo SIGINT.
+- **Límite del medio:** el arrastre del mouse + el borrado de selección por redibujo de claude son DOM/timing
+  → no se verifican headless; `node --check`/`tsc` limpios y la lógica es aditiva. El usuario confirma en vivo.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

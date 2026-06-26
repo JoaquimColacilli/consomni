@@ -1163,12 +1163,21 @@
   }
 
   /* ── copiar / pegar / seleccionar (clipboard vía IPC; navigator.clipboard está bloqueado por la CSP) ── */
-  function termCopy(term) {
+  function termCopy(term, pane) {
     try {
       if (term.hasSelection && term.hasSelection()) {
         var sel = term.getSelection();
         if (sel && api && api.action) api.action('copyText', { text: sel }).catch(function () {});
         try { term.clearSelection(); } catch (e) {}   // así un 2º Ctrl+C cae a SIGINT
+        if (pane) pane._lastSel = null;
+        return true;
+      }
+      // RESCATE (sólo claude): si un redibujo de claude borró el resaltado entre seleccionar y copiar,
+      // copiá la ÚLTIMA selección que vimos (onSelectionChange la guarda). Se consume → un 2º Ctrl+C cae a
+      // SIGINT igual (no rompe el "interrumpir claude"). Esto arregla "a veces copia y a veces no".
+      if (pane && pane.dataset.kind === 'claude' && pane._lastSel) {
+        var last = pane._lastSel; pane._lastSel = null;
+        if (api && api.action) api.action('copyText', { text: last }).catch(function () {});
         return true;
       }
     } catch (e) {}
@@ -1467,6 +1476,7 @@
   function showTermCtx(x, y, term, ev, pane) {
     closeTermCtx();
     var hasSel = false; try { hasSel = !!(term.hasSelection && term.hasSelection()); } catch (e) {}
+    if (!hasSel && pane && pane.dataset.kind === 'claude' && pane._lastSel) hasSel = true;   // rescate: hay última selección copiable
     var tok = (ev && pane) ? pathUnderEvent(term, ev) : null;
     var resolved = null, fcwd = '';
     if (tok) { fcwd = (pane && pane.dataset.cwd) || (view !== '__home__' ? viewCwd : '') || ''; resolved = resolveFilePath(tok.text, fcwd); }
@@ -1491,7 +1501,7 @@
       var fa = b.getAttribute('data-fctx');
       if (fa) { if (fa === 'panel') openFilePanel(resolved, fcwd); else if (fa === 'editor') openFileEditor(resolved, fcwd); else if (fa === 'reveal') revealFilePath(resolved); closeTermCtx(); return; }
       var act = b.getAttribute('data-ctx');
-      if (act === 'copy') termCopy(term); else if (act === 'paste') termPaste(term, pane); else if (act === 'all') termSelectAll(term);
+      if (act === 'copy') termCopy(term, pane); else if (act === 'paste') termPaste(term, pane); else if (act === 'all') termSelectAll(term);
       closeTermCtx(); try { term.focus(); } catch (e2) {}
     });
     setTimeout(function () {
@@ -1860,9 +1870,9 @@
         // heurística para el picker de '/': el input está "sucio" si tipeaste algo desde el último Enter/Ctrl+C/Ctrl+U.
         // (las teclas interceptadas arriba —pickers, Shift+Enter— ya hicieron return; acá sólo pasan las que van a claude)
         if (pane.dataset.kind === 'claude') {
-          if (ev.code === 'Enter' && !ev.shiftKey) { pane._inputDirty = false; pane._lastWasSpace = false; kbSelReset(term, pane); }
+          if (ev.code === 'Enter' && !ev.shiftKey) { pane._inputDirty = false; pane._lastWasSpace = false; kbSelReset(term, pane); pane._lastSel = null; }
           else if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && (ev.code === 'KeyC' || ev.code === 'KeyU')) { pane._inputDirty = false; pane._lastWasSpace = false; }
-          else if (ev.key && ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { pane._inputDirty = true; pane._lastWasSpace = (ev.key === ' '); kbSelReset(term, pane); }
+          else if (ev.key && ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { pane._inputDirty = true; pane._lastWasSpace = (ev.key === ' '); kbSelReset(term, pane); pane._lastSel = null; }
           // flecha/Home/End SIN shift (el cursor se mueve) → soltar la selección por teclado
           else if (!ev.shiftKey && (ev.code === 'ArrowLeft' || ev.code === 'ArrowRight' || ev.code === 'ArrowUp' || ev.code === 'ArrowDown' || ev.code === 'Home' || ev.code === 'End')) { kbSelReset(term, pane); }
         }
@@ -1909,9 +1919,9 @@
           if (kbCut(term, pane)) return false;   // había selección → copió (+borró si fue seguro) → consumir
           return true;                            // sin selección → dejar pasar (comportamiento de siempre)
         }
-        if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') { termCopy(term); return false; }              // copiar siempre
+        if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') { termCopy(term, pane); return false; }              // copiar siempre
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.code === 'KeyC') {
-          if (termCopy(term)) { pane._kbSel = null; return false; }   // había selección → copió + limpió → no mandar nada
+          if (termCopy(term, pane)) { pane._kbSel = null; return false; }   // había selección (o rescate) → copió → no mandar nada
           return true;                        // sin selección → la shell recibe SIGINT (\x03)
         }
         if (ev.ctrlKey && ev.code === 'KeyV') {                                  // pegar (Ctrl+V/Ctrl+Shift+V); guard + listener de captura matan el paste NATIVO de xterm → NUNCA se duplica (ver de-dup abajo)
@@ -1978,6 +1988,9 @@
         setPaneMeta(pane, ic, res.title || (kind === 'claude' ? 'claude' : 'shell'), projLabel(pane));
         term.onData(function (d) { api.term.write(res.id, d); });
         term.onResize(function (sz) { pushPty(pane, res.id, sz.cols, sz.rows); });   // resize genuino (drag/ventana) → al PTY
+        // RESCATE de copia (sólo claude): recordá la última selección no vacía. Si un redibujo de claude borra
+        // el resaltado, termCopy igual puede copiarla (Ctrl+C deja de "fallar y mandar SIGINT"). Ver termCopy.
+        if (kind === 'claude') { try { term.onSelectionChange(function () { try { var s = term.getSelection(); if (s) pane._lastSel = s; } catch (e) {} }); } catch (e) {} }
         // AUTOSUGGEST (shell): reposicionar el ghost al cursor real tras cada render (el echo del shell llega
         // async). Si la fila del cursor SALTÓ (output) → ocultar (la línea se movió; el próximo keystroke recomputa).
         if (kind === 'shell') {
