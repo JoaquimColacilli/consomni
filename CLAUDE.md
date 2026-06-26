@@ -1673,6 +1673,31 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.12 — Self-heal de notificaciones de "nueva versión" inválidas (+ hooks de QA que no persisten)
+> Incidente: durante la verificación en dev de v1.9.11 se llamó `__consomni.markUpdate({latest:'1.9.99'})`
+> contra el store REAL → `markUpdateAvailable → addUpdateNotif → persistNotifs()` **persistió** una notif de
+> prueba ("Nueva versión v1.9.99") en `~/.consomni/notifications.json` del usuario. Bump **1.9.11 → 1.9.12**.
+> Aditivo, respeta las 4 Hard Rules.
+
+- **Causa raíz:** los hooks de QA (`simulateUpdate`/`markUpdate`) pasaban por el MISMO camino que un update
+  real → escribían el store persistido. Nunca debieron tocar disco.
+- **Fix 1 — hooks de QA no persisten** (`app.js`): `markUpdateAvailable(data, skipNotif)` salta
+  `addUpdateNotif` cuando `skipNotif`; `onUpdatePhase(phase,data,opts)` pasa `opts.qa`. Los exports de QA
+  ahora son wrappers que fuerzan `{qa:true}`/`skipNotif=true` → prenden el botón/toast para testear PERO no
+  escriben notificaciones. Los caminos REALES (evento `update-available` del preload —2 args—, "buscar" de
+  Settings, click en notif, re-pull al boot) llaman SIN el flag → siguen notificando normal.
+- **Fix 2 — self-heal al boot** (`app.js`, en el `getNotifications().then`): al cargar las notificaciones se
+  filtran las de update espurias → (a) versiones de PRUEBA conocidas (`BOGUS_UPDATE_VERSIONS = {'1.9.99':1}`)
+  y (b) updates ya instalados (`!isNewerVer(v, appVersion)` → no avisar de algo que ya tenés). Si removió algo,
+  `persistNotifs()` graba la limpieza → no reaparece. General + surgical (no toca notifs que no son de update).
+- **Cleanup inmediato:** se editó `~/.consomni/notifications.json` sacando `update-1.9.99` (quedó sólo la real
+  `update-1.9.11`). El self-heal cubre a cualquiera que la tuviera persistida una vez que llega a 1.9.12.
+- **Verificación:** TS compila limpio; `node --check` OK. La lógica del filtro se validó con un test node
+  (saca `1.9.99`, saca `<=` current, deja las más nuevas). **Regla de acá en más:** los hooks de QA de update
+  NO deben correrse nunca contra el store real, y de hecho ya no persisten aunque se corran.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

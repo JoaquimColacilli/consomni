@@ -388,20 +388,22 @@
   // ÚNICO punto que prende el botón "Actualizar": setea state.upd (lo que gobierna applyUpdBtn) + guarda
   // el update + notifica. Idempotente (addNotif dedupea por id). Lo usan TODOS los caminos (auto, "buscar"
   // de Settings, click en la notificación, re-pull al boot) → ninguno queda como callejón sin salida.
-  function markUpdateAvailable(data) {
+  function markUpdateAvailable(data, skipNotif) {
     if (!data || !data.latest) return;
     state.update = data;
     state.upd = { mode: 'show', label: 'Actualizar' };
-    addUpdateNotif(data);
+    // skipNotif lo pasan SÓLO los hooks de QA → nunca escriben el store persistido de notificaciones
+    // (los caminos reales —auto, "buscar", notif, boot— sí notifican).
+    if (!skipNotif) addUpdateNotif(data);
     applyUpdBtn(); applyUpdToast();
   }
   // available → (click en botón o toast) → progress* → downloaded → relanza. error → "Actualizar" + fallback.
-  function onUpdatePhase(phase, data) {
+  function onUpdatePhase(phase, data, opts) {
     if (phase === 'available') {
       // ignorar el available redundante mientras ya bajamos/instalamos (el check interno de downloadUpdate
       // re-dispara update-available → sin esto el estado "downloading" se resetearía a "Actualizar").
       if (state.upd && (state.upd.mode === 'downloading' || state.upd.mode === 'installing')) return;
-      markUpdateAvailable(data); return;
+      markUpdateAvailable(data, opts && opts.qa); return;   // opts.qa (sólo QA) → no persiste notif
     }
     else if (phase === 'progress') { state.upd = { mode: 'downloading', label: (data && data.percent != null ? data.percent + '%' : 'Descargando…'), pct: data && data.percent }; }
     else if (phase === 'downloaded') { state.upd = { mode: 'installing', label: 'Reiniciando…' }; }
@@ -554,6 +556,10 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.12', date: '26 jun 2026', title: 'Limpieza de notificaciones de "nueva versión" inválidas', items: [
+      'Se quita sola cualquier notificación de "nueva versión" que no correspondía (por ejemplo una versión que en realidad no existe, o una que ya tenías instalada).',
+      'Refuerzo interno para que esas notificaciones inválidas no se vuelvan a guardar.',
+    ] },
     { v: '1.9.11', date: '26 jun 2026', title: 'El botón "Actualizar" vuelve a funcionar (y nunca quedás trabado)', items: [
       'Se arregló el bug en el que la app avisaba que había una versión nueva pero no te dejaba actualizar. Ahora, detectar una versión nueva SIEMPRE te da el botón para descargar e instalar.',
       'El botón aparece en los tres lugares: en la barra de arriba, en "Novedades", y al tocar la notificación de "nueva versión". Antes desde Settings → "buscar" sólo te mostraba el changelog, sin opción de bajar.',
@@ -2678,8 +2684,23 @@
     if (api.getNotifications) api.getNotifications().then(function (d) {
       var list = (d && Array.isArray(d.notifs)) ? d.notifs : [];
       list.forEach(function (n) { if (n && n.id && !notifById(n.id)) state.notifs.push(n); });
+      // SELF-HEAL: sacar notificaciones de "nueva versión" espurias →
+      //  (a) versiones de PRUEBA conocidas que pudieron quedar persistidas y nunca debieron entrar, y
+      //  (b) updates ya instalados (versión <= la actual) → no tiene sentido avisar de algo que ya tenés.
+      // Se persiste el resultado para que no reaparezcan al próximo boot.
+      var BOGUS_UPDATE_VERSIONS = { '1.9.99': 1 };
+      var curV = state.snapshot && state.snapshot.appVersion;
+      var before = state.notifs.length;
+      state.notifs = state.notifs.filter(function (n) {
+        if (!n || n.kind !== 'update') return true;
+        var v = (n.data && n.data.latest) || (typeof n.id === 'string' ? n.id.replace(/^update-/, '') : '');
+        if (BOGUS_UPDATE_VERSIONS[v]) return false;
+        if (curV && v && !isNewerVer(v, curV)) return false;
+        return true;
+      });
       state.notifs.sort(function (a, b) { return (b.ts || 0) - (a.ts || 0); });
       if (state.notifs.length > 60) state.notifs.length = 60;
+      if (state.notifs.length !== before) persistNotifs();   // graba la limpieza
       applyNotifBadge();
     }).catch(function () {});
     // biblioteca (store dedicado): cargar + sembrar ejemplos la 1ª vez
@@ -2712,7 +2733,8 @@
     toggleDensity: toggleDensity, showOnboarding: showOnboarding,
     enterSplit: enterSplit, exitSplit: exitSplit, dispatchAction: dispatchAction,
     firstSid: function () { var l = (state.snapshot && state.snapshot.sessions) || []; return l.length ? l[0].id : null; },
-    simulateUpdate: onUpdatePhase,   // QA: __consomni.simulateUpdate('available'|'progress'|'downloaded'|'error', {…})
-    markUpdate: markUpdateAvailable, // QA: __consomni.markUpdate({latest:'1.9.99', name:'v1.9.99', url:'…'}) → prende el botón como lo haría "buscar"/la notif
+    // QA (NO persisten notificaciones — el flag qa/skipNotif evita escribir el store real):
+    simulateUpdate: function (phase, data) { return onUpdatePhase(phase, data, { qa: true }); },
+    markUpdate: function (data) { return markUpdateAvailable(data, true); },
   };
 })();
