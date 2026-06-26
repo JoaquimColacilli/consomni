@@ -556,6 +556,11 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.15', date: '26 jun 2026', title: 'Pegar que no envía + Ctrl+Inicio/Fin en el input + scroll más estable', items: [
+      'Arreglado: a veces al pegar (Ctrl+V o clic derecho → Pegar) en la terminal de claude se ENVIABA el mensaje en vez de pegar el texto — pasaba sobre todo cuando lo copiado tenía un salto de línea al final, y después de minimizar/restaurar. Ahora pega siempre, sin enviar.',
+      'Ctrl+Inicio / Ctrl+Fin sobre el input de claude ahora van al principio / al final de lo que estás escribiendo (antes scrolleaban la conversación y quedaba raro).',
+      'Scroll de la terminal más estable: si se trababa, ahora con clickear la terminal se recupera (sin tener que maximizar y achicar). Además se quitó el scroll "suave" que podía dejar la rueda pegada.',
+    ] },
     { v: '1.9.14', date: '26 jun 2026', title: 'Seleccionar el texto del input de claude con Shift+flechas + Ctrl+X corta', items: [
       'En la terminal de claude ahora podés SELECCIONAR con el teclado lo que estás escribiendo: Shift+flechas (carácter por carácter), Ctrl+Shift+flecha (de a palabras) y Shift+Inicio/Fin (hasta el principio o el fin de lo tipeado). Después Ctrl+C lo copia.',
       'Ctrl+X CORTA: copia la selección y la borra del input de una.',

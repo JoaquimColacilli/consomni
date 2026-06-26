@@ -1748,6 +1748,48 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.15 — Pegar que no envía + Ctrl+Inicio/Fin en el input + scroll más estable
+> Tres reportes de usuarios sobre la terminal embebida. Bump **1.9.14 → 1.9.15**. Aditivo, scopeado a
+> paneles `claude` (shell intacto). Verificado con harness PTY headless contra `claude.exe` (4/4) + boot.
+
+### A) Ctrl+V / clic derecho → Pegar a veces ENVIABA en vez de pegar (claude)
+- **Causa (confirmada por el usuario):** un paste sólo "envía" si un `\n`/`\r` llega a claude SIN
+  bracketed-paste. `term.paste(txt)` sólo envuelve en `\x1b[200~…\x1b[201~` si el tracking de `?2004h` de
+  xterm cree que el modo está on. **Al minimizar→restaurar** (o en un redibujo de claude) ese tracking
+  queda DESINCRONIZADO (xterm "off", claude "on") → `term.paste` manda el texto CRUDO → el salto (sobre
+  todo el FINAL, al copiar una línea con su `\n`) se lee como Enter → submit. El usuario lo reprodujo:
+  "minimicé, copié algo, volví, pegué y se mandó" + "era lo que estaba copiando".
+- **Fix** (`terminals-ui.js`, `termPaste(term, pane)`): en claude, **escribir el bracketed-paste
+  EXPLÍCITO** (`api.term.write(tid, '\x1b[200~' + clean + '\x1b[201~')`) en vez de `term.paste()` → NO
+  depende del tracking de xterm; claude lo colapsa a `[Pasted text]`. Además **sacar los CR/LF del final**
+  (`replace(/[\r\n]+$/,'')`) → un paste nunca auto-envía. El de-dup guard (preventDefault + listener de
+  captura) sigue evitando el paste nativo crudo en paralelo. Se pasó `pane` a los 3 call sites (Ctrl+V
+  claude/shell + "Pegar" del menú contextual). **Shell sin cambios** (pegar-y-correr es esperado).
+- **Verificado (harness):** bracketed EXPLÍCITO de `linea uno\nlinea dos\nlinea tres\n` (multilínea +
+  salto final) → claude muestra `[Pasted text #1 +3 lines]`, **NO envía**; `holamundo` → pega.
+
+### B) Ctrl+Inicio / Ctrl+Fin → inicio/fin del INPUT (no scrollear la conversación)
+- Antes caían al default de xterm (scroll del scrollback → janky en el alt-screen de claude). **Fix:** rama
+  nueva scopeada a claude (tras el branch de Ctrl+Z) que intercepta Ctrl+Home/End y manda la secuencia
+  readline que claude honra: **Ctrl+Inicio → `\x01`** (Ctrl+A = inicio), **Ctrl+Fin → `\x05`** (Ctrl+E = fin);
+  `return false` para que xterm no scrollee. No choca con la selección Shift+Home/End (exige shift) ni con
+  Ctrl+A/C/X/Z/W. Plain Home/End no se tocan. Ctrl+flecha arriba/abajo queda fuera (claude las usa).
+- **Verificado (harness):** "abcdef" + `\x01` + "X" → "Xabcdef" (inicio); + `\x05` + "Y" → "abcdefY" (fin).
+
+### C) Scroll que se traba (best-effort seguro — sin repro 100%)
+- Pista: maximizar/achicar lo arregla (dispara `refitAll`→`syncTerm`→`fit.fit()` que recomputa el viewport).
+- **Fix 1:** se quitó `smoothScrollDuration: 120` del ctor de xterm (polish de v1.9.10, sospechoso #1 de
+  "rueda trabada") → scroll instantáneo estándar.
+- **Fix 2:** `syncTerm` al enfocar un panel (en `setFocus`) → reusa el camino guardado (`offsetParent` +
+  `pushPty` no-op si las dims no cambian → sin SIGWINCH espurio): ahora basta clickear la terminal para
+  recuperar el scroll (en vez de redimensionar). Honesto: best-effort; si persiste, repro dedicado.
+
+> **Pendiente (reporte de Facundo, NO en esta versión):** "Ctrl+C a veces copia y a veces no · parece que
+> intenta cerrar claude". Es la semántica clásica de Ctrl+C (con selección copia; sin selección = SIGINT
+> para interrumpir claude); cambiarla es delicado (no romper el interrumpir). Se investiga aparte.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

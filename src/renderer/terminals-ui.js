@@ -491,6 +491,10 @@
     if (focused === pane) { renderSessionBar(); return; }
     focused = pane;
     panesOf().forEach(function (p) { p.classList.toggle('focused', p === pane); });
+    // Recuperar el scroll al enfocar: re-fit del viewport (mismo camino guardado que el resize que "lo
+    // arregla"; pushPty es no-op si las dims no cambian → sin SIGWINCH espurio). Cubre el caso "el scroll
+    // se trabó y tengo que maximizar/achicar": ahora basta con clickear la terminal.
+    var _ft = terms.get(pane.dataset.tid); if (_ft && _ft.term && _ft.fit) { try { syncTerm(_ft.term, _ft.fit, pane); } catch (e) {} }
     renderSessionBar();
     updateDiffBadge();   // el badge +N/−N sigue a la terminal enfocada (fallback activeTermCwd en inicio)
   }
@@ -1170,10 +1174,26 @@
     } catch (e) {}
     return false;   // sin selección → el caller deja pasar la tecla
   }
-  function termPaste(term) {
+  function termPaste(term, pane) {
     try {
       if (api && api.clipboardRead) api.clipboardRead().then(function (txt) {
-        if (txt) { try { term.paste(txt); } catch (e) {} }   // term.paste respeta bracketed-paste
+        if (txt) {
+          if (pane && pane.dataset.kind === 'claude') {
+            // En claude: sacar el salto FINAL (un paste NUNCA debe auto-enviar) y escribir el bracketed-paste
+            // EXPLÍCITO en vez de term.paste(). term.paste sólo envuelve si el tracking de ?2004h de xterm
+            // cree que el modo está on; ese tracking puede quedar DESINCRONIZADO tras minimizar/restaurar
+            // (xterm "off", claude "on") → mandaría el texto crudo → el \n se lee como Enter = submit.
+            // El write explícito NO depende de ese tracking; claude (que sí tiene el modo on) lo colapsa.
+            var clean = txt.replace(/[\r\n]+$/, '');
+            var tid = pane.dataset.tid;
+            if (clean) {
+              if (tid && api.term && api.term.write) api.term.write(tid, '\x1b[200~' + clean + '\x1b[201~');
+              else { try { term.paste(clean); } catch (e) {} }   // fallback raro: sin tid
+            }
+          } else {
+            try { term.paste(txt); } catch (e) {}   // shell: como siempre (term.paste respeta bracketed; pegar-y-correr es esperado)
+          }
+        }
         try { term.focus(); } catch (e) {}                    // re-focus (la lectura es async)
       }).catch(function () {});
     } catch (e) {}
@@ -1471,7 +1491,7 @@
       var fa = b.getAttribute('data-fctx');
       if (fa) { if (fa === 'panel') openFilePanel(resolved, fcwd); else if (fa === 'editor') openFileEditor(resolved, fcwd); else if (fa === 'reveal') revealFilePath(resolved); closeTermCtx(); return; }
       var act = b.getAttribute('data-ctx');
-      if (act === 'copy') termCopy(term); else if (act === 'paste') termPaste(term); else if (act === 'all') termSelectAll(term);
+      if (act === 'copy') termCopy(term); else if (act === 'paste') termPaste(term, pane); else if (act === 'all') termSelectAll(term);
       closeTermCtx(); try { term.focus(); } catch (e2) {}
     });
     setTimeout(function () {
@@ -1723,7 +1743,7 @@
     var termOpts = {
       fontFamily: "'Geist Mono', ui-monospace, 'Cascadia Mono', monospace",
       fontSize: 12.5, lineHeight: 1.15, cursorBlink: true, cursorStyle: 'bar',
-      allowProposedApi: true, scrollback: 12000, smoothScrollDuration: 120, theme: THEME   // scroll de rueda suave (polish)
+      allowProposedApi: true, scrollback: 12000, theme: THEME   // scroll instantáneo (el smoothScroll de v1.9.10 podía dejar la rueda "trabada")
     };
     // ConPTY-aware: en Windows xterm necesita saber que el backend es ConPTY para detectar bien las
     // líneas ENVUELTAS y NO doble-reflowear al hacer resize (xterm + ConPTY reflowean distinto → el
@@ -1870,6 +1890,13 @@
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey && ev.code === 'KeyZ' && pane.dataset.kind === 'claude') {
           var ztid = pane.dataset.tid; if (ztid && api.term && api.term.write) api.term.write(ztid, '\x1f'); return false;
         }
+        // Ctrl+Inicio / Ctrl+Fin en claude → ir al INICIO / FIN del input (no scrollear la conversación,
+        // que es lo que hace xterm por default y queda janky en el alt-screen de claude). Manda la secuencia
+        // readline que claude honra: Ctrl+A (\x01)=inicio del input, Ctrl+E (\x05)=fin. Scopeado a claude.
+        if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey && (ev.code === 'Home' || ev.code === 'End') && pane.dataset.kind === 'claude') {
+          var htid = pane.dataset.tid; if (htid && api.term && api.term.write) api.term.write(htid, ev.code === 'Home' ? '\x01' : '\x05');
+          kbSelReset(term, pane); return false;
+        }
         // Ctrl+A en claude → SELECCIONAR todo el input que escribiste (a nivel xterm; la TUI de claude NO tiene
         // selección de su input — verificado: su Ctrl+A es "inicio de línea", que queda en Home). Luego Ctrl+C copia.
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && !ev.metaKey && ev.code === 'KeyA' && pane.dataset.kind === 'claude') {
@@ -1890,8 +1917,8 @@
         if (ev.ctrlKey && ev.code === 'KeyV') {                                  // pegar (Ctrl+V/Ctrl+Shift+V); guard + listener de captura matan el paste NATIVO de xterm → NUNCA se duplica (ver de-dup abajo)
           pane._pasteGuard = Date.now(); ev.preventDefault();
           // en claude: si hay IMAGEN en el portapapeles, pegala (ruta→[Image #N]); si no, pegá TEXTO. En shell: sólo texto.
-          if (pane.dataset.kind === 'claude') { pasteClipImage(term, pane).then(function (didImage) { if (!didImage) termPaste(term); }); }
-          else termPaste(term);
+          if (pane.dataset.kind === 'claude') { pasteClipImage(term, pane).then(function (didImage) { if (!didImage) termPaste(term, pane); }); }
+          else termPaste(term, pane);
           return false;
         }
         return true;
