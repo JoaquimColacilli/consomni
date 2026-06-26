@@ -1567,6 +1567,60 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.10 — Terminal más estable + `@` tipeable siempre + menos tooltips + selección no pisa el clipboard
+> Batch de feedback de usuarios sobre v1.9.9. Bump **1.9.9 → 1.9.10** (`package.json` + fallbacks `brand-ver`/`.ver`
+> en `chrome.js` + entrada en `CHANGELOG` de `app.js`). Mantenimiento, cambios acotados. Respeta las 4 Hard Rules
+> (CSS aditivo con tokens; responsive; cero API; cero atribución a IA). TS compila limpio; `node --check` OK en los
+> 3 .js del renderer; app arranca sin errores y topbar responsive verificado por screenshot (720/560px).
+
+### 1) Texto roto/duplicado en la terminal de claude (parche de atlas WebGL) — headline
+- **Causa raíz (confianza alta):** el renderer WebGL (`@xterm/addon-webgl@0.19.0`, v1.9.9) cachea los glifos en un
+  *texture atlas* que **no se invalidaba** al cambiar la geometría de celda (resize, carga async de Geist Mono,
+  panel que vuelve del pool) → glifos viejos en posiciones nuevas → letras dobladas/mezcladas ("RReadback").
+- **Fix (`terminals-ui.js`):** se guarda la instancia del addon en `pane._wgl` (null en `onContextLoss`) y un helper
+  `clearAtlas(pane)` → `pane._wgl.clearTextureAtlas()` (no-op/try-catch si está en DOM o disposed). Se llama en
+  `syncTerm()` (cubre resize, drag, ventana, **mostrar panel desde el pool** vía `refitAll`) y en `document.fonts.ready`.
+  `THEME` es constante (las terminales son SIEMPRE oscuras) → no hay evento de tema que limpiar.
+- **Decisión del usuario:** WebGL queda **ON por defecto**; el toggle "render por GPU" → OFF es el fallback.
+- **Límite honesto:** el render WebGL NO se puede verificar headless (sin display) → best-effort; el usuario confirma en vivo.
+
+### 2) No se podía tipear `@` (selector flotante fail-open + trigger conservador + toggle)
+- **Causa:** al tipear `@` en claude, Consomni intercepta la tecla y abre su overlay; si `listFiles` fallaba / `cwd`
+  fuera del allowlist / sin archivos, el picker quedaba abierto **tragando todas las teclas** → el `@` nunca llegaba.
+  (El `/` no sufría porque sus built-ins nunca dan lista vacía → por eso "el `/` sí dejaba".)
+- **Fix (`terminals-ui.js`):**
+  - **Fail-open en `openAtPicker`:** `failOpenAt(pane)` escribe el literal `@`+lo tipeado a la PTY y cierra cuando
+    `listFiles` cae en `.catch`, devuelve `ok:false`/vacío, o no hay API; + safety `setTimeout(1800ms)` si hangea.
+    Garantiza que el `@` SIEMPRE se pueda tipear (claude muestra su picker inline como fallback).
+  - **Trigger conservador:** el `@` sólo abre el picker en **límite de palabra** (`!_inputDirty || _lastWasSpace`,
+    nuevo flag trackeado en el bloque claude del handler) → no roba el `@` de mitad de token (emails/paths).
+  - **Toggle `config.floatingPickers` (default `true`):** módulo `floatingPickers` + `setFloatingPickers` (bridge),
+    gatea la intercepción de `@` y `/`. OFF = van crudos a claude. Settings → Editor & Terminal (coerción a bool,
+    aplica en vivo). `state.floatingPickers` cargado de config al boot + empujado a `ConsomniTerms`.
+
+### 3) Tooltip flotante redundante ("sacame eso") (`terminals-ui.js`)
+- Se sacó `pane.title` en `setPaneMeta` (flotaba en el MEDIO de la terminal al hover, repitiendo el título ya visible
+  del head) y el `title=` redundante del chip en `renderSessionBar` (el `.dk-sess-nm` ya lo muestra; sólo queda el
+  tooltip útil "minimizada (proceso vivo)" en chips `min`). Los `title` de BOTONES (explican acciones) no se tocan.
+
+### 4) Seleccionar texto pisaba el portapapeles (OSC 52 sacado) (`terminals-ui.js`)
+- Se **eliminó** `registerOscHandler(52, …)` (era el único camino que escribía el clipboard desde la terminal —el
+  "c to copy"/copy de claude— y pisaba lo que el usuario tuviera). Ahora la terminal **nunca** escribe el clipboard
+  sola. **Decisión del usuario:** seleccionar + **Ctrl+C** sigue copiando (vía `termCopy` en el handler de Ctrl+C),
+  igual Ctrl+Shift+C y el menú contextual "Copiar". (En claude, para arrastrar y seleccionar hay que estar en "modo
+  selección" — botón I-beam v1.9.4 — porque claude tiene mouse-tracking; eso no cambia.)
+
+### 5) Responsive del topbar a ancho angosto (`app.css`)
+- Hardening aditivo (tokens existentes): `.topbar .spacer{min-width:0}`, `.topbar .brand{flex-shrink:0;min-width:0}`,
+  `.wordmark` con ellipsis, y `@media(max-width:600px)` oculta el `.brand-changelog` del topbar (sigue en sidebar/paleta)
+  y baja el `min-width` del search. Verificado por screenshot a 720/560px (sin solapamientos).
+
+### 6) Scroll un toque más suave (polish, `terminals-ui.js` + `app.css`)
+- `smoothScrollDuration: 120` en el ctor de xterm (rueda suave en las terminales) + `scroll-behavior:smooth` en `.dk-convo`
+  (conversación read-only). Bajo riesgo; si molesta, se quita sin tocar nada más.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

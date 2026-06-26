@@ -29,6 +29,7 @@ export interface AppConfig {
   claudeConfigDir: string;     // perfil ACTIVO de Claude Code (config dir). '' = auto (env CLAUDE_CONFIG_DIR → ~/.claude). Multi-perfil (ej ~/.claude-max)
   claudeFullscreen: boolean;   // claude en modo "fullscreen" (input box ANCLADO abajo via alt-screen) en las terminales embebidas. inyecta CLAUDE_CODE_NO_FLICKER=1 (sólo env, no toca disco). default true
   gpuRender: boolean;          // render por GPU (WebGL) en las terminales embebidas → mucho más fluido. default true; opt-out si una GPU rinde mal (cae al renderer DOM)
+  floatingPickers: boolean;    // selector flotante de @ y / (estilo Warp) en paneles claude. default true; off = @ y / van crudos a claude (su picker inline)
   seenProfileTour: boolean;    // ¿ya vio el tutorial de multi-perfil? (gate confiable bajo file://, no localStorage). Auto-salta 1 vez al actualizar
   seenWhatsNew18: boolean;     // ¿ya vio el tour de novedades v1.8.0? (gate confiable bajo file://). Auto-salta 1 vez tras actualizar
   autoStart: boolean;          // abrir Consomni al iniciar la PC (nativo: app.setLoginItemSettings → registro Run). Sólo aplica empaquetado
@@ -80,6 +81,7 @@ const DEFAULTS: AppConfig = {
   claudeConfigDir: '',
   claudeFullscreen: true,
   gpuRender: true,
+  floatingPickers: true,
   seenProfileTour: false,
   seenWhatsNew18: false,
   autoStart: false,

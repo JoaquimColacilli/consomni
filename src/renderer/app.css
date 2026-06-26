@@ -53,8 +53,13 @@
    progresivamente (siguen accesibles por teclado/palette). Tamaños grandes intactos. */
 .topbar .counters{flex-shrink:1;min-width:0;overflow:hidden;}
 .topbar .search{flex-shrink:1;min-width:120px;cursor:pointer;}  /* clickeable: activa el buscador (igual que '/') */
+.topbar .spacer{min-width:0;}        /* que colapse del todo en angosto (no empuje el contenido fuera) */
+.topbar .brand{flex-shrink:0;min-width:0;}
+.topbar .wordmark{overflow:hidden;text-overflow:ellipsis;}
 @media (max-width:1180px){ .topbar .seg{display:none;} }
 @media (max-width:1040px){ .topbar .counters{display:none;} .topbar .divider-v{display:none;} }
+/* muy angosto: el Changelog del topbar se va (sigue en sidebar/paleta) para no apretar el buscador */
+@media (max-width:600px){ .topbar .brand-changelog{display:none;} .topbar .search{min-width:0;} }
 /* colapsar a icon-only en angosto SÓLO cuando está inactivo y sin filtro (si está activo / con query, se ve entero) */
 @media (max-width:900px){ .topbar .search:not(.searching):not(.has-q) span{display:none;} .topbar .search:not(.searching):not(.has-q){width:auto;min-width:0;} .topbar .search .kbd{display:none;} }
 
@@ -382,7 +387,7 @@ body.view-archived .board{ flex-wrap: wrap; align-content: flex-start; overflow-
 .dk-pane--session .dk-pane-body{display:flex;flex-direction:column;}
 .dk-shead{flex:none;display:flex;align-items:center;padding:7px 10px;border-bottom:1px solid var(--border);background:var(--surface-sidebar);}
 .dk-sactions{display:flex;gap:6px;flex-wrap:wrap;}
-.dk-convo{flex:1;min-height:0;overflow:auto;padding:12px 14px;}
+.dk-convo{flex:1;min-height:0;overflow:auto;padding:12px 14px;scroll-behavior:smooth;}
 .dk-empty{color:var(--text-4);font-size:12px;line-height:1.7;padding:14px 6px;}
 .cv-turn{margin-bottom:13px;}
 .cv-who{display:inline-block;font-size:9.5px;letter-spacing:1px;text-transform:uppercase;color:var(--text-4);margin-bottom:4px;}

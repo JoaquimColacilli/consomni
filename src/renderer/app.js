@@ -519,6 +519,14 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.10', date: '25 jun 2026', title: 'Terminal más estable + se puede tipear @ siempre + menos tooltips + la selección ya no pisa el portapapeles', items: [
+      'Texto de la terminal más estable: se arregló el texto que se rompía o se duplicaba (letras dobladas) al scrollear o redimensionar la consola de claude. Si igual lo notaras, podés cambiar a renderer clásico en Settings → Editor & Terminal ("render por GPU").',
+      'Se puede tipear @ siempre: el selector flotante de @ ya no te deja trabado si no puede listar los archivos — si falla, el @ va directo a claude y seguís escribiendo normal. El @ además sólo abre la cajita al empezar una palabra (no en medio de un "user@host"). Si preferís, lo podés apagar del todo en Settings ("selector flotante de @ y /").',
+      'Menos tooltips molestos: se sacó el cartelito que flotaba en el medio de la terminal al pasar el mouse (repetía el nombre que ya se ve arriba).',
+      'La selección ya no pisa el portapapeles: seleccionar texto en la terminal dejó de copiarlo solo. Ahora copiás cuando vos querés, con Ctrl+C (o Ctrl+Shift+C / clic derecho → Copiar).',
+      'Arreglos de tamaño chico: la barra de arriba se acomoda mejor cuando achicás la ventana.',
+      'Scroll un poco más suave en la conversación y en las terminales.',
+    ] },
     { v: '1.9.9', date: '25 jun 2026', title: 'Terminales mucho más fluidas + aviso al actualizar + abrir .md + "esto no es un proyecto"', items: [
       'Terminales más fluidas: ahora se dibujan por GPU (WebGL), así que la consola de claude va mucho más suave —sobre todo cuando claude escribe mucho o redibuja la pantalla—. Si tu GPU llegara a renderizar raro, lo podés apagar en Settings → Editor & Terminal ("render por GPU").',
       'Aviso al actualizar con claude abierto: si tenés una sesión de Claude activa y le das a Actualizar, ahora te pregunta antes (actualizar cierra la app y corta la sesión en vivo). Podés seguir trabajando o actualizar igual.',
@@ -2028,6 +2036,8 @@
         '<div style="font-size:10px;color:var(--text-4);margin-top:4px">modo fullscreen de claude (alt-screen) → el input queda abajo de todo, como WezTerm · off = inline (input sigue al contenido, scrollback en el buffer) · aplica a terminales nuevas</div>' +
         '<div class="set-row"><span class="k">render por GPU (terminal más fluida) <span style="color:var(--text-3)">· WebGL</span></span>' + seg2('gpuRender', cfg.gpuRender !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
         '<div style="font-size:10px;color:var(--text-4);margin-top:4px">dibuja las terminales en la GPU (WebGL) → mucho más fluido, sobre todo en claude · off = renderer DOM (apagalo sólo si ves la terminal rara en tu GPU) · aplica a terminales nuevas</div>' +
+        '<div class="set-row"><span class="k">selector flotante de @ y / <span style="color:var(--text-3)">· estilo Warp</span></span>' + seg2('floatingPickers', cfg.floatingPickers !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
+        '<div style="font-size:10px;color:var(--text-4);margin-top:4px">al tipear @ (archivos) o / (comandos) en una terminal de claude, abre una cajita flotante para elegir (no corre la pantalla) · off = @ y / van directo a claude (su selector inline) · aplica en vivo</div>' +
         '<div class="set-row"><span class="k">autocompletar con Tab (terminal)</span>' + seg2('autosuggest', cfg.autosuggest !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
         '<div class="set-row"><span class="k">tecla para aceptar la sugerencia</span><span style="display:inline-flex;align-items:center;gap:8px"><code id="setSgKey" style="padding:2px 7px;border-radius:5px;background:var(--surface-input);border:1px solid var(--border);font-family:\'Geist Mono\',monospace;font-size:11px;color:var(--text-2)">' + esc(prettyAcceptKey(cfg.autosuggestAcceptKey || 'Tab')) + '</code><button class="btn btn--sm" id="setSgRebind">cambiar</button></span></div>' +
         '<div style="font-size:10px;color:var(--text-4);margin-top:4px">sugiere en gris (pegado al cursor) el comando más reciente de tu historial que empieza con lo que escribís · la tecla acepta SÓLO cuando hay sugerencia visible (si no, pasa al completado nativo) · sólo en terminales shell</div>' +
@@ -2139,11 +2149,12 @@
           return;
         }
         var patch = {};
-        if (key === 'sounds' || key === 'checkUpdates' || key === 'claudeFullscreen' || key === 'autosuggest' || key === 'gpuRender') patch[key] = (val === 'on'); else patch[key] = val;
+        if (key === 'sounds' || key === 'checkUpdates' || key === 'claudeFullscreen' || key === 'autosuggest' || key === 'gpuRender' || key === 'floatingPickers') patch[key] = (val === 'on'); else patch[key] = val;
         if (key === 'quickTermKind') state.quickTermKind = val;   // aplica sin reiniciar
         if (key === 'autosuggest') { state.autosuggest = (val === 'on'); pushAutosuggest(); }   // aplica en vivo a las terminales
         if (key === 'claudeFullscreen') { state.claudeFullscreen = (val === 'on'); if (window.ConsomniTerms && window.ConsomniTerms.setClaudeFullscreenDefault) window.ConsomniTerms.setClaudeFullscreenDefault(state.claudeFullscreen); }   // default para terminales claude NUEVAS
         if (key === 'gpuRender') { state.gpuRender = (val === 'on'); if (window.ConsomniTerms && window.ConsomniTerms.setGpuRender) window.ConsomniTerms.setGpuRender(state.gpuRender); }   // aplica a terminales NUEVAS
+        if (key === 'floatingPickers') { state.floatingPickers = (val === 'on'); if (window.ConsomniTerms && window.ConsomniTerms.setFloatingPickers) window.ConsomniTerms.setFloatingPickers(state.floatingPickers); }   // aplica EN VIVO (gatea la intercepción de @ y /)
         saveSetting(patch);
       });
     });
@@ -2608,9 +2619,11 @@
         state.autosuggestAcceptKey = cfg.autosuggestAcceptKey || 'Tab';
         state.claudeFullscreen = cfg.claudeFullscreen !== false;
         state.gpuRender = cfg.gpuRender !== false;
+        state.floatingPickers = cfg.floatingPickers !== false;
         pushAutosuggest();   // empujar la config del autosuggest a las terminales
         if (window.ConsomniTerms && window.ConsomniTerms.setClaudeFullscreenDefault) window.ConsomniTerms.setClaudeFullscreenDefault(state.claudeFullscreen);   // default de modo render para terminales claude nuevas
         if (window.ConsomniTerms && window.ConsomniTerms.setGpuRender) window.ConsomniTerms.setGpuRender(state.gpuRender);   // default de render GPU/WebGL para terminales nuevas
+        if (window.ConsomniTerms && window.ConsomniTerms.setFloatingPickers) window.ConsomniTerms.setFloatingPickers(state.floatingPickers);   // selector flotante de @ y / en paneles claude
         applyTheme();
       }
       render();

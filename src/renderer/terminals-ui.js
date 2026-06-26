@@ -21,6 +21,7 @@
   'use strict';
   var C = g.Chrome, api = g.consomni, Terminal = g.Terminal, FitNS = g.FitAddon, WebLinksNS = g.WebLinksAddon, WebglNS = g.WebglAddon;
   var gpuRender = true;   // render por GPU (WebGL) — mucho más fluido en claude; opt-out por si una GPU rinde mal (lo empuja app.js)
+  var floatingPickers = true;   // selector flotante de @ y / (estilo Warp) en paneles claude; opt-out si molesta (lo empuja app.js)
 
   var host = null, rootEl = null, poolEl = null, dropInd = null, countEl = null, sessBarEl = null;
   var lastSnap = null;         // último snapshot (para el badge de diff del dock)
@@ -517,10 +518,11 @@
     sessBarEl.hidden = false;
     sessBarEl.innerHTML = list.map(function (p) {
       var min = p.dataset.min === '1', act = (p === focused) && !min;
+      // sin title nativo redundante (el .dk-sess-nm ya muestra el label); sólo en minimizadas el tooltip útil
       return '<button class="dk-sess-chip' + (act ? ' active' : '') + (min ? ' min' : '') + '" data-sess-pane="' + esc(p.dataset.pane) + '"' +
-        ' title="' + esc(paneChipTitle(p)) + (min ? ' · minimizada (proceso vivo)' : '') + '">' +
+        (min ? ' title="minimizada (proceso vivo)"' : '') + '>' +
         paneChipIcon(p) + '<span class="dk-sess-nm">' + esc(paneChipTitle(p)) + '</span>' +
-        (min ? '<span class="dk-sess-dot" title="proceso vivo"></span>' : '') + '</button>';
+        (min ? '<span class="dk-sess-dot"></span>' : '') + '</button>';
     }).join('');
   }
   function minimizePane(pane) {
@@ -711,7 +713,8 @@
   function setPaneMeta(pane, icon, title, proj) {
     pane.querySelector('.dk-pane-ic').innerHTML = icon;
     pane.querySelector('.dk-pane-title').innerHTML = esc(title) + (proj ? ' <span class="dk-pt-proj">· ' + esc(proj) + '</span>' : '');
-    pane.title = title + (proj ? ' · ' + proj : '');
+    // NO seteamos pane.title: el head del panel YA muestra el título visible, y un title nativo sobre el panel
+    // entero flotaba en el medio de la terminal al hacer hover ("claude ⚡ X · X"). Sin tooltip redundante.
     renderSessionBar();   // F6: el chip de la barra usa este título
   }
 
@@ -959,17 +962,33 @@
     requestAnimationFrame(function () { if (pane._atp) renderAtList(pane); });
     setTimeout(function () { if (pane._atp) renderAtList(pane); }, 90);
     if (api && api.listFiles) {
+      st.bailT = setTimeout(function () { if (pane._atp && pane._atp.loading) failOpenAt(pane); }, 1800);   // si listar hangea → no atrapar al usuario
       api.listFiles(pane.dataset.cwd || '').then(function (r) {
         if (!pane._atp) return;
-        st.files = (r && r.ok && r.files) ? r.files : [];
-        st.loading = false; filterAt(pane); renderAtList(pane);
-      }).catch(function () { if (pane._atp) { st.loading = false; renderAtList(pane); } });
-    } else { st.loading = false; }
+        try { clearTimeout(st.bailT); } catch (e) {}
+        var files = (r && r.ok && r.files) ? r.files : [];
+        if (!files.length) { failOpenAt(pane); return; }   // sin archivos (error/fuera de alcance/vacío) → escribí el '@' literal y seguí
+        st.files = files; st.loading = false; filterAt(pane); renderAtList(pane);
+      }).catch(function () { if (pane._atp) failOpenAt(pane); });
+    } else { failOpenAt(pane); }
+  }
+  // FAIL-OPEN del picker de '@': si no puede listar (error / fuera de alcance / sin archivos / sin API / hang),
+  // NO atrapamos al usuario → escribimos el '@'+lo tipeado a la PTY (claude muestra su picker inline) y cerramos.
+  // Garantiza que el '@' SIEMPRE se pueda tipear (bug reportado: el picker quedaba vacío tragando teclas).
+  function failOpenAt(pane) {
+    var st = pane._atp; if (!st || st.ending) return;
+    var tid = pane.dataset.tid, q = st.query;
+    try { if (st.bailT) clearTimeout(st.bailT); } catch (e) {}
+    closeAtPicker(pane);
+    if (tid && api && api.term && api.term.write) api.term.write(tid, '@' + (q || ''));
+    pane._inputDirty = true;
+    try { var t = paneTerm(pane); if (t) t.focus(); } catch (e) {}
   }
   // cierre DIRECTO (mouse / outside-click): libera pane._atp ya (no hay secuencia de teclas que tragar)
   function closeAtPicker(pane) {
     var st = pane._atp; if (!st) return;
     try { if (st.endTimer) { clearTimeout(st.endTimer); st.endTimer = null; } } catch (e) {}
+    try { if (st.bailT) { clearTimeout(st.bailT); st.bailT = null; } } catch (e) {}
     try { if (st.outside) g.document.removeEventListener('mousedown', st.outside, true); } catch (e) {}
     try { if (st.onResize) g.removeEventListener('resize', st.onResize); } catch (e) {}
     try { if (st.el && st.el.parentNode) st.el.parentNode.removeChild(st.el); } catch (e) {}
@@ -1301,6 +1320,7 @@
   }
   function setClaudeFullscreenDefault(on) { claudeFsDefault = (on !== false); }
   function setGpuRender(on) { gpuRender = (on !== false); }   // aplica a terminales NUEVAS (las abiertas siguen con su renderer)
+  function setFloatingPickers(on) { floatingPickers = (on !== false); }   // @ y / flotantes; OFF = van crudos a claude (su picker inline)
   // ¿hay una sesión de claude VIVA (PTY viva, no minimizada, no finalizada)? → para avisar antes de actualizar (corta la sesión)
   function hasActiveClaudeSessions() {
     return allPanes().some(function (p) {
@@ -1610,7 +1630,7 @@
     var termOpts = {
       fontFamily: "'Geist Mono', ui-monospace, 'Cascadia Mono', monospace",
       fontSize: 12.5, lineHeight: 1.15, cursorBlink: true, cursorStyle: 'bar',
-      allowProposedApi: true, scrollback: 12000, theme: THEME
+      allowProposedApi: true, scrollback: 12000, smoothScrollDuration: 120, theme: THEME   // scroll de rueda suave (polish)
     };
     // ConPTY-aware: en Windows xterm necesita saber que el backend es ConPTY para detectar bien las
     // líneas ENVUELTAS y NO doble-reflowear al hacer resize (xterm + ConPTY reflowean distinto → el
@@ -1639,9 +1659,10 @@
       try {
         if (WebglNS && WebglNS.WebglAddon) {
           var wgl = new WebglNS.WebglAddon();
-          try { wgl.onContextLoss(function () { try { wgl.dispose(); } catch (e) {} }); } catch (e) {}   // contexto perdido → DOM
+          try { wgl.onContextLoss(function () { try { wgl.dispose(); } catch (e) {} pane._wgl = null; }); } catch (e) {}   // contexto perdido → DOM
           term.loadAddon(wgl);
           pane._gpu = 1;
+          pane._wgl = wgl;   // ref para invalidar el texture atlas (ver clearAtlas) cuando cambia la geometría de celda
         }
       } catch (e) { /* WebGL no disponible (GPU vieja/sandbox) → DOM built-in, igual que antes */ }
     }
@@ -1680,7 +1701,10 @@
             if (ev.type === 'keydown') atKey(pane, ev);
             return false;
           }
-          if (ev.key === '@' && !ev.metaKey) { if (ev.type === 'keydown') openAtPicker(pane); return false; }
+          // El '@' SÓLO se intercepta en LÍMITE DE PALABRA (inicio del input o después de un espacio) y con el
+          // toggle activo → no roba el '@' de mitad de token (emails/paths "user@host" van crudos a claude). Si
+          // no es límite o el toggle está off, dejamos pasar el '@' (xterm lo tipea → claude maneja lo suyo).
+          if (floatingPickers && ev.key === '@' && !ev.metaKey && (!pane._inputDirty || pane._lastWasSpace)) { if (ev.type === 'keydown') openAtPicker(pane); return false; }
           // '/' PICKER flotante (slash-commands): mismo motor, datos de comandos. Sólo dispara al INICIO del
           // input (heurística _inputDirty) para no robar el '/' de rutas/URLs/and-or en medio de un prompt.
           if (pane._slp) {
@@ -1688,7 +1712,7 @@
             if (ev.type === 'keydown') slKey(pane, ev);
             return false;
           }
-          if (ev.key === '/' && !ev.metaKey && !ev.ctrlKey && !ev.altKey && !pane._inputDirty) { if (ev.type === 'keydown') openSlashPicker(pane); return false; }
+          if (floatingPickers && ev.key === '/' && !ev.metaKey && !ev.ctrlKey && !ev.altKey && !pane._inputDirty) { if (ev.type === 'keydown') openSlashPicker(pane); return false; }
         }
         // Shift+Enter en claude -> SALTO DE LINEA (no enviar el prompt). xterm.js no distingue Shift+Enter
         // de Enter, asi que se emula. DOS claves para que ande BIEN:
@@ -1723,9 +1747,9 @@
         // heurística para el picker de '/': el input está "sucio" si tipeaste algo desde el último Enter/Ctrl+C/Ctrl+U.
         // (las teclas interceptadas arriba —pickers, Shift+Enter— ya hicieron return; acá sólo pasan las que van a claude)
         if (pane.dataset.kind === 'claude') {
-          if (ev.code === 'Enter' && !ev.shiftKey) pane._inputDirty = false;
-          else if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && (ev.code === 'KeyC' || ev.code === 'KeyU')) pane._inputDirty = false;
-          else if (ev.key && ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) pane._inputDirty = true;
+          if (ev.code === 'Enter' && !ev.shiftKey) { pane._inputDirty = false; pane._lastWasSpace = false; }
+          else if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && (ev.code === 'KeyC' || ev.code === 'KeyU')) { pane._inputDirty = false; pane._lastWasSpace = false; }
+          else if (ev.key && ev.key.length === 1 && !ev.ctrlKey && !ev.metaKey && !ev.altKey) { pane._inputDirty = true; pane._lastWasSpace = (ev.key === ' '); }
         }
         // AUTOSUGGEST (ghost text, sólo SHELL): trackea el buffer sombra y, si aceptás la sugerencia, consume la tecla
         if (pane.dataset.kind === 'shell' && shellAutosuggestKey(pane, ev)) return false;
@@ -1760,21 +1784,10 @@
         return true;
       });
     } catch (e) {}
-    // "c to copy" de claude (OSC 52): decodificá base64 UTF-8 y copiá al portapapeles (sin addon extra)
-    try {
-      term.parser.registerOscHandler(52, function (data) {
-        try {
-          var semi = String(data || '').indexOf(';'); if (semi < 0) return true;
-          var b64 = data.slice(semi + 1);
-          if (!b64 || b64 === '?') return true;                       // query de lectura → ignorar
-          var bin = atob(b64), bytes = new Uint8Array(bin.length);
-          for (var i = 0; i < bin.length; i++) bytes[i] = bin.charCodeAt(i) & 0xff;
-          var text = new TextDecoder('utf-8').decode(bytes);
-          if (text && api && api.action) api.action('copyText', { text: text }).catch(function () {});
-        } catch (e) {}
-        return true;
-      });
-    } catch (e) {}
+    // OSC 52 ("c to copy" / copy automático de la TUI): SACADO a propósito (pedido del usuario). Hacía que
+    // seleccionar/copiar en la terminal PISARA el portapapeles del usuario sin que él lo pidiera. Ahora la
+    // terminal NUNCA escribe el clipboard sola; se copia SOLO con Ctrl+C / Ctrl+Shift+C / menú contextual
+    // "Copiar" (seleccionar texto + Ctrl+C sigue funcionando vía termCopy).
     // cwd EN VIVO (cd tracking): el shell puede emitir OSC 7 (file://host/path) u OSC 9;9 (path) en cada
     // prompt → actualizamos pane.dataset.cwd para que "clonar la terminal activa" (Ctrl+Espacio) y las
     // rutas clickeables tomen el directorio REAL. Si el shell no lo emite, queda el cwd de arranque (no rompe nada).
@@ -2153,11 +2166,19 @@
   // y NaN si está oculto). Salta paneles ocultos (offsetParent null): ahí fit() es no-op por NaN y
   // term.cols/rows quedarían STALE → empujarlas desincronizaría. Re-ancla al fondo SÓLO si el usuario
   // ya estaba al fondo (respeta el scroll hacia arriba intencional → no lo saca de la historia).
+  // invalida el TEXTURE ATLAS del renderer WebGL: el addon cachea los glifos por geometría de celda; si la
+  // geometría cambia (resize, carga de fuente async, panel que vuelve del pool, cambio de tema) y el atlas NO
+  // se purga, dibuja glifos viejos en posiciones nuevas → letras dobladas/mezcladas ("RReadback"/"EEditar").
+  // No-op (try/catch) si el panel está en renderer DOM o el addon ya se disposó por context-loss.
+  function clearAtlas(pane) {
+    try { if (pane && pane._wgl && pane._wgl.clearTextureAtlas) pane._wgl.clearTextureAtlas(); } catch (e) {}
+  }
   function syncTerm(term, fit, pane) {
     if (!term || !fit || !pane || pane.offsetParent === null) return;
     var wasBottom = nearBottom(term);
     try { fit.fit(); } catch (e) {}
     pushPty(pane, pane.dataset.tid, term.cols || 0, term.rows || 0);
+    clearAtlas(pane);   // tras cualquier fit/reflow → purgá el atlas WebGL para que no queden glifos desfasados
     if (wasBottom) { try { term.scrollToBottom(); } catch (e) {} }
     if (pane._sgGhostVisible) placeShellGhost(pane, term);   // autosuggest: el cursor se movió con el resize → reubicar el ghost
   }
@@ -2238,7 +2259,7 @@
     setEditorOpener: setEditorOpener, setQuickTermHook: setQuickTermHook,
     setHomeProjects: setHomeProjects,
     setClaudeFullscreenDefault: setClaudeFullscreenDefault,
-    setGpuRender: setGpuRender, hasActiveClaudeSessions: hasActiveClaudeSessions,
+    setGpuRender: setGpuRender, setFloatingPickers: setFloatingPickers, hasActiveClaudeSessions: hasActiveClaudeSessions,
     setAutosuggest: setAutosuggest, setAutosuggestRebinder: setAutosuggestRebinder,
     openTourDemo: openTourDemo, closeTourDemo: closeTourDemo,
     openFilePanel: openFilePanel, activeTermCwd: activeTermCwd
