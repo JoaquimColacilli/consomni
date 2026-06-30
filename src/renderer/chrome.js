@@ -185,7 +185,6 @@
       return '<span class="fpill' + (on ? ' on' : '') + '" data-mode="' + mode + '"><span class="d" style="background:var(' + varname + ')"></span>' + mode + '</span>';
     };
     const sortLabel = o.sortLabel || 'prioridad';
-    const density = o.density || 'comodo';
     // buscador: estado ACTIVO (foco + caret titilando) / CON-FILTRO (× para borrar) hermosos; INACTIVO = design-reference.
     const sActive = !!o.searchActive, sQuery = o.searchQuery || '';
     const sPh = 'buscar nombre / proyecto / branch…';
@@ -202,12 +201,12 @@
 
     return '<header class="topbar">' +
       '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span>' +
-        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.9.16') + '</span>' +
+        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.9.17') + '</span>' +
         '<button class="brand-changelog" data-act="changelog-all" title="ver todas las novedades">' + svg('sparkles', 10, 1.7) + '<span>Changelog</span></button></span></div>' +
       '<div class="divider-v"></div>' +
       '<div class="counters">' +
         '<span><b>' + total + '</b> sesiones</span><span class="sep">·</span>' +
-        '<span style="color:var(--amber)' + (hasAttn ? ';animation:amberBlink 1.6s ease-in-out infinite;font-weight:500' : '') + '">' + attn + ' atención</span><span class="sep">·</span>' +
+        // "atención" sacado del header a pedido del usuario (no duplicar): vive sólo en el footer (statusbar).
         '<span style="color:var(--green)">' + working + ' working</span><span class="sep">·</span>' +
         '<span style="color:#7a7a82">' + idle + ' idle</span><span class="sep">·</span>' +
         '<span style="color:var(--text-3)">' + closed + ' cerradas</span><span class="sep">·</span>' +
@@ -217,7 +216,7 @@
       '<div class="mode-pills">' +
         pill('ask', '--ask') + pill('plan', '--blue') + pill('edit', '--violet') + pill('auto', '--red') + '</div>' +
       '<button class="tbtn">orden: <b>' + esc(sortLabel) + '</b>' + svg('chevD', 10, 2.4) + '</button>' +
-      '<div class="seg"><span' + (density === 'comodo' ? ' class="on"' : '') + ' data-density="comodo">cómodo</span><span' + (density === 'compacto' ? ' class="on"' : '') + ' data-density="compacto">compacto</span></div>' +
+      // segmentado de densidad (cómodo/compacto) sacado a pedido del usuario; la densidad queda en el default.
       // botón de actualización: oculto por default; lo muestra app.js cuando hay update.
       '<button class="upbtn" data-act="update" title="actualizar Consomni" hidden>' +
         '<span class="upbtn-bar"></span>' +
@@ -225,7 +224,7 @@
         '<span class="upbtn-tx">Actualizar</span>' +
       '</button>' +
       '<button class="iconbtn notif-bell" title="notificaciones" data-act="notifs">' + svg('bell', 15, 1.7) + '<span class="notif-badge" hidden></span></button>' +
-      '<button class="cmdk"><kbd class="kbd">⌘</kbd><kbd class="kbd">K</kbd></button>' +
+      // ⌘K (cmdk) sacado del topbar a pedido del usuario; el atajo ⌘K/Ctrl+K sigue abriendo la palette (keydown global en app.js).
     '</header>';
   }
 
@@ -342,7 +341,7 @@
         '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
         '<button class="sbtn" data-act="theme" title="' + (o.light ? 'modo oscuro' : 'modo claro') + '">' + svg(o.light ? 'moon' : 'sun', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v1.9.16') + '</span></div>' +
+        '<span class="ver">' + esc(o.version || 'v1.9.17') + '</span></div>' +
     '</aside>';
   }
 
@@ -365,8 +364,9 @@
     return '<footer class="statusbar">' +
       '<span class="row" style="gap:6px;color:' + hookColor + '">' + hookDot + hookLabel + '</span><span class="sep">·</span>' +
       '<span>Σ <b>' + tokensToday + '</b> tok hoy</span><span class="sep">·</span>' +
-      '<span><b>' + activeCount + '</b> sesiones activas</span><span class="sep">·</span>' +
-      '<span style="color:var(--amber)">' + attnCount + ' esperan atención</span>' +
+      '<span><b>' + activeCount + '</b> sesiones activas</span>' +
+      // "esperan atención" sólo si hay alguno (oculto en 0); el separador va adentro para no quedar colgado.
+      (attnCount > 0 ? '<span class="sep">·</span><span style="color:var(--amber)">' + attnCount + ' esperan atención</span>' : '') +
       '<span class="right">auto-refresh ' + refreshSecs + 's · última actualización ' + esc(lastUpdate) + '</span>' +
     '</footer>';
   }

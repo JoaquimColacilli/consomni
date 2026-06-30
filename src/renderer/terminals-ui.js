@@ -49,6 +49,7 @@
   var homeProjects = null;     // provider de proyectos para el inicio (lo inyecta app.js) → [{id,name,cwd,fav}]
   var claudeFsDefault = true;  // default global config.claudeFullscreen (lo empuja app.js); fullscreen=input anclado abajo
   var claudeHistHintShown = false;  // tip "Ctrl+O = historial completo" una sola vez por sesión (al retomar un claude en fullscreen)
+  var copyHintShown = false;  // tip "Ctrl+C interrumpe · copiá con Ctrl+Shift+C" una sola vez por sesión (al apretar Ctrl+C con selección en claude)
   function isMaximized() { return !!host && host.classList.contains('maximized'); }
   function notifyMax() { try { maxObserver(isMaximized()); } catch (e) {} }
 
@@ -401,12 +402,39 @@
     countEl = host.querySelector('.dk-count');
     sessBarEl = host.querySelector('.dk-sessions');
     sessBarEl.addEventListener('click', function (e) {
+      if (sessBarEl._suppressClick) return;   // venía de un drag → no enfocar un chip sin querer
       var c = e.target.closest && e.target.closest('[data-sess-pane]'); if (!c) return;
       e.stopPropagation();
       var pane = paneByKey(c.getAttribute('data-sess-pane')); if (!pane) return;
       if (pane.dataset.min === '1') restorePane(pane);
       else { setFocus(pane); try { var pt = paneTerm(pane); if (pt) pt.focus(); } catch (e2) {} renderSessionBar(); }
     });
+    // F6 carrusel: la barra de sesiones se DESBORDA a la derecha con muchas terminales. Drag-to-scroll
+    // (arrastrar la barra) + rueda vertical → scroll horizontal para llegar a todas. El drag suprime el
+    // click de fin (umbral 4px) para no enfocar un chip al soltar. Listeners de move/up en document para
+    // no perder el drag si el puntero sale de la barra.
+    (function () {
+      var down = false, sx = 0, sl = 0, moved = false;
+      sessBarEl.addEventListener('mousedown', function (e) {
+        if (e.button !== 0) return;
+        down = true; moved = false; sx = e.clientX; sl = sessBarEl.scrollLeft;
+      });
+      g.document.addEventListener('mousemove', function (e) {
+        if (!down) return;
+        var dx = e.clientX - sx;
+        if (!moved && Math.abs(dx) > 4) { moved = true; sessBarEl.classList.add('dragging'); }
+        if (moved) sessBarEl.scrollLeft = sl - dx;
+      });
+      g.document.addEventListener('mouseup', function () {
+        if (!down) return; down = false;
+        if (moved) { sessBarEl._suppressClick = true; setTimeout(function () { sessBarEl._suppressClick = false; }, 0); }
+        sessBarEl.classList.remove('dragging');
+      });
+      sessBarEl.addEventListener('wheel', function (e) {
+        if (!e.deltaY) return;
+        sessBarEl.scrollLeft += e.deltaY; e.preventDefault();   // rueda vertical → mueve la barra en horizontal
+      }, { passive: false });
+    })();
     host.querySelector('.dk-new-term').addEventListener('click', function () { spawn('shell'); });
     // claude: REUSA el activo de la vista si hay (en vez de abrir otro y llenar de tabs). Shift/Alt+click = uno nuevo.
     host.querySelector('.dk-new-claude').addEventListener('click', function (ev) {
@@ -459,7 +487,18 @@
     api.onSnapshot(function (snap) {
       lastSnap = snap || lastSnap;
       updateDiffBadge();
-      sessions.forEach(function (pane) { if (host && !host.hidden && !host.classList.contains('minimized') && rootEl.contains(pane)) renderSession(pane); });
+      // mapa sid→lastActivity para gatear: re-renderizar un panel de sesión hace un IPC getSessionDetail
+      // (lee el transcript en main) + rebuild innerHTML de la conversación. ANTES corría para TODOS los
+      // paneles en CADA snapshot (causa #4 del lag). Ahora sólo si la sesión tuvo actividad nueva.
+      var actBySid = {};
+      if (snap && snap.sessions) for (var i = 0; i < snap.sessions.length; i++) { actBySid[snap.sessions[i].id] = snap.sessions[i].lastActivity || 0; }
+      sessions.forEach(function (pane) {
+        if (!(host && !host.hidden && !host.classList.contains('minimized') && rootEl.contains(pane))) return;
+        var act = actBySid[pane.dataset.sid];
+        if (act !== undefined && pane._lastConvoAct === act) return;   // sin actividad nueva → no re-fetch ni rebuild
+        pane._lastConvoAct = act;
+        renderSession(pane);
+      });
     });
   }
   // badge "+N −N" en la cabecera del dock (cambios git sin commitear, estilo Warp). El cwd se resuelve con
@@ -488,7 +527,9 @@
 
   function updateCount() { if (countEl) { var n = panesOf().length; countEl.textContent = n ? ('· ' + n) : ''; } updateDiffBadge(); }
   function setFocus(pane) {
-    if (focused === pane) { renderSessionBar(); return; }
+    // repaint SIEMPRE (incluso re-click de la misma): WebGL evicta el contexto menos usado → enfocar una
+    // terminal puede corromper otra ("click arregla una, rompe la otra"). Repintar el set visible las recupera.
+    if (focused === pane) { renderSessionBar(); scheduleRepaintVisible(); return; }
     focused = pane;
     panesOf().forEach(function (p) { p.classList.toggle('focused', p === pane); });
     // Recuperar el scroll al enfocar: re-fit del viewport (mismo camino guardado que el resize que "lo
@@ -497,6 +538,7 @@
     var _ft = terms.get(pane.dataset.tid); if (_ft && _ft.term && _ft.fit) { try { syncTerm(_ft.term, _ft.fit, pane); } catch (e) {} }
     renderSessionBar();
     updateDiffBadge();   // el badge +N/−N sigue a la terminal enfocada (fallback activeTermCwd en inicio)
+    scheduleRepaintVisible();
   }
 
   /* ── F6 · barra de sesiones + minimizar ──
@@ -619,6 +661,7 @@
     // doble pase: el primero por rAF + uno extra cuando el layout se asienta (mismo patrón que el post-create)
     refitSoon();
     if (g.requestAnimationFrame) g.requestAnimationFrame(function () { g.requestAnimationFrame(refitAll); });
+    scheduleRepaintVisible();   // paneles que vuelven del pool pueden tener el canvas WebGL corrupto → repintar
   }
   function setView(v, cwd, name) {
     ensureDock();
@@ -1184,8 +1227,10 @@
     return false;   // sin selección → el caller deja pasar la tecla
   }
   function termPaste(term, pane) {
+    // sin bridge de clipboard → avisar (antes era no-op silencioso = "a veces no pega y no dice nada")
+    if (!api || !api.clipboardRead) { try { notifier('no se pudo acceder al portapapeles'); } catch (e) {} return; }
     try {
-      if (api && api.clipboardRead) api.clipboardRead().then(function (txt) {
+      api.clipboardRead().then(function (txt) {
         if (txt) {
           if (pane && pane.dataset.kind === 'claude') {
             // En claude: sacar el salto FINAL (un paste NUNCA debe auto-enviar) y escribir el bracketed-paste
@@ -1204,8 +1249,8 @@
           }
         }
         try { term.focus(); } catch (e) {}                    // re-focus (la lectura es async)
-      }).catch(function () {});
-    } catch (e) {}
+      }).catch(function () { try { notifier('no se pudo pegar (fallo del portapapeles)'); } catch (e) {} });   // antes se tragaba el error en silencio
+    } catch (e) { try { notifier('no se pudo pegar (fallo del portapapeles)'); } catch (e2) {} }
   }
   function termSelectAll(term) { try { term.selectAll(); } catch (e) {} }
 
@@ -1782,7 +1827,7 @@
       try {
         if (WebglNS && WebglNS.WebglAddon) {
           var wgl = new WebglNS.WebglAddon();
-          try { wgl.onContextLoss(function () { try { wgl.dispose(); } catch (e) {} pane._wgl = null; }); } catch (e) {}   // contexto perdido → DOM
+          try { wgl.onContextLoss(function () { try { wgl.dispose(); } catch (e) {} pane._wgl = null; try { var lt = terms.get(pane.dataset.tid); if (lt && lt.term) lt.term.refresh(0, (lt.term.rows || 1) - 1); } catch (e2) {} }); } catch (e) {}   // contexto perdido → DOM + repaint para no dejar el canvas corrupto
           term.loadAddon(wgl);
           pane._gpu = 1;
           pane._wgl = wgl;   // ref para invalidar el texture atlas (ver clearAtlas) cuando cambia la geometría de celda
@@ -1919,8 +1964,19 @@
           if (kbCut(term, pane)) return false;   // había selección → copió (+borró si fue seguro) → consumir
           return true;                            // sin selección → dejar pasar (comportamiento de siempre)
         }
-        if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') { termCopy(term, pane); return false; }              // copiar siempre
+        if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') { termCopy(term, pane); return false; }              // copiar SIEMPRE (claude + shell)
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.code === 'KeyC') {
+          // claude: Ctrl+C = SIEMPRE interrumpir (\x03 = SIGINT). PREDECIBLE — copiar es Ctrl+Shift+C. Antes
+          // intentaba copiar "si había selección", pero la selección en claude es frágil (su mouse-tracking
+          // come el arrastre normal; los redibujos borran el resaltado) → "a veces copia, a veces intenta
+          // cerrar claude". Ahora nunca copia por Ctrl+C; NO toca la selección, así un Ctrl+Shift+C posterior
+          // igual la copia. Si apretás Ctrl+C TENIENDO selección (probable que querías copiar) → tip 1 vez.
+          if (pane.dataset.kind === 'claude') {
+            var hadSel = false; try { hadSel = !!((term.hasSelection && term.hasSelection()) || pane._lastSel); } catch (e) {}
+            if (hadSel && !copyHintShown) { copyHintShown = true; try { notifier('Ctrl+C interrumpe claude · copiá con Ctrl+Shift+C'); } catch (e) {} }
+            return true;                       // \x03 → SIGINT
+          }
+          // shell: Windows-standard → con selección copia, sin selección interrumpe (no se tocó).
           if (termCopy(term, pane)) { pane._kbSel = null; return false; }   // había selección (o rescate) → copió → no mandar nada
           return true;                        // sin selección → la shell recibe SIGINT (\x03)
         }
@@ -1972,7 +2028,7 @@
     pane._ptySize = '';   // se siembra al crear el PTY; pushPty dedupea por dims para no spamear SIGWINCH
     var ro = null;
     if (g.ResizeObserver) { ro = new g.ResizeObserver(function () { syncTerm(term, fit, pane); }); ro.observe(body); }
-    if (g.document && g.document.fonts && g.document.fonts.ready) g.document.fonts.ready.then(function () { syncTerm(term, fit, pane); });
+    if (g.document && g.document.fonts && g.document.fonts.ready) g.document.fonts.ready.then(function () { pane._atlasGeo = ''; clearAtlas(pane); syncTerm(term, fit, pane); });   // la fuente puede cambiar el pixel de celda sin cambiar cols/rows → forzar purga del atlas una vez
 
     requestAnimationFrame(function () {
       // hidden mount: NO medir (proposeDimensions daría NaN) → el PTY nace en 80x24 y se corrige al mostrarse
@@ -2330,8 +2386,14 @@
     if (!term || !fit || !pane || pane.offsetParent === null) return;
     var wasBottom = nearBottom(term);
     try { fit.fit(); } catch (e) {}
-    pushPty(pane, pane.dataset.tid, term.cols || 0, term.rows || 0);
-    clearAtlas(pane);   // tras cualquier fit/reflow → purgá el atlas WebGL para que no queden glifos desfasados
+    var cols = term.cols || 0, rows = term.rows || 0;
+    pushPty(pane, pane.dataset.tid, cols, rows);
+    // purgá el atlas WebGL SÓLO si cambió la geometría de celda (cols/rows). Antes corría en CADA syncTerm
+    // (RO, foco, drag por frame, snapshot…) aunque nada cambiara → re-rasterizaba TODOS los glifos en GPU sin
+    // necesidad = stutter (causa #5 del lag). El bug de glifos desfasados ("RReadback") SÓLO pasa al cambiar
+    // la geometría → con el guard se sigue limpiando cuando hace falta. (font-load: fonts.ready fuerza el clear.)
+    var geo = cols + 'x' + rows;
+    if (pane._atlasGeo !== geo) { pane._atlasGeo = geo; clearAtlas(pane); }
     if (wasBottom) { try { term.scrollToBottom(); } catch (e) {} }
     if (pane._sgGhostVisible) placeShellGhost(pane, term);   // autosuggest: el cursor se movió con el resize → reubicar el ghost
   }
@@ -2341,6 +2403,20 @@
   // único choke point de refit → todos los paths (RO, ventana, drag, show/restore/maximize, showView,
   // minimize/restore, ask-bar) pasan por el empuje atómico. Los ocultos los saltea syncTerm.
   function refitAll() { terms.forEach(function (t) { try { syncTerm(t.term, t.fit, t.pane); } catch (e) {} }); }
+
+  // REPAINT (anti-corrupción de WebGL): purga el atlas + fuerza un refresh COMPLETO del render. Se usa SÓLO
+  // en transiciones de visibilidad (foco / mostrar vista) — NO por frame (eso era el stutter que la pasada de
+  // perf sacó de syncTerm). Arregla "la sesión activa se ve distorsionada / desaparece el texto" sin volver al
+  // clearAtlas-por-frame. Si el contexto WebGL se perdió, term.refresh repinta vía el fallback DOM.
+  var repaintRaf = null;
+  function repaintPane(pane) {
+    if (!pane || pane.offsetParent === null) return;   // oculta → no se ve (y daría medidas malas)
+    var t = terms.get(pane.dataset.tid); if (!t || !t.term) return;
+    try { clearAtlas(pane); } catch (e) {}
+    try { t.term.refresh(0, (t.term.rows || 1) - 1); } catch (e) {}
+  }
+  function repaintVisible() { terms.forEach(function (t) { repaintPane(t.pane); }); }
+  function scheduleRepaintVisible() { if (repaintRaf) cancelAnimationFrame(repaintRaf); repaintRaf = requestAnimationFrame(function () { repaintRaf = null; repaintVisible(); }); }
 
   /* ── estados: show / minimize / restore / maximize / home / hide ── */
   function show() {

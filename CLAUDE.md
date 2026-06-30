@@ -1815,6 +1815,77 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.17 — Ctrl+C predecible · barra de terminales arrastrable · fix de corrupción WebGL · dedup header/footer · perf
+> Batch de feedback del usuario + una pasada de performance (otra sesión). Bump **1.9.16 → 1.9.17** (`package.json`
+> + fallbacks `brand-ver`/`.ver` en `chrome.js` + entrada en `CHANGELOG` de `app.js`). `tsc` compila limpio,
+> `node --check` OK en los 3 .js del renderer. Aditivo, respeta las 4 Hard Rules. Lo DOM/GPU/timing se confirma en vivo.
+
+### 1) Ctrl+C en claude = SIEMPRE interrumpir (decisión del usuario) — `terminals-ui.js`
+- Antes: Ctrl+C copiaba si "había selección", si no mandaba SIGINT. La selección en claude es FRÁGIL (su
+  mouse-tracking come el arrastre normal; los redibujos borran el resaltado) → "a veces copia, a veces intenta
+  cerrar claude". Ahora **Ctrl+C en un panel claude NUNCA copia: siempre `\x03` (SIGINT)**, predecible. NO toca la
+  selección → un **Ctrl+Shift+C** posterior igual la copia (sigue con el rescate `_lastSel`). **Shell sin cambios**
+  (Windows-standard: con selección copia, sin selección interrumpe).
+- **Tip 1×/sesión** (`copyHintShown`): si apretás Ctrl+C TENIENDO selección en claude (probable que querías copiar)
+  → toast *"Ctrl+C interrumpe claude · copiá con Ctrl+Shift+C"*.
+
+### 2) Paste con feedback de error — `terminals-ui.js`
+- `termPaste` ya no se traga los fallos en silencio (`.catch(()=>{})` = otra fuente de "a veces no pega"). Sin bridge
+  de clipboard → toast *"no se pudo acceder al portapapeles"*; fallo de lectura IPC → *"no se pudo pegar (fallo del
+  portapapeles)"*. El resto intacto (bracketed-paste explícito en claude, saca `\n` final, de-dup guard).
+
+### 3) Barra de terminales (`.dk-sessions`) arrastrable (carrusel) — `terminals-ui.js` + `app.css`
+- Con muchas terminales los chips se DESBORDAN a la derecha y no se llegaba (el scrollbar estaba `height:0` y no
+  había wheel horizontal). Ahora: **drag-to-scroll** (mousedown en la barra + move en `document`, umbral 4px que
+  suprime el click de fin para no enfocar un chip al soltar) + **rueda vertical → scroll horizontal** + **barra fina
+  visible** (4px) + cursor **grab/grabbing**. CSS aditivo con white-alpha (mismo patrón que el override del `.xterm-viewport`).
+
+### 4) Fix corrupción WebGL de la terminal activa ("texto distorsionado/desaparece; click arregla una y rompe la otra") — `terminals-ui.js`
+- **Causa raíz (dos sumadas):** (a) la pasada de perf (abajo) gateó `clearAtlas` a "sólo cambio de geometría" →
+  se perdió el auto-arreglo de v1.9.10 (que purgaba el atlas en cada `syncTerm`/foco). (b) **cada terminal tiene su
+  propio contexto WebGL**; Chromium evicta el menos usado → enfocar una corrompe otra (firma "click arregla una,
+  rompe la otra").
+- **Fix:** `repaintPane`/`repaintVisible`/`scheduleRepaintVisible` (purga atlas + `term.refresh(0,rows-1)` completo)
+  SÓLO en transiciones de VISIBILIDAD — **`setFocus`** (repinta TODO el set visible, incluso re-click de la misma),
+  **`showView`** (paneles que vuelven del pool con canvas corrupto) — NO por frame (eso era el stutter que perf sacó).
+  **`onContextLoss`** ahora además hace `term.refresh` → el fallback a DOM se dibuja limpio (antes quedaba el canvas
+  corrupto pegado).
+- **Límite conocido / follow-up:** con MUCHÍSIMAS terminales (~16+) la eviction de contextos puede seguir haciendo
+  ping-pong; el fix profundo sería **disponer el WebGL en los paneles minimizados/del pool** para liberar contextos
+  GPU (no hecho; más invasivo, perf quería WebGL ON). Anotado.
+
+### 5) Topbar: sin ⌘K ni densidad + dedup header/footer (decisión del usuario) — `chrome.js`
+- **Sacado el botón ⌘K** (`.cmdk`): el atajo ⌘K/Ctrl+K sigue abriendo la palette (keydown global en `app.js`,
+  independiente del botón). **Sacado el segmentado cómodo/compacto** (`.seg`): la densidad queda en el default
+  (`comodo`); las cards se siguen renderizando igual. Los click-handlers de ambos quedan inertes (sin elemento no
+  disparan) → no rompen, revertible re-agregando el markup. (Desvío consciente del design-reference / HR1, pedido del dueño.)
+- **Dedup activas/atención:** "atención" aparecía en header (`N atención`) Y footer (`N esperan atención`). Decisión:
+  la atención vive **sólo en el footer**. Header pierde su span de atención (queda `total · working · idle · cerradas ·
+  Σ tok`; el ojo sigue pulsando ámbar ante atención). Footer: `N esperan atención` ahora **sólo si >0** (su `·` va
+  adentro del condicional para no quedar colgado en 0).
+
+### 6) Performance (pasada de otra sesión) — `sessions.ts`, `index.ts`, `app.js`, `terminals-ui.js`
+> Causa raíz: `buildSnapshot` re-parseaba TODOS los transcripts sync sin cache hasta ~4×/seg, y el renderer
+> reconstruía el board entero con `innerHTML` en cada push. **`tsc` compila limpio** (verificado en este build).
+- **Cache de `scan()` por mtime+size** (`sessions.ts`): reusa el `Session` parseado si el `.jsonl` no cambió ni cambió
+  su estado local; devuelve shallow-clone para no contaminar el cache con la mutación de `mergeOverlay`. Con 100+
+  sesiones re-parsea 1-2 archivos en vez de todos.
+- **`buildSnapshot()` fuera de los handlers IPC** (`sessions.ts` + `index.ts`): `readFile` (poll 1s) y `listFiles`
+  (picker `@`) usaban un scan completo sólo para la allowlist de cwds → ahora un `knownCwds()` cacheado del último snapshot.
+- **El timer de 4s ya no fuerza push** (`sessions.ts`): sólo recalcula git diff; pushea únicamente si algún valor cambió.
+  Idle real = renderer quieto. **Tradeoff intencional:** los timestamps "hace Xs" de las cards no tickean en idle (el de
+  la statusbar sí).
+- **Renderer** (`app.js` + `terminals-ui.js`): gate por **firma de snapshot** en `setSnapshot` (no reconstruye el DOM si
+  nada visible cambió); **`clearAtlas` del WebGL sólo en cambio de geometría** de celda (no en cada sync — ver punto 4,
+  que reintrodujo el repaint en foco/show para compensar); `bindSnap` re-renderiza un panel de sesión sólo si su
+  `lastActivity` cambió.
+
+### Pendiente de proceso
+- **Publish:** el `npm run release` (build + `electron-builder --publish always`) necesita `GH_TOKEN` local del
+  mantenedor (write al repo) — no se commitea jamás. El commit/tag/push los hace el asistente con OK explícito.
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

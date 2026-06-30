@@ -315,16 +315,40 @@ function listSessionFiles(): string[] {
   return files;
 }
 
+/* ════════ cache de scan (evita re-parsear transcripts sin cambios) ════════
+   buildSnapshot se dispara hasta ~4×/seg (chokidar + hooks + diffTimer); sin cache, cada disparo
+   re-leía + JSON.parse de los 100+ .jsonl ENTEROS en el event loop del main = causa #1 del lag.
+   Reusamos el Session parseado si el archivo no cambió (mtime+size) NI cambió su estado local
+   (pin/fav/archivar). Devolvemos SIEMPRE un shallow-clone porque mergeOverlay muta los campos
+   top-level (state/statusText/…) in place → el original cacheado tiene que quedar prístino. */
+interface ScanCacheEntry { mtimeMs: number; size: number; localSig: string; session: Session; }
+const scanCache = new Map<string, ScanCacheEntry>();
+
 export function scan(): Session[] {
   const local = loadLocalState();
   const sessions: Session[] = [];
+  const seen = new Set<string>();
   for (const f of listSessionFiles()) {
+    seen.add(f);
     const id = path.basename(f).replace(/\.jsonl$/i, '');
+    let st: fs.Stats;
+    try { st = fs.statSync(f); } catch { continue; }  // archivo desaparecido entre listar y statear
+    const localSig = JSON.stringify(local[id] ?? null);
+    const cached = scanCache.get(f);
+    if (cached && cached.mtimeMs === st.mtimeMs && cached.size === st.size && cached.localSig === localSig) {
+      sessions.push({ ...cached.session });  // clone: protege el cacheado de la mutación de mergeOverlay
+      continue;
+    }
     try {
       const s = parseSessionFile(f, local[id]);
-      if (s) sessions.push(s);
+      if (s) {
+        scanCache.set(f, { mtimeMs: st.mtimeMs, size: st.size, localSig, session: s });
+        sessions.push({ ...s });
+      }
     } catch { /* archivo en escritura / corrupto: saltar este ciclo */ }
   }
+  // GC: soltar entradas de transcripts borrados (no dejar crecer el cache sin límite)
+  if (scanCache.size > seen.size) { for (const k of scanCache.keys()) if (!seen.has(k)) scanCache.delete(k); }
   return sessions;
 }
 
@@ -334,8 +358,17 @@ function isToday(ms: number): boolean {
   return d.getFullYear() === n.getFullYear() && d.getMonth() === n.getMonth() && d.getDate() === n.getDate();
 }
 
+/** cwds del último snapshot construido — para que los handlers IPC (readFile/listFiles) NO tengan
+    que re-escanear TODO sólo para sacar la allowlist de cwds (causa #2 del lag: el visor pollea
+    readFile cada 1s, el picker @ dispara listFiles mientras tipeás → cada uno era un scan completo). */
+let lastCwds: string[] = [];
+let lastSessions: Session[] = [];
+export function knownCwds(): string[] { return lastCwds; }
+
 export function buildSnapshot(): Snapshot {
   const sessions = mergeOverlay(scan());
+  lastCwds = sessions.map((s) => s.cwd).filter(Boolean);
+  lastSessions = sessions;
   let tokensToday = 0;
   for (const s of sessions) if (isToday(s.lastActivity)) tokensToday += s.tokensTotal;
   const cfg = loadConfig();
@@ -385,9 +418,13 @@ export function start(onUpdate: (s: Snapshot) => void): void {
   onUpdateCb = onUpdate;
   pushUpdate();   // snapshot inicial inmediato
   startWatcher();
-  // refresh periódico del diff (las ediciones de git NO tocan los .jsonl → el watcher solo no alcanza)
+  // refresh periódico del diff (las ediciones de git NO tocan los .jsonl → el watcher solo no alcanza).
+  // ANTES: setInterval(scheduleUpdate, 4000) → forzaba un buildSnapshot + push COMPLETO cada 4s aunque
+  // todo estuviera idle (causa #3 del lag: el renderer reconstruía el board entero sin que nada cambiara).
+  // AHORA: sólo recalcula git diff de los cwds activos; computeDiffStat ya hace scheduleUpdate() SÓLO si
+  // un valor cambió → cero push cuando no hay cambios reales (git ni jsonl).
   if (diffTimer) clearInterval(diffTimer);
-  diffTimer = setInterval(() => scheduleUpdate(), 4000);
+  diffTimer = setInterval(() => refreshDiffStats(lastSessions), 4000);
 }
 
 /** Reinicia el watcher (p.ej. tras cambiar watchedDirs en settings). */

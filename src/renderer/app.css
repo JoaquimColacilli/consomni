@@ -267,8 +267,13 @@ body.view-archived .board{ flex-wrap: wrap; align-content: flex-start; overflow-
 #terminals.dock.minimized .dk-resize{display:none;}
 
 /* ── F6 · barra de sesiones: chips de todas las terminales vivas de la vista (cambiar / minimizar sin matar) ── */
-.dk-sessions{flex:none;display:flex;align-items:center;gap:6px;height:34px;padding:0 9px;background:var(--bg-chrome);border-bottom:1px solid var(--border);overflow-x:auto;overflow-y:hidden;}
-.dk-sessions::-webkit-scrollbar{height:0;}
+.dk-sessions{flex:none;display:flex;align-items:center;gap:6px;height:34px;padding:0 9px;background:var(--bg-chrome);border-bottom:1px solid var(--border);overflow-x:auto;overflow-y:hidden;cursor:grab;}
+.dk-sessions.dragging,.dk-sessions.dragging .dk-sess-chip{cursor:grabbing;}
+.dk-sessions.dragging{user-select:none;}
+.dk-sessions::-webkit-scrollbar{height:4px;}
+.dk-sessions::-webkit-scrollbar-track{background:transparent;}
+.dk-sessions::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:4px;}
+.dk-sessions::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.28);}
 .dk-sess-chip{display:inline-flex;align-items:center;gap:6px;flex:none;max-width:200px;height:24px;padding:0 9px;border-radius:7px;border:1px solid var(--border-soft);background:var(--surface-input);color:var(--text-3);font-family:'Geist Mono',monospace;font-size:11px;cursor:pointer;}
 .dk-sess-chip svg{color:var(--text-4);flex:none;}
 .dk-sess-nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}

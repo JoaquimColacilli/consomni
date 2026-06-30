@@ -7,7 +7,7 @@ import { app, BrowserWindow, ipcMain, session, Notification, dialog, clipboard }
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { start as startSessions, stop as stopSessions, buildSnapshot, rescanNow, setHooksConnected, applyHookEvent, getDetail, findSessionFile, findPlanDocs, setAttnCallback, restartWatcher, type AttnInfo } from './sessions';
+import { start as startSessions, stop as stopSessions, buildSnapshot, knownCwds, rescanNow, setHooksConnected, applyHookEvent, getDetail, findSessionFile, findPlanDocs, setAttnCallback, restartWatcher, type AttnInfo } from './sessions';
 import { runAction, type ActionPayload } from './actions';
 import { startHooksServer, stopHooksServer, isServerListening } from './hooks-server';
 import { install as installHooks, uninstall as uninstallHooks, getStatus as getHooksStatus, isInstalled } from './hooks-install';
@@ -272,7 +272,7 @@ if (!gotLock) {
         const roots = [
           claudeProjectsPath(cfg),
           ...(Array.isArray(cfg.watchedDirs) ? cfg.watchedDirs : []),
-          ...buildSnapshot().sessions.map((s) => s.cwd).filter(Boolean),
+          ...knownCwds(),   // cwds del último snapshot (NO re-escanea todos los transcripts por cada poll)
           // cwd del panel que abrió el archivo: una terminal embebida cuyo cwd NO es una sesión JSONL
           // trackeada hacía que un .md clickeado ahí se rechazara ("fuera del alcance" → "no se pudo leer").
           ...(cwd ? [String(cwd)] : []),
@@ -308,7 +308,7 @@ if (!gotLock) {
         const roots = [
           claudeProjectsPath(cfg),
           ...(Array.isArray(cfg.watchedDirs) ? cfg.watchedDirs : []),
-          ...buildSnapshot().sessions.map((s) => s.cwd).filter(Boolean),
+          ...knownCwds(),   // idem readFile: el picker @ dispara esto mientras tipeás → no re-escanear todo
         ].map((r) => path.resolve(String(r))).filter(Boolean);
         const allowed = roots.some((root) => base === root || base.startsWith(root + path.sep));
         if (!allowed) return { ok: false, error: 'fuera del alcance permitido' };

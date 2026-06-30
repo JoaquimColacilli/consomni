@@ -299,7 +299,33 @@
     if (libQ) { var ls = document.querySelector('.lib-search'); if (ls) { try { ls.focus(); ls.setSelectionRange(libPos, libPos); } catch (e2) {} } }
   }
   function scheduleRender() { if (rafPending) return; rafPending = true; requestAnimationFrame(function () { rafPending = false; render(); }); }
-  function setSnapshot(snap) { state.snapshot = snap; scheduleRender(); if (state.detailId) refreshDetail(); }
+  // firma barata del snapshot: SÓLO los campos que afectan el board. Si no cambian, no reconstruimos el
+  // DOM (causa #3 del lag en el renderer: cada push hacía root.innerHTML = buildShell() entero, lo que
+  // además dispara los ResizeObserver de las terminales → refit + clear de atlas GPU de TODOS los paneles).
+  // Las interacciones (filtros, modo, densidad, overlays) llaman render() DIRECTO → no pasan por este gate.
+  function snapSig(snap) {
+    if (!snap) return '';
+    var parts = [];
+    var ss = snap.sessions || [];
+    for (var i = 0; i < ss.length; i++) {
+      var s = ss[i];
+      parts.push(s.id + '|' + s.state + '|' + (s.ctxPct | 0) + '|' + s.tokensTotal + '|' + s.mode + '|' + s.model +
+        '|' + (s.statusText || '') + '|' + (s.statusEm || '') + '|' + (s.attnReason || '') + '|' + (s.lastActivity || 0) +
+        '|' + (s.pinned ? 1 : 0) + '|' + (s.fav ? 1 : 0) + '|' + (s.branch || '') + '|' + (s.name || '') +
+        '|' + (s.subagents ? s.subagents.length : 0) + '|' + (s.plan ? ((s.plan.updatedAt || 0) + '.' + (s.plan.todos ? s.plan.todos.length : 0)) : 0));
+    }
+    parts.push('H' + (snap.hooksConnected ? 1 : 0) + 'T' + (snap.tokensToday || 0) + 'V' + (snap.appVersion || ''));
+    var d = snap.diffStats || {}, dk = Object.keys(d).sort();
+    for (var j = 0; j < dk.length; j++) { var dv = d[dk[j]]; parts.push(dk[j] + ':' + dv.added + '/' + dv.removed + '/' + dv.files); }
+    return parts.join(';');
+  }
+  var lastSnapSig = null;
+  function setSnapshot(snap) {
+    state.snapshot = snap;
+    var sig = snapSig(snap);
+    if (sig !== lastSnapSig) { lastSnapSig = sig; scheduleRender(); }
+    if (state.detailId) refreshDetail();
+  }
 
   function applyFocusRing() {
     if (!state.focusSid) return;
@@ -556,6 +582,14 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.17', date: '29 jun 2026', title: 'Ctrl+C que no se traba + barra de terminales arrastrable + arreglo del texto distorsionado', items: [
+      'En la terminal de claude, Ctrl+C ahora SIEMPRE interrumpe (como en cualquier consola) — antes a veces copiaba y a veces intentaba cerrar claude. Para copiar usá Ctrl+Shift+C (y si apretás Ctrl+C con texto seleccionado, te lo recuerda).',
+      'Arreglado: la terminal activa a veces se veía con el texto distorsionado o desaparecía, y había que clickear para arreglarla (rompiendo la otra). Ahora se repinta sola al enfocar o cambiar de vista.',
+      'La barra de terminales de arriba ahora se arrastra (o girás la rueda) para llegar a todas cuando tenés muchas abiertas.',
+      'Pegar ahora avisa si el portapapeles falla (antes no pegaba nada y no decía por qué).',
+      'Topbar más limpio: se sacó el botón ⌘K (el atajo sigue funcionando) y el selector cómodo/compacto; la info de sesiones activas / atención ya no se duplica entre la barra de arriba y la de abajo.',
+      'La app va más fluida: menos tirones al refrescar con muchas sesiones abiertas.',
+    ] },
     { v: '1.9.16', date: '26 jun 2026', title: 'Copiar (Ctrl+C) más confiable en la terminal de claude', items: [
       'Si seleccionabas texto en la terminal de claude y al copiar con Ctrl+C "a veces copiaba y a veces no" (y encima te saltaba el aviso de cerrar claude): ahora, si claude redibujó y se borró el resaltado, Ctrl+C igual copia lo último que habías seleccionado. Ctrl+C sin nada seleccionado sigue interrumpiendo claude como siempre.',
       'Tip: para seleccionar en la terminal de claude, arrastrá con Shift apretado, o usá el botón de "modo selección" (el del cursor de texto) en la barra del panel. Ctrl+Shift+C copia siempre.',
