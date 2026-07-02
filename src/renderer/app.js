@@ -582,6 +582,9 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.18', date: '01 jul 2026', title: 'El selector de "/" ya no se queda tildado al volver a la app', items: [
+      'Si volvías a Consomni después de tenerla de fondo un rato, a veces el "/" no abría el selector de comandos en la terminal de claude hasta escribir y borrar una letra a mano. Ahora se destraba solo apenas la ventana vuelve a tener foco.',
+    ] },
     { v: '1.9.17', date: '29 jun 2026', title: 'Ctrl+C que no se traba + barra de terminales arrastrable + arreglo del texto distorsionado', items: [
       'En la terminal de claude, Ctrl+C ahora SIEMPRE interrumpe (como en cualquier consola) — antes a veces copiaba y a veces intentaba cerrar claude. Para copiar usá Ctrl+Shift+C (y si apretás Ctrl+C con texto seleccionado, te lo recuerda).',
       'Arreglado: la terminal activa a veces se veía con el texto distorsionado o desaparecía, y había que clickear para arreglarla (rompiendo la otra). Ahora se repinta sola al enfocar o cambiar de vista.',
@@ -2596,7 +2599,10 @@
 
   // cerrar sort menu al click afuera ya se maneja en el delegate (closeSortMenu al inicio)
   window.addEventListener('blur', function () { logoBlink.focused = false; });
-  window.addEventListener('focus', function () { logoBlink.focused = true; });
+  window.addEventListener('focus', function () {
+    logoBlink.focused = true;
+    if (window.ConsomniTerms && window.ConsomniTerms.resetInputTrackingOnFocus) window.ConsomniTerms.resetInputTrackingOnFocus();
+  });
 
   /* ════════ ONBOARDING + LOGO PARPADEANTE ════════ */
   var logoBlink = { timer: null, on: true, focused: true };

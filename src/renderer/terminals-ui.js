@@ -149,6 +149,21 @@
   function panesOf() { return rootEl ? Array.prototype.slice.call(rootEl.querySelectorAll('.dk-pane')) : []; }
   function allPanes() { return host ? Array.prototype.slice.call(host.querySelectorAll('.dk-pane')) : []; }
 
+  // Al volver a la app tras estar afuera (window blur→focus), la heurística _inputDirty del picker de '/'
+  // (y '@') puede quedar "tildada": si había texto tipeado sin Enter, o un picker que no llegó a cerrarse
+  // bien (outside-click no disparó porque la ventana no tenía foco), la 1ª tecla '/' no abre nada hasta
+  // limpiar el estado a mano (escribir+borrar = Backspace, que tampoco resetea _inputDirty por diseño).
+  // Fix: al recuperar el foco de la VENTANA, cerrar pickers colgados y resetear _inputDirty por panel claude.
+  function resetInputTrackingOnFocus() {
+    allPanes().forEach(function (pane) {
+      if (pane.dataset.kind !== 'claude') return;
+      if (pane._atp) closeAtPicker(pane);
+      if (pane._slp) closeSlashPicker(pane);
+      pane._inputDirty = false;
+      pane._lastWasSpace = false;
+    });
+  }
+
   /* ════════ rutas de archivo clickeables (terminal + conversación) ════════
      Detecta rutas, las resuelve contra el cwd del panel y las abre (panel / editor / revelar).
      Sólo Windows-paths absolutos y rutas (rel/bare) que TERMINAN en una extensión conocida → bajo ruido,
@@ -2491,7 +2506,8 @@
     setGpuRender: setGpuRender, setFloatingPickers: setFloatingPickers, hasActiveClaudeSessions: hasActiveClaudeSessions,
     setAutosuggest: setAutosuggest, setAutosuggestRebinder: setAutosuggestRebinder,
     openTourDemo: openTourDemo, closeTourDemo: closeTourDemo,
-    openFilePanel: openFilePanel, activeTermCwd: activeTermCwd
+    openFilePanel: openFilePanel, activeTermCwd: activeTermCwd,
+    resetInputTrackingOnFocus: resetInputTrackingOnFocus
   };
   loadTermHistoryStore();   // cargar el historial de comandos para el autosuggest (una vez, al iniciar)
 })(window);
