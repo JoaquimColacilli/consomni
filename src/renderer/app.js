@@ -582,6 +582,11 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.19', date: '03 jul 2026', title: 'Ctrl+C copia en la terminal de claude (con texto seleccionado)', items: [
+      'En la terminal de claude, Ctrl+C con texto seleccionado ahora COPIA (como en cualquier consola de Windows); sin selección sigue interrumpiendo a claude, como siempre.',
+      'Sin conflictos: copiar consume la selección, así que un segundo Ctrl+C siempre interrumpe. Y si un redibujo de claude te borra el resaltado justo antes de copiar, Consomni igual copia lo que habías seleccionado (solo por unos segundos — un Ctrl+C tardío para interrumpir nunca copia algo viejo).',
+      'Ctrl+Shift+C sigue copiando siempre, por si preferís el gesto explícito.',
+    ] },
     { v: '1.9.18', date: '01 jul 2026', title: 'El selector de "/" ya no se queda tildado al volver a la app', items: [
       'Si volvías a Consomni después de tenerla de fondo un rato, a veces el "/" no abría el selector de comandos en la terminal de claude hasta escribir y borrar una letra a mano. Ahora se destraba solo apenas la ventana vuelve a tener foco.',
     ] },

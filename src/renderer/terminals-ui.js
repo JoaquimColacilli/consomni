@@ -49,7 +49,7 @@
   var homeProjects = null;     // provider de proyectos para el inicio (lo inyecta app.js) → [{id,name,cwd,fav}]
   var claudeFsDefault = true;  // default global config.claudeFullscreen (lo empuja app.js); fullscreen=input anclado abajo
   var claudeHistHintShown = false;  // tip "Ctrl+O = historial completo" una sola vez por sesión (al retomar un claude en fullscreen)
-  var copyHintShown = false;  // tip "Ctrl+C interrumpe · copiá con Ctrl+Shift+C" una sola vez por sesión (al apretar Ctrl+C con selección en claude)
+  var copyHintShown = false;  // tip "copiado · Ctrl+C sin selección interrumpe claude" una sola vez por sesión (la 1ª vez que Ctrl+C copia en claude)
   function isMaximized() { return !!host && host.classList.contains('maximized'); }
   function notifyMax() { try { maxObserver(isMaximized()); } catch (e) {} }
 
@@ -1221,7 +1221,7 @@
   }
 
   /* ── copiar / pegar / seleccionar (clipboard vía IPC; navigator.clipboard está bloqueado por la CSP) ── */
-  function termCopy(term, pane) {
+  function termCopy(term, pane, rescueMaxMs) {
     try {
       if (term.hasSelection && term.hasSelection()) {
         var sel = term.getSelection();
@@ -1233,7 +1233,11 @@
       // RESCATE (sólo claude): si un redibujo de claude borró el resaltado entre seleccionar y copiar,
       // copiá la ÚLTIMA selección que vimos (onSelectionChange la guarda). Se consume → un 2º Ctrl+C cae a
       // SIGINT igual (no rompe el "interrumpir claude"). Esto arregla "a veces copia y a veces no".
-      if (pane && pane.dataset.kind === 'claude' && pane._lastSel) {
+      // rescueMaxMs (opcional, lo pasa Ctrl+C): el rescate sólo vale si la selección se vio hace <N ms —
+      // un Ctrl+C tardío queriendo INTERRUMPIR nunca copia una selección vieja. Los gestos inequívocos de
+      // copiar (Ctrl+Shift+C, menú contextual) no lo pasan → rescate sin ventana.
+      if (pane && pane.dataset.kind === 'claude' && pane._lastSel &&
+          (!rescueMaxMs || (Date.now() - (pane._lastSelTs || 0)) < rescueMaxMs)) {
         var last = pane._lastSel; pane._lastSel = null;
         if (api && api.action) api.action('copyText', { text: last }).catch(function () {});
         return true;
@@ -1981,18 +1985,22 @@
         }
         if (ev.ctrlKey && ev.shiftKey && ev.code === 'KeyC') { termCopy(term, pane); return false; }              // copiar SIEMPRE (claude + shell)
         if (ev.ctrlKey && !ev.shiftKey && !ev.altKey && ev.code === 'KeyC') {
-          // claude: Ctrl+C = SIEMPRE interrumpir (\x03 = SIGINT). PREDECIBLE — copiar es Ctrl+Shift+C. Antes
-          // intentaba copiar "si había selección", pero la selección en claude es frágil (su mouse-tracking
-          // come el arrastre normal; los redibujos borran el resaltado) → "a veces copia, a veces intenta
-          // cerrar claude". Ahora nunca copia por Ctrl+C; NO toca la selección, así un Ctrl+Shift+C posterior
-          // igual la copia. Si apretás Ctrl+C TENIENDO selección (probable que querías copiar) → tip 1 vez.
+          // claude: Ctrl+C con SELECCIÓN = copiar; sin selección = interrumpir (\x03 = SIGINT). Windows-standard,
+          // como el shell. La fragilidad histórica ("a veces copia, a veces intenta cerrar claude", ver v1.9.16/17)
+          // se resuelve con DOS guardas: (1) el rescate de una selección que un redibujo de claude borró sólo vale
+          // por una ventana CORTA (5s desde que se vio) → un Ctrl+C tardío queriendo interrumpir jamás copia una
+          // selección vieja; (2) copiar CONSUME la selección (viva o rescatada) → el 2º Ctrl+C SIEMPRE interrumpe.
+          // Tipear/Enter también invalida _lastSel (arriba) → tras escribir, Ctrl+C es SIGINT limpio.
           if (pane.dataset.kind === 'claude') {
-            var hadSel = false; try { hadSel = !!((term.hasSelection && term.hasSelection()) || pane._lastSel); } catch (e) {}
-            if (hadSel && !copyHintShown) { copyHintShown = true; try { notifier('Ctrl+C interrumpe claude · copiá con Ctrl+Shift+C'); } catch (e) {} }
-            return true;                       // \x03 → SIGINT
+            if (termCopy(term, pane, 5000)) {
+              pane._kbSel = null;
+              if (!copyHintShown) { copyHintShown = true; try { notifier('copiado · Ctrl+C sin selección interrumpe claude'); } catch (e) {} }
+              return false;                    // copió → no mandar \x03
+            }
+            return true;                       // sin selección → \x03 → SIGINT (interrumpir claude, como siempre)
           }
           // shell: Windows-standard → con selección copia, sin selección interrumpe (no se tocó).
-          if (termCopy(term, pane)) { pane._kbSel = null; return false; }   // había selección (o rescate) → copió → no mandar nada
+          if (termCopy(term, pane)) { pane._kbSel = null; return false; }   // había selección → copió → no mandar nada
           return true;                        // sin selección → la shell recibe SIGINT (\x03)
         }
         if (ev.ctrlKey && ev.code === 'KeyV') {                                  // pegar (Ctrl+V/Ctrl+Shift+V); guard + listener de captura matan el paste NATIVO de xterm → NUNCA se duplica (ver de-dup abajo)
@@ -2061,7 +2069,7 @@
         term.onResize(function (sz) { pushPty(pane, res.id, sz.cols, sz.rows); });   // resize genuino (drag/ventana) → al PTY
         // RESCATE de copia (sólo claude): recordá la última selección no vacía. Si un redibujo de claude borra
         // el resaltado, termCopy igual puede copiarla (Ctrl+C deja de "fallar y mandar SIGINT"). Ver termCopy.
-        if (kind === 'claude') { try { term.onSelectionChange(function () { try { var s = term.getSelection(); if (s) pane._lastSel = s; } catch (e) {} }); } catch (e) {} }
+        if (kind === 'claude') { try { term.onSelectionChange(function () { try { var s = term.getSelection(); if (s) { pane._lastSel = s; pane._lastSelTs = Date.now(); } } catch (e) {} }); } catch (e) {} }
         // AUTOSUGGEST (shell): reposicionar el ghost al cursor real tras cada render (el echo del shell llega
         // async). Si la fila del cursor SALTÓ (output) → ocultar (la línea se movió; el próximo keystroke recomputa).
         if (kind === 'shell') {

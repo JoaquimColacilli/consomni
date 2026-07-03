@@ -1886,6 +1886,32 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.19 — Ctrl+C COPIA con selección en la terminal de claude (sin romper el interrumpir)
+> Pedido de Facundo: copiar con Ctrl+C en la terminal de claude (Ctrl+Shift+C andaba pero es incómodo), sin
+> conflicto con "cerrar claude". Bump **1.9.18 → 1.9.19**. Revierte la decisión de v1.9.17 (siempre-SIGINT)
+> con las guardas que a v1.9.16 le faltaban. Cambios sólo en `terminals-ui.js` (+ bumps). Aditivo, 4 Hard Rules OK.
+
+- **Semántica nueva (claude = Windows-standard, igual que el shell):** Ctrl+C **con selección → copia**; sin
+  selección → `\x03` (SIGINT, interrumpir claude, como siempre).
+- **Las DOS guardas que evitan el conflicto histórico** ("a veces copia, a veces intenta cerrar claude"):
+  1. **Rescate con ventana de 5s:** si un redibujo de claude borró el resaltado entre seleccionar y copiar,
+     `termCopy` igual copia la última selección vista (`pane._lastSel`, guardada por `onSelectionChange`) —
+     pero SÓLO si se vio hace **<5s** (`pane._lastSelTs` nuevo; `termCopy(term, pane, rescueMaxMs)` 3er arg
+     opcional que pasa únicamente el branch de Ctrl+C). Un Ctrl+C tardío queriendo INTERRUMPIR jamás copia
+     una selección vieja. Los gestos inequívocos (Ctrl+Shift+C, menú contextual "Copiar") no pasan el TTL →
+     rescate sin ventana, como antes.
+  2. **Copiar CONSUME la selección** (viva → `clearSelection()`; rescatada → `_lastSel=null`) → el **2º Ctrl+C
+     SIEMPRE interrumpe**. Además tipear/Enter ya invalidaba `_lastSel` (v1.9.16) → tras escribir, Ctrl+C es
+     SIGINT limpio.
+- **Tip 1×/sesión** (`copyHintShown`, resignificado): la 1ª vez que Ctrl+C copia en claude → toast
+  *"copiado · Ctrl+C sin selección interrumpe claude"*. Ctrl+Shift+C sigue copiando SIEMPRE (sin cambios).
+- **Shell intacto** (ya era con-selección-copia / sin-selección-SIGINT, sin TTL porque su selección no es frágil).
+- **Verificación:** `node --check` OK en los 3 .js del renderer. El flujo de teclas + arrastre EN VIVO es
+  DOM/timing → lo confirma el usuario (límite conocido del medio). Recordatorio: para SELECCIONAR con el mouse
+  en claude sigue haciendo falta Shift+arrastre o el botón "modo selección" (mouse-tracking de claude, v1.9.4).
+
+---
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).
