@@ -77,6 +77,7 @@
     if (d.projname) o.projname = d.projname;
     if (d.pinned === '1') o.pinned = 1;
     if (d.min === '1') o.min = 1;   // F6: minimizada (sigue viva en la barra de sesiones)
+    if (d.cname) o.cname = d.cname;   // nombre puesto por el usuario (renombrar panel)
     return o;
   }
   function buildPane(o) {
@@ -87,6 +88,7 @@
     if (o.projname) pane.dataset.projname = o.projname;
     if (o.pinned) pane.dataset.pinned = '1';
     if (o.min) pane.dataset.min = '1';   // F6: restaura minimizada (queda en el pool, viva)
+    if (o.cname) pane.dataset.cname = o.cname;   // nombre puesto por el usuario (gana en setPaneMeta)
     if (kind === 'session') { pane.dataset.sid = o.sid || ''; pane.dataset.sname = o.name || ''; }
     else { if (o.cwd) pane.dataset.cwd = o.cwd; if (o.resume) pane.dataset.resume = o.resume; if (o.skip) pane.dataset.skip = '1'; }
     if (kind === 'claude' && (o.fullscreen === 0 || o.fullscreen === 1)) pane.dataset.fullscreen = o.fullscreen ? '1' : '0';
@@ -436,6 +438,14 @@
       if (pane.dataset.min === '1') restorePane(pane);
       else { setFocus(pane); try { var pt = paneTerm(pane); if (pt) pt.focus(); } catch (e2) {} renderSessionBar(); }
     });
+    // click derecho en un chip → renombrar esa terminal/sesión (las shells abiertas a mano quedan "sin nombre")
+    sessBarEl.addEventListener('contextmenu', function (e) {
+      var c = e.target.closest && e.target.closest('[data-sess-pane]'); if (!c) return;
+      e.preventDefault(); e.stopPropagation();
+      var pane = paneByKey(c.getAttribute('data-sess-pane')); if (!pane) return;
+      var r = c.getBoundingClientRect();
+      openRename(pane, Math.round(r.left), Math.round(r.bottom + 6));
+    });
     // F6 carrusel: la barra de sesiones se DESBORDA a la derecha con muchas terminales. Drag-to-scroll
     // (arrastrar la barra) + rueda vertical → scroll horizontal para llegar a todas. El drag suprime el
     // click de fin (umbral 4px) para no enfocar un chip al soltar. Listeners de move/up en document para
@@ -750,6 +760,12 @@
       '</div>' +
       '<div class="dk-pane-body"></div>';
     pane.addEventListener('mousedown', function () { setFocus(pane); });
+    // click derecho en la cabecera → renombrar el panel (los botones quedan afuera: tienen sus acciones)
+    pane.querySelector('.dk-pane-head').addEventListener('contextmenu', function (e) {
+      if (e.target.closest && e.target.closest('.dk-pbtn')) return;
+      e.preventDefault(); e.stopPropagation();
+      openRename(pane, e.clientX, e.clientY);
+    });
     pane.querySelector('.dk-ask-btn').addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); toggleAsk(pane); });
     pane.querySelector('.dk-pin').addEventListener('click', function (e) { e.stopPropagation(); pinToggle(pane); });
     pane.querySelector('.dk-split-r').addEventListener('click', function (e) { e.stopPropagation(); setFocus(pane); spawn('shell', null, 'right'); });
@@ -786,8 +802,10 @@
     if (vb) btns.insertBefore(cb, vb); else if (x) btns.insertBefore(cb, x); else btns.appendChild(cb);
   }
   function setPaneMeta(pane, icon, title, proj) {
+    pane._autoTitle = title;   // guardado para volver al nombre automático al des-renombrar (rename vacío)
     pane.querySelector('.dk-pane-ic').innerHTML = icon;
-    pane.querySelector('.dk-pane-title').innerHTML = esc(title) + (proj ? ' <span class="dk-pt-proj">· ' + esc(proj) + '</span>' : '');
+    // si el usuario renombró el panel (dataset.cname), su nombre GANA sobre el título automático
+    pane.querySelector('.dk-pane-title').innerHTML = esc(pane.dataset.cname || title) + (proj ? ' <span class="dk-pt-proj">· ' + esc(proj) + '</span>' : '');
     // NO seteamos pane.title: el head del panel YA muestra el título visible, y un title nativo sobre el panel
     // entero flotaba en el medio de la terminal al hacer hover ("claude ⚡ X · X"). Sin tooltip redundante.
     renderSessionBar();   // F6: el chip de la barra usa este título
@@ -1583,6 +1601,52 @@
     setTimeout(function () {
       g.document.addEventListener('mousedown', onCtxOutside, true);
       g.document.addEventListener('keydown', onCtxKey, true);
+    }, 0);
+  }
+
+  /* ── renombrar panel (pedido de usuarios: una shell abierta a mano queda "sin nombre") ──
+     Popover con input, reusa el lenguaje de .dk-ctx (tokens → flipea con el tema, como el menú contextual).
+     Se abre con click derecho en un chip de la barra de sesiones o en la cabecera del panel.
+     Enter guarda · Esc cancela · vacío = volver al nombre automático. El nombre vive en
+     pane.dataset.cname (gana en setPaneMeta sobre el título automático) y se persiste en dock.json. */
+  function closeRename() {
+    var m = g.document.getElementById('dkRen'); if (m) m.remove();
+    g.document.removeEventListener('mousedown', onRenOutside, true);
+  }
+  function onRenOutside(e) { if (!e.target.closest || !e.target.closest('#dkRen')) closeRename(); }
+  function applyRename(pane, name) {
+    name = String(name || '').replace(/\s+/g, ' ').trim().slice(0, 60);
+    if (name) pane.dataset.cname = name; else pane.removeAttribute('data-cname');
+    var t = pane.querySelector('.dk-pane-title');
+    if (t) {
+      var proj = projLabel(pane);
+      t.innerHTML = esc(pane.dataset.cname || pane._autoTitle || '…') + (proj ? ' <span class="dk-pt-proj">· ' + esc(proj) + '</span>' : '');
+    }
+    renderSessionBar(); persist();
+  }
+  function openRename(pane, x, y) {
+    if (!pane) return;
+    closeRename(); closeTermCtx();
+    var m = g.document.createElement('div');
+    m.id = 'dkRen'; m.className = 'dk-ctx dk-ren';
+    m.innerHTML =
+      '<div class="dk-ren-lbl">renombrar panel</div>' +
+      '<input class="dk-ren-inp" type="text" maxlength="60" spellcheck="false" placeholder="vacío = nombre automático">' +
+      '<div class="dk-ren-hint">Enter guarda · Esc cancela</div>';
+    g.document.body.appendChild(m);
+    var inp = m.querySelector('.dk-ren-inp');
+    inp.value = pane.dataset.cname || '';
+    var mw = m.offsetWidth || 238, mh = m.offsetHeight || 92;
+    m.style.left = Math.max(4, Math.min(x, g.innerWidth - mw - 4)) + 'px';
+    m.style.top = Math.max(4, Math.min(y, g.innerHeight - mh - 4)) + 'px';
+    inp.addEventListener('keydown', function (e) {
+      e.stopPropagation();   // que Enter/Esc no lleguen a los atajos globales ni al dock
+      if (e.key === 'Enter') { e.preventDefault(); applyRename(pane, inp.value); closeRename(); }
+      else if (e.key === 'Escape') { e.preventDefault(); closeRename(); }
+    });
+    setTimeout(function () {
+      try { inp.focus(); inp.select(); } catch (e) {}
+      g.document.addEventListener('mousedown', onRenOutside, true);
     }, 0);
   }
 

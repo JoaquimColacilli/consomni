@@ -238,6 +238,34 @@ function deriveState(lastAssistant: Rec | undefined, lastRec: Rec | undefined, a
   return 'idle';
 }
 
+/* ── worktrees git → repo padre ──
+   Un worktree NO es otro proyecto: <cwd>/.git es un ARCHIVO "gitdir: <repo>/.git/worktrees/<x>"
+   → el proyecto real es <repo>. Cubre los worktrees de claude (.claude/worktrees/agent-*) y los
+   manuales (<repo>/worktrees/<branch>). Si el worktree ya fue borrado (no hay .git que leer),
+   cae a un recorte por patrón en el segmento /worktrees/. Submódulos NO matchean (su gitdir
+   apunta a .git/modules/). Cacheado por cwd único → costo ~cero en el scan. */
+const wtCache = new Map<string, string>();
+export function normalizeWorktreeCwd(cwd: string): string {
+  if (!cwd) return cwd;
+  const hit = wtCache.get(cwd);
+  if (hit !== undefined) return hit;
+  let out = cwd;
+  try {
+    const st = fs.statSync(path.join(cwd, '.git'));
+    if (st.isFile()) {
+      const m = fs.readFileSync(path.join(cwd, '.git'), 'utf8')
+        .match(/^gitdir:\s*(.+?)[\\/]\.git[\\/]worktrees[\\/]/im);
+      if (m && m[1]) out = m[1].trim();
+    }
+  } catch {
+    // sin <cwd>/.git legible (worktree borrado, o carpeta sin git) → patrón best-effort
+    const m = cwd.match(/^(.+?)[\\/](?:\.claude[\\/])?worktrees[\\/].+$/i);
+    if (m && m[1]) out = m[1];
+  }
+  wtCache.set(cwd, out);
+  return out;
+}
+
 export function parseSessionFile(
   filePath: string,
   local: LocalSessionState | undefined,
@@ -257,6 +285,12 @@ export function parseSessionFile(
   // cwd / branch / permissionMode (último válido)
   const cwd = lastWhere(tail, (r) => !!r.cwd)?.cwd
     || lastWhere(head, (r) => !!r.cwd)?.cwd || '';
+  // ⚠️ el cwd viene del ÚLTIMO record → una sesión que ENTRA a un worktree git (EnterWorktree /
+  // branch aislada) quedaría clasificada como "proyecto" nuevo por cada branch (pb-124-reconcile…).
+  // La AGRUPACIÓN (project/projectPath) se normaliza al repo real; el cwd queda CRUDO para que
+  // las acciones (terminal/editor/diff) sigan yendo al worktree donde está el laburo. El branch
+  // igual se ve en la card (gitBranch intacto).
+  const projRoot = normalizeWorktreeCwd(cwd);
   const branch = lastWhere(tail, (r) => typeof r.gitBranch === 'string')?.gitBranch
     ?? lastWhere(head, (r) => typeof r.gitBranch === 'string')?.gitBranch ?? '';
   const pmRec = lastWhere(all, (r) => typeof r.permissionMode === 'string');
@@ -319,8 +353,8 @@ export function parseSessionFile(
   const session: Session = {
     id,
     name: deriveName(head),
-    project: cwd ? path.basename(cwd) : (id.slice(0, 8)),
-    projectPath: cwd || idFromName,
+    project: projRoot ? (path.basename(projRoot) || projRoot) : (id.slice(0, 8)),   // basename('C:\')='' → mostrar la raíz tal cual
+    projectPath: projRoot || idFromName,
     cwd,
     branch: branch || '',
     mode,

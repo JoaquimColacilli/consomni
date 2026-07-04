@@ -1028,10 +1028,16 @@ body.light .col-diff,body.light .dk-tb-diff{border-color:var(--border);}
 .cv-file{color:var(--blue-2);text-decoration:underline;text-decoration-color:rgba(96,165,250,.4);text-underline-offset:2px;cursor:pointer;}
 .cv-file:hover{text-decoration-color:var(--blue-2);}
 .dk-ctx-sep{height:1px;margin:4px 6px;background:var(--border);}
+/* popover de renombrar panel (click derecho en un chip de la barra de sesiones o en la cabecera del panel) */
+.dk-ren{width:238px;padding:9px 10px;display:flex;flex-direction:column;gap:7px;}
+.dk-ren-lbl{font-size:9.5px;letter-spacing:.6px;text-transform:uppercase;color:var(--text-4);user-select:none;}
+.dk-ren-inp{height:28px;padding:0 9px;border-radius:6px;border:1px solid var(--border-hover);background:var(--surface-input);color:var(--text-1);font:inherit;font-size:11.5px;outline:none;}
+.dk-ren-inp:focus{border-color:var(--green);}
+.dk-ren-hint{font-size:9.5px;color:var(--text-4);user-select:none;}
 /* panel visor de archivo */
 .dk-pane--file .dk-pane-body{display:flex;flex-direction:column;}
 .dk-fileview{flex:1;min-height:0;overflow:auto;}
-.dk-fv-pre{margin:0;padding:11px 13px;font-family:'Geist Mono',monospace;font-size:12px;line-height:1.55;color:var(--text-1);white-space:pre;tab-size:2;-moz-tab-size:2;user-select:text;}
+.dk-fv-pre{margin:0;padding:11px 13px;font-family:'Geist Mono',monospace;font-size:12px;line-height:1.55;color:var(--text-1);white-space:pre-wrap;overflow-wrap:anywhere;tab-size:2;-moz-tab-size:2;user-select:text;}
 /* badge "● vivo" del visor de archivo (sync en tiempo real); pulsa al actualizarse */
 .dk-fv-live{display:inline-flex;align-items:center;gap:4px;flex:0 0 auto;margin-left:6px;font-size:9.5px;letter-spacing:.4px;text-transform:uppercase;color:var(--text-4);user-select:none;}
 .dk-fv-live-dot{width:6px;height:6px;border-radius:50%;background:var(--green);opacity:.55;transition:opacity .2s;}
@@ -1039,7 +1045,7 @@ body.light .col-diff,body.light .dk-tb-diff{border-color:var(--border);}
 .dk-fv-live.pulse .dk-fv-live-dot{opacity:1;animation:fvLivePulse .7s ease;}
 @keyframes fvLivePulse{0%{box-shadow:0 0 0 0 var(--green);}100%{box-shadow:0 0 0 5px transparent;}}
 .dk-fv-empty{color:var(--text-3);white-space:pre-wrap;}
-.dk-fv-md{padding:13px 15px;color:var(--text-2);font-size:12.5px;line-height:1.6;}
+.dk-fv-md{padding:13px 15px;color:var(--text-2);font-size:12.5px;line-height:1.6;overflow-wrap:anywhere;}
 .dk-fv-md .fv-h{color:var(--text-1);font-weight:600;margin:14px 0 7px;letter-spacing:.2px;}
 .dk-fv-md .fv-h:first-child{margin-top:0;}
 .dk-fv-md .fv-h1{font-size:16px;} .dk-fv-md .fv-h2{font-size:14px;} .dk-fv-md .fv-h3{font-size:13px;}

@@ -1946,6 +1946,59 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
   orden de `knownCwds`). Rutas relativas con subcarpeta (`docs/x.md`) que no existan bajo el cwd también entran
   a la búsqueda por basename (se pierde el hint del directorio; aceptable, el caso dominante es nombre pelado).
 
+---
+
+## v1.9.21 — Worktrees ≠ proyectos + renombrar paneles + visor sin scroll horizontal
+> Batch de feedback de Facundo (3 pedidos) + auditoría de "qué considera proyecto Consomni". Bump
+> **1.9.20 → 1.9.21** (`package.json` + fallbacks `brand-ver`/`.ver` en `chrome.js` + entrada en `CHANGELOG`
+> de `app.js`). `tsc` limpio; `node --check` OK en los 3 .js del renderer. Aditivo, respeta las 4 Hard Rules.
+
+### 1) Un worktree git ya NO es "otro proyecto" (auditoría: PepBox tenía un proyecto por branch)
+- **Causa raíz:** el `cwd` de una sesión se toma del **ÚLTIMO** record del transcript (`jsonl.ts`). Una sesión
+  que ENTRA a un worktree (EnterWorktree / skill de git-worktrees) queda clasificada como proyecto nuevo por
+  cada branch (`pepbox/worktrees/pb-124-reconcile`, `altitude/.claude/worktrees/agent-…`). Auditado contra los
+  datos reales: 39 grupos, 8 de ellos worktrees.
+- **Fix (`jsonl.ts` `normalizeWorktreeCwd`, exportada; usada también en `syntheticSession` de `sessions.ts`):**
+  se normaliza **SÓLO la agrupación** (`project`/`projectPath`) al repo padre; **`cwd` queda CRUDO** para que
+  las acciones (terminal/editor/diff) sigan yendo al worktree real. Mecanismo: `<cwd>/.git` **ARCHIVO** con
+  `gitdir: <repo>/.git/worktrees/<x>` → proyecto = `<repo>` (pb-124 cae en `premiumbiologics-frontend`, no en
+  el root PepBox). Worktree ya BORRADO (no hay `.git` legible) → recorte por patrón en `/.claude/worktrees/` o
+  `/worktrees/`. Submódulos NO matchean (su gitdir apunta a `.git/modules/`). Cache por cwd único (`wtCache`)
+  → costo ~cero en el scan. El branch se sigue viendo en la card (`gitBranch` intacto).
+- **Verificado:** test node 11/11 (réplica exacta + casos REALES del disco: worktree vivo → repo correcto,
+  borrado → patrón, repo normal / subrepo real / carpeta pelada / raíz → intactos) + simulación del listado
+  final: **39 → 31 grupos** (los 9 transcripts de pb-* absorbidos por frontend/api, cuadran exacto).
+- **Tradeoff conocido:** el badge de diff del grupo puede no reflejar cambios que viven SÓLO en un worktree
+  (el diff se computa por cwd de sesión; los grupos mixtos lo cubren). Aceptable vs proyecto-por-branch.
+
+### 2) Renombrar terminales/sesiones del dock (pedido: shells abiertas a mano quedan "sin nombre")
+- **Click derecho** en un chip de la barra de sesiones (`.dk-sessions`) o en la **cabecera** de un panel (los
+  `.dk-pbtn` quedan excluidos) → popover `#dkRen` (`openRename`/`applyRename`/`closeRename` en
+  `terminals-ui.js`; clases `.dk-ren*` en `app.css`, reusa el lenguaje de `.dk-ctx` con tokens → flipea con el
+  tema). Enter guarda · Esc cancela · **vacío = volver al nombre automático** (guardado en `pane._autoTitle`).
+- **El nombre vive en `pane.dataset.cname`** y GANA en `setPaneMeta` (único choke point del título) → los
+  updates automáticos posteriores (resolución de PTY, resume) NO lo pisan, y el chip de la barra lo refleja
+  solo (`paneChipTitle` lee del título). **Persistido** en `dock.json` (`serializePane`/`buildPane`). Capado a
+  60 chars. El keydown del input hace `stopPropagation` (Enter/Esc no llegan a los atajos globales).
+
+### 3) Visor de archivos: wrap en vez de scroll horizontal (pedido: .md scrolleaba horizontal)
+- `.dk-fv-pre` pasó de `white-space:pre` a **`pre-wrap` + `overflow-wrap:anywhere`** (app.css) → las líneas
+  largas envuelven (aplica a TODOS los archivos del visor, no sólo .md — decisión: es un visor read-only).
+  `.dk-fv-md` (vista renderizada) también lleva `overflow-wrap:anywhere` (URLs gigantes). Los bloques fenced
+  de la vista .md (`.fv-code`) conservan su scroll horizontal propio (estándar).
+
+### 4) Higiene de proyectos (auditoría de datos + fixes menores)
+- **Nombre vacío:** sesión con cwd = raíz de disco (`C:\`) mostraba proyecto sin nombre (`basename('C:\')` =
+  `''`) → ahora `basename(x) || x` (jsonl.ts + sessions.ts).
+- **Limpieza one-shot ejecutada en la máquina del usuario:** 14 carpetas encoded de `~/.claude-max/projects`
+  sin transcripts y con SÓLO un archivo `memory` de 0 bytes → borradas (re-verificadas en el momento; se
+  conservaron `dardo-shopify` —memoria real— y `moraserver-syl-quests` —script de workflow—). Kept fantasma
+  `c:/users/facu` sacado de `config.keptProjects` (backup `config.json.<ts>.bak`).
+- **Pendientes anotados (no implementados):** heurística "no parece proyecto" (home/raíz/carpeta contenedora →
+  sugerir ocultar; el mecanismo `hiddenProjects` ya existe), el helper NL (`claude -p`) cae a `os.homedir()` →
+  puede fabricar sesiones en `C:\Users\Facu` (canilla abierta), y repensar el auto-kept al entrar una vez a un
+  proyecto (v1.2.5, agresivo).
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

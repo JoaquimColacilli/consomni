@@ -582,6 +582,12 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.21', date: '04 jul 2026', title: 'Un worktree ya no es "otro proyecto" + renombrar terminales + visor sin scroll horizontal', items: [
+      'Las sesiones que trabajan en un worktree git (una branch aislada, tipo pb-124-reconcile) ahora se agrupan en su repo REAL en vez de fabricar un proyecto por branch. La branch se sigue viendo en la card; las acciones (terminal, editor, diff) siguen yendo al worktree donde está el laburo.',
+      'Renombrá cualquier terminal o sesión del dock con click derecho en su chip de la barra de sesiones o en la cabecera del panel (las shells abiertas a mano quedaban "sin nombre"). Enter guarda, vacío vuelve al nombre automático, y el nombre sobrevive al reiniciar.',
+      'El visor de archivos ya no scrollea horizontal: las líneas largas envuelven (los bloques de código de la vista .md conservan su scroll propio).',
+      'Una sesión corrida en la raíz de un disco (C:\\) ya no aparece como proyecto sin nombre.',
+    ] },
     { v: '1.9.20', date: '03 jul 2026', title: 'Los archivos que claude nombra se abren aunque vivan en otro proyecto', items: [
       'Al clickear un archivo mencionado por su nombre pelado (sin ruta) en el chat o la terminal, el visor a veces decía "no se pudo leer": el archivo existía, pero en OTRO proyecto. Ahora Consomni lo busca en tus proyectos conocidos y lo abre igual (el panel se redirige al archivo real y el sync en vivo sigue ese archivo).',
       'Si de verdad no existe, el error ahora dice QUÉ archivo no encontró (antes era un "no se pudo leer" genérico).',

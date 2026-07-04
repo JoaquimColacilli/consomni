@@ -9,7 +9,7 @@ import * as path from 'path';
 import { app } from 'electron';
 import { execFile, execFileSync } from 'child_process';
 import chokidar, { type FSWatcher } from 'chokidar';
-import { parseSessionFile, parseSessionDetail, type SessionDetail } from './jsonl';
+import { parseSessionFile, parseSessionDetail, normalizeWorktreeCwd, type SessionDetail } from './jsonl';
 import { loadConfig, loadLocalState, claudeProjectsPath, type AppConfig } from './config';
 import type { Session, Snapshot, SessionState, SessionMode, SubagentInfo, PlanDoc } from './types';
 
@@ -244,13 +244,14 @@ export function applyHookEvent(event: string, payload: Record<string, unknown>):
 }
 
 function syntheticSession(sid: string, live: LiveState): Session {
-  const cwd = live.cwd || '';
-  const proj = cwd ? path.basename(cwd) : 'sesión';
+  const cwd = live.cwd || '';                          // crudo (acciones van al worktree real)
+  const projRoot = normalizeWorktreeCwd(cwd);          // agrupación → repo padre (igual que el parser JSONL)
+  const proj = projRoot ? (path.basename(projRoot) || projRoot) : 'sesión';
   return {
     id: sid,
     name: live.name || proj,
     project: proj,
-    projectPath: cwd || sid,
+    projectPath: projRoot || sid,
     cwd,
     branch: '',
     mode: live.mode || 'ask',
