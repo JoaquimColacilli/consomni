@@ -198,7 +198,8 @@ export function collectPlan(recs: Rec[]): SessionPlan {
         const tid = String(inp.taskId || inp.id || inp.task_id || '');
         if (!tid) continue;
         const prev: PlanTodo = taskMap.get(tid) || { content: '', status: 'pending' };
-        const c = inp.content || inp.prompt || inp.description;
+        // shape real de TaskCreate (claude 2.1.x): subject (título) + description (larga)
+        const c = inp.subject || inp.content || inp.prompt || inp.description;
         if (c && !prev.content) prev.content = String(c).slice(0, 200);
         else if (c) prev.content = String(c).slice(0, 200);
         if (isTodoStatus(inp.status)) prev.status = inp.status;
@@ -410,8 +411,26 @@ function isConvoNoise(t: string): boolean {
     t.startsWith('[Request interrupted') || t.startsWith('Caveat:');
 }
 
+// memo por mtime+size (espejo del scanCache): el panel E2 y los paneles de sesión del dock
+// re-piden el detalle en cada snapshot — sin cache, cada pedido re-leía y re-parseaba 736KB
+// del MISMO archivo que scan() ya había parseado.
+const detailCache = new Map<string, { mtimeMs: number; size: number; detail: SessionDetail }>();
+const DETAIL_CACHE_MAX = 40;
 export function parseSessionDetail(filePath: string): SessionDetail {
   const empty: SessionDetail = { feed: [], files: [], counts: { edits: 0, bash: 0, reads: 0 }, convo: [] };
+  let st: fs.Stats;
+  try { st = fs.statSync(filePath); } catch { return empty; }
+  const hit = detailCache.get(filePath);
+  if (hit && hit.mtimeMs === st.mtimeMs && hit.size === st.size) return hit.detail;
+  const detail = parseSessionDetailFresh(filePath, empty);
+  detailCache.set(filePath, { mtimeMs: st.mtimeMs, size: st.size, detail });
+  if (detailCache.size > DETAIL_CACHE_MAX) {   // GC: soltar la entrada más vieja (orden de inserción del Map)
+    const first = detailCache.keys().next().value;
+    if (first !== undefined) detailCache.delete(first);
+  }
+  return detail;
+}
+function parseSessionDetailFresh(filePath: string, empty: SessionDetail): SessionDetail {
   let chunks: Chunks;
   try { chunks = readChunks(filePath); } catch { return empty; }
   const recs = parseLines(chunks.head === chunks.tail ? chunks.head : chunks.head.concat(chunks.tail));

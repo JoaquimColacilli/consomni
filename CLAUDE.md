@@ -1948,6 +1948,141 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.23 — MODO ECO (menos CPU/GPU/disco/batería) — investigación + auditoría + fixes
+> Pedido de Facundo: "que la app gaste menos recursos". Proceso: 2 agentes (auditoría exhaustiva del repo +
+> research web de best practices Electron/xterm/chokidar/git 2024-2026, con fuentes) + mediciones EN VIVO de
+> la app corriendo (v1.9.21: **GPU process 98% de un core + renderer 82% + main 9% SOSTENIDO**; 16.4h uptime =
+> 3.1h de CPU sólo el proceso GPU; 479MB privados GPU). Bump **1.9.22 → 1.9.23**. Verificado: `tsc` limpio,
+> `node --check` OK, harness headless del flow control (electron-as-node + PTY real: 304KB → 178 mensajes
+> IPC batcheados ≈ 10× menos; acks OK; pause/resume presentes en el fork).
+
+### Main process (`sessions.ts` + `index.ts`)
+- **Pausa por visibilidad:** `setUiVisible(bool)` (eventos `minimize/restore/show/hide` de la ventana) —
+  oculta → `scheduleUpdate` sólo marca `uiDirty` (ni parse, ni push) y el `diffTimer` no corre git; al volver
+  → un push fresco. Las PTYs/hooks/**notificación nativa de attn** NO pasan por ahí (attn va por
+  `setAttnCallback`, verificado) → lo que las terminales ejecutan no se ve afectado. `powerMonitor`
+  (`on-battery`/`on-ac`; `isOnBatteryPower` es FUNCIÓN — ojo) → con batería el git diff corre 1 de cada 8
+  ticks (~32s). Los timers del main NUNCA los throttlea Chromium (es Node) → este gating manual es la única forma.
+- **Throttle de rebuild:** `MIN_BUILD_GAP_MS=1000` en `scheduleUpdate` (debounce 250ms + piso de 1s entre
+  buildSnapshot) → con claude escribiendo el transcript, el re-parse+push pasó de 4×/s a 1×/s. El primer
+  evento tras quietud sigue saliendo a los 250ms. NO se usó `awaitWriteFinish` de chokidar (la auditoría lo
+  sugirió pero el research lo refuta: pollea el archivo cada 100ms mientras cambia, y el jsonl activo cambia
+  SIEMPRE → polling constante + evento retrasado indefinidamente).
+- **`countUntrackedAdds` con cache por archivo** (`untrackedCache`: Map cwd → Map(rel → {size,mtimeMs,lines})):
+  antes releía el CONTENIDO de hasta 200 archivos (≈50MB) cada ~3-4s por proyecto activo — el mayor consumo
+  de disco en reposo; ahora sólo relee los que cambiaron su size/mtime (map fresco por pasada = GC de borrados).
+- **`--no-optional-locks`** en los git de fondo (diff + status) → no escriben/refrescan el index ni compiten
+  con el git del usuario (práctica de VS Code).
+- **Cache TTL 5s de `listSessionFiles`** (antes `readdirSync` de TODOS los roots+subdirs por cada
+  buildSnapshot) — invalidado al instante por chokidar `add`/`unlink` (`onFsList`) y en `startWatcher`.
+  `findSessionFile` ahora reusa ese listado (antes re-caminaba los roots).
+- **`readFile` (visor) acepta `prevMtimeMs`** → si el archivo no cambió responde `{unchanged:true}` sin leer
+  ni mandar hasta 1MB por IPC ("304" barato). Siempre devuelve `mtimeMs`.
+- **IPC `consomni:termAck`** (flow control, abajo).
+
+### Terminales (`terminals.ts` + `terminals-ui.js` + `config.ts`)
+- **Batching PTY→renderer:** los chunks del PTY se juntan ~8ms (`FLUSH_MS`, tope `FLUSH_MAX` 64KB) antes del
+  `send('term:data')` → ~10× menos mensajes IPC con output rápido (medido); imperceptible (< 1 frame 60Hz).
+  Flush en exit; `killTerm` limpia el timer.
+- **Flow control watermark (patrón oficial xterm.js / VS Code):** el main cuenta `unacked`; >512KB
+  (`FLOW_HIGH`) → `proc.pause()` (pausa la LECTURA; el proceso sigue — el SO bufferea); el renderer ackea en el
+  **callback de `term.write`** (`api.term.ack`) con el largo RECIBIDO (`p.data.length`, NO el filtrado por
+  `stripMouseTracking` — si no, deuda fantasma pausaría para siempre); <128KB (`FLOW_LOW`) → `resume()`.
+  `pause/resume` verificados en el fork (proxy a `socket.pause`). Guard `typeof` por si faltaran.
+- **`scrollback` configurable** (`config.scrollback`, default **5000**; antes 12000 hardcodeado = ~29MB por
+  terminal llena a 200 cols — 12 bytes/celda; VS Code usa 3000). Settings → Editor & Terminal (3k/5k/12k),
+  aplica EN VIVO (`ConsomniTerms.setScrollback`; `options.scrollback` es mutable — bajarlo recorta historial viejo).
+- **`cursorBlink` sólo en la terminal ENFOCADA** (ctor `false`; `setFocus` lo prende en una y apaga el resto)
+  → el blink de N terminales repintaba N cursores para siempre.
+- **Visor en vivo:** el poll de 1s ahora (a) salta si `document.hidden`, (b) pasa `prevMtime` → sin cambios =
+  cero I/O/DOM. Ticker del statusbar también gateado por `document.hidden`.
+
+### Renderer (`app.js`)
+- **Firma de snapshot cuantizada:** `lastActivity` a 5s y `tokensTotal` a 1k → la escritura continua del
+  transcript ya no invalida la firma en cada push (el innerHTML del board entero era el costo del renderer).
+- **Memo de `parseSessionDetail`** (`jsonl.ts`, espejo del scanCache: mtime+size, cap 40 con GC FIFO) — el
+  panel E2 y los paneles de sesión del dock re-parseaban 736KB del MISMO archivo que scan() ya había parseado.
+
+### Qué NO se tocó (anti-recomendaciones verificadas con fuentes)
+`backgroundThrottling` queda default `true` (apagarlo rompe `visibilitychange`); nada de `--disable-gpu-vsync`
+(AUMENTA GPU y es no-op moderno), `powerSaveBlocker` (es para IMPEDIR ahorro), `--disable-features=
+CalculateNativeWinOcclusion` (perdería "ventana tapada = no render"), `usePolling`/`awaitWriteFinish`,
+`--max-old-space-size` (capea sin reducir; riesgo OOM). Express idle ≈ 0 CPU (socket en el event loop) — intacto.
+Pendiente opcional anotado: `git config core.fsmonitor true` + `core.untrackedCache true` POR repo grande
+(daemon ~86MB — no automatizar global); IntersectionObserver para WebGL de paneles visibles-pero-scrolleados.
+
+### Límite del medio
+El impacto real (GPU%/renderer% en vivo) se confirma con la app nueva corriendo — la instancia del usuario
+(v1.9.21) tiene el single-instance lock. Buen benchmark: medir CPU delta 30s antes/después de actualizar.
+
+---
+
+## v1.9.22 — Planes lee el store de tasks en disco (sesiones largas ya no pierden sus tareas)
+> Bug reportado por Facundo: un plan ejecutándose en otra sesión (commit `91c17d9`, plan del widget avatar
+> de Syl en moraserver) no aparecía en Planes. Bump **1.9.21 → 1.9.22**. Causa raíz CONFIRMADA empíricamente
+> contra los datos reales. Aditivo, respeta las 4 Hard Rules (sólo `fs` local read-only del config dir activo).
+
+- **Causa raíz (3 capas):** (1) el transcript pesaba 4.6MB y `collectPlan` sólo ve el tail de 640KB — los 10
+  `TaskCreate` vivían en el byte ~2.05MB → fuera; el único `TaskUpdate` del tail era `{taskId,status}` sin
+  content → descartado (`if (prev.content)`) → `plan` no se adjuntaba → sin frente. (2) `collectPlan` no leía
+  el shape real de las Task tools de claude 2.1.x (**`subject`** + `description`; leía `content|prompt|description`).
+  (3) `findPlanDocs` prof ≤3 no alcanzaba docs anidados (`syl/docs/superpowers/plans/…` = prof 4 desde la raíz).
+- **Fix 1 (la joya) — store de tasks en disco como fuente PRIMARIA:** Claude Code persiste el estado ACTUAL de
+  sus Task tools en **`<config-dir>/tasks/<sessionId>/<id>.json`** (`{id,subject,description,status,blocks,
+  blockedBy}`). Nuevo `claudeTasksPath(cfg)` en `config.ts` (sigue el perfil activo, como projects/settings).
+  En `sessions.ts`: `readTaskStore(root, sessionId)` (statuses válidos `pending|in_progress|completed` —
+  cancelled/deleted fuera; content = `subject || description`, cap 200; orden por id numérico; cap 60;
+  `at` = mtime más nuevo) + `applyTaskStore(s, tasksRoot)` que PISA `plan.todos`/counts con el store
+  (preserva `hasPlan`/`planAt` del jsonl — ExitPlanMode sólo vive en el transcript) y CREA `s.plan` si no
+  había. Se llama en el branch NO-cacheado de `scan()` (cada TaskUpdate también escribe al transcript → el
+  mtime del jsonl cambia → el cache se invalida → se relee fresco; documentado). `collectPlan` queda de
+  fallback (TodoWrite / claudes viejos sin store).
+- **Fix 2:** `collectPlan` ahora prefiere **`inp.subject`** como título de la task (jsonl.ts).
+- **Fix 3:** `findPlanDocs` prof **3→5** (sessions.ts; el tope de 60/24 docs ya acota el costo).
+- **Verificación:** e2e headless con los módulos COMPILADOS reales (`dist/main/jsonl.js` + `config.js`) contra
+  el transcript real de la sesión 83df3b08 (moraserver): antes `plan: null` → después **4 todos** con subject
+  como título. `findPlanDocs` réplica: depth 3 = 27 docs SIN el plan del widget; depth 5 = lo encuentra (plan +
+  spec). Casos borde de `readTaskStore` (sesión sin store / dir inexistente → null). `tsc` limpio; `node --check`
+  OK en los 3 .js del renderer. **Límite del entorno:** la app del usuario estaba corriendo (single-instance
+  lock) → la vista Planes en vivo la confirma el usuario al reiniciar.
+- **Límite conocido:** el store refleja el estado ACTUAL (claude limpia tasks viejas) → frentes de sesiones
+  históricas pueden mostrar menos tasks que las que existieron; es el comportamiento deseado (estado real).
+
+### Parte 2 — pasada de "nada se buguea visualmente + más cómodo" (pedido del usuario; Planes + dock/inicio)
+**Planes / render global (`app.js` + `app.css`):**
+- **`render()` preserva el scroll del board** (`main.board` scrollTop/Left, cubre board/planes/biblioteca): los
+  snapshots vivos re-renderizaban con `innerHTML` y el scroll saltaba al inicio.
+- **Los checklists `.plan-todos` respetan al usuario:** antes `open` salía SÓLO de `p.inProgress` → cada snapshot
+  te cerraba/abría el `<details>`. Ahora `state.planTodosOpen` (sid → bool) se captura del DOM ANTES del rebuild
+  (sin evento `toggle`: el DOM previo es la verdad) y gana sobre el default.
+- **La altura custom de la nota de frente** (resize manual del textarea → style.height inline) se captura y re-aplica.
+- **`snapSig` usaba `s.plan.updatedAt` (campo INEXISTENTE — es `todoAt`)** → un cambio de status de una task con
+  mismo count podía no re-renderizar. Ahora firma con `todoAt + len + completed + inProgress`.
+- **Los docs de plan/spec se refrescan solos:** `maybeReloadPlanDocs()` (llamado desde `setSnapshot` con Planes
+  abierto) re-pide `getPlanDocs` si cambió el SET de cwds de los frentes (firma `planDocsSig`). Antes: sólo botón manual.
+- **Frente 100% terminado se atenúa** (`.plan-col--done{opacity:.68}`, hover/focus-within lo revive).
+**Dock / inicio con MUCHAS terminales (`terminals-ui.js` + `app.css`):**
+- **WebGL por VISIBILIDAD (fix de raíz del pendiente v1.9.17):** cada terminal WebGL = un contexto GPU; Chromium
+  capea ~16 por página y evicta → "click arregla una, rompe la otra". Ahora el addon vive SÓLO mientras el panel
+  se VE: `attachWebgl(pane, term)` / `detachWebgl(pane)` / `syncWebglVisibility()` (corre dentro de
+  `repaintVisible`, que ya se dispara en foco/showView; se agregó `scheduleRepaintVisible()` a
+  `show/restore/minimize/toggleMax/hide`). Panel al pool/minimizado/dock oculto → dispose (libera el contexto);
+  al volver a verse → re-attach (loadAddon post-open, atlas fresco). `onContextLoss` suma `pane._wglFail`;
+  con 2 pérdidas NO se reintenta (GPU rota → DOM renderer, sin ping-pong). `attachWebgl` no attachea paneles
+  ocultos (guard `offsetParent`); `killPaneContent` suelta la ref. **`setGpuRender` ahora aplica EN VIVO**
+  (antes sólo a terminales nuevas). Límite conocido: N paneles visibles a la vez siguen siendo N contextos
+  (la fila scrolleable no lo evita — IntersectionObserver sería el fino, anotado).
+- **Paneles con tamaño mínimo usable:** `.dk-split.row>.dk-pane{min-width:230px}` + `.col>.dk-pane{min-height:130px}`
+  + `.dk-root{overflow:auto}` → con 12 terminales el mosaico SCROLLEA en vez de aplastar a tiles de ~110px.
+- **Head de panel angosto = sólo controles vitales:** `syncTerm` togglea `.pane-narrow` (<350px) → CSS oculta
+  vscode/cd/scroll/sel/✨/split-r/split-d (quedan minimizar/★/✕). `.dk-pane-head{overflow:hidden}` de red.
+- **El chip activo del carrusel se auto-trae a la vista** (`scrollIntoView nearest` en `renderSessionBar`), SÓLO
+  cuando cambia el foco (`lastChipKey`) para no pelear con el drag-to-scroll.
+- **Límite del medio:** WebGL/scroll/drag son DOM+GPU → no verificables headless; `tsc`/`node --check` limpios,
+  el usuario confirma en vivo.
+
+---
+
 ## v1.9.21 — Worktrees ≠ proyectos + renombrar paneles + visor sin scroll horizontal
 > Batch de feedback de Facundo (3 pedidos) + auditoría de "qué considera proyecto Consomni". Bump
 > **1.9.20 → 1.9.21** (`package.json` + fallbacks `brand-ver`/`.ver` en `chrome.js` + entrada en `CHANGELOG`

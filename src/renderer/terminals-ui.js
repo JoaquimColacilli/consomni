@@ -21,6 +21,7 @@
   'use strict';
   var C = g.Chrome, api = g.consomni, Terminal = g.Terminal, FitNS = g.FitAddon, WebLinksNS = g.WebLinksAddon, WebglNS = g.WebglAddon;
   var gpuRender = true;   // render por GPU (WebGL) — mucho más fluido en claude; opt-out por si una GPU rinde mal (lo empuja app.js)
+  var scrollbackLines = 5000;   // historial por terminal (12 bytes/celda: 12000 ≈ 29MB/term llena); lo empuja app.js desde config
   var floatingPickers = true;   // selector flotante de @ y / (estilo Warp) en paneles claude; opt-out si molesta (lo empuja app.js)
 
   var host = null, rootEl = null, poolEl = null, dropInd = null, countEl = null, sessBarEl = null;
@@ -336,7 +337,10 @@
     // no es una sesión JSONL trackeada se rechazaba con "fuera del alcance" → "no se pudo leer"). Bug fix.
     // 3er arg: sólo en la lectura INICIAL el main busca el basename en los proyectos conocidos si el path
     // no existe (link con nombre pelado que vive en OTRO proyecto) y devuelve resolvedPath → redirigimos.
-    api.readFile(fpath, (pane && pane.dataset.cwd) || '', !!isInitial).then(function (r) {
+    // prevMtime (sólo polls): si el archivo no cambió el main responde {unchanged} sin re-leer ni re-mandar 1MB
+    api.readFile(fpath, (pane && pane.dataset.cwd) || '', !!isInitial, isInitial ? 0 : (pane._fMtime || 0)).then(function (r) {
+      if (r && r.ok && r.mtimeMs) pane._fMtime = r.mtimeMs;
+      if (r && r.ok && r.unchanged) return;        // sin cambios → cero trabajo de DOM
       if (isInitial && r && r.ok && r.resolvedPath && r.resolvedPath !== fpath) {
         pane.dataset.fsrc = fpath;                 // path pedido original → el dedupe de openFilePanel lo reconoce
         pane.dataset.fpath = r.resolvedPath;
@@ -350,6 +354,7 @@
   function startFilePoll(pane, fpath, body, isMd) {
     stopFilePoll(pane);
     pane._filePoll = g.setInterval(function () {
+      if (g.document && g.document.hidden) return;                   // ventana oculta → ni IPC (Chromium degrada el timer pero el trabajo lo evitamos nosotros)
       if (!pane.isConnected || pane.offsetParent === null) return;   // movido (re-tiling) / oculto / minimizado → esperar
       refreshFile(pane, fpath, body, isMd, false);
     }, 1000);
@@ -510,7 +515,11 @@
       // modo selección ON (sólo claude): filtrá el mouse-tracking que claude re-asserta → xterm queda con el mouse
       // libre para SELECCIONAR (arrastre normal) en vez de mandarle el click a claude.
       if (t.pane && t.pane._selMode && t.pane.dataset.kind === 'claude') data = stripMouseTracking(data);
-      t.term.write(data);
+      // callback = ack de flow control: el main cuenta bytes sin confirmar y pausa el PTY si nos atrasamos.
+      // se ackea el largo RECIBIDO (p.data), no el filtrado — si stripMouseTracking recorta, el main igual
+      // tiene que descontar lo que mandó (si no, la "deuda" fantasma pausaría el PTY para siempre).
+      var n = p.data.length;
+      t.term.write(data, function () { try { if (api.term.ack) api.term.ack(p.id, n); } catch (e) {} });
     });
     api.term.onExit(function (p) {
       var t = terms.get(p.id); if (!t) return;
@@ -569,6 +578,8 @@
     if (focused === pane) { renderSessionBar(); scheduleRepaintVisible(); return; }
     focused = pane;
     panesOf().forEach(function (p) { p.classList.toggle('focused', p === pane); });
+    // cursor parpadeando SÓLO en la terminal enfocada (el blink de N terminales repinta N cursores para siempre)
+    terms.forEach(function (t) { try { t.term.options.cursorBlink = (t.pane === pane); } catch (e) {} });
     // Recuperar el scroll al enfocar: re-fit del viewport (mismo camino guardado que el resize que "lo
     // arregla"; pushPty es no-op si las dims no cambian → sin SIGWINCH espurio). Cubre el caso "el scroll
     // se trabó y tengo que maximizar/achicar": ahora basta con clickear la terminal.
@@ -582,6 +593,7 @@
      Lista TODAS las terminales/sesiones vivas de la vista actual (visibles + minimizadas) como chips.
      Minimizar = sacar el panel del tiling al pool (PTY VIVO) marcándolo data-min; el chip lo restaura. */
   function paneByKey(k) { var a = allPanes(); for (var i = 0; i < a.length; i++) if (a[i].dataset.pane === k) return a[i]; return null; }
+  var lastChipKey = '';   // último chip activo (para auto-scrollear el carrusel sólo cuando CAMBIA el foco)
   function paneChipTitle(pane) {
     var t = pane.querySelector('.dk-pane-title');
     var s = (t ? (t.textContent || '') : '').replace(/\s+/g, ' ').trim();
@@ -607,6 +619,14 @@
         paneChipIcon(p) + '<span class="dk-sess-nm">' + esc(paneChipTitle(p)) + '</span>' +
         (min ? '<span class="dk-sess-dot"></span>' : '') + '</button>';
     }).join('');
+    // con muchos chips el activo puede quedar fuera del carrusel → traerlo a la vista, pero SÓLO cuando
+    // cambia el foco (no en cada refresh: pelearía con el drag-to-scroll del usuario)
+    var actKey = focused && focused.dataset ? focused.dataset.pane : '';
+    if (actKey && actKey !== lastChipKey) {
+      var actChip = sessBarEl.querySelector('.dk-sess-chip.active');
+      if (actChip && actChip.scrollIntoView) { try { actChip.scrollIntoView({ block: 'nearest', inline: 'nearest' }); } catch (e) {} }
+    }
+    lastChipKey = actKey;
   }
   function minimizePane(pane) {
     if (!pane || pane.dataset.min === '1') return;
@@ -865,6 +885,7 @@
     if (pane._sgGhost) { try { if (pane._sgGhost.parentNode) pane._sgGhost.parentNode.removeChild(pane._sgGhost); } catch (e) {} pane._sgGhost = null; pane._sgGhostVisible = false; }   // y quitar el ghost
     var pid = pane.dataset.tid;
     if (pid) { var t = terms.get(pid); if (t) { try { t.term.dispose(); } catch (e) {} if (t.ro) try { t.ro.disconnect(); } catch (e2) {} } terms.delete(pid); if (api && api.term) api.term.kill(pid); }
+    pane._wgl = null;   // term.dispose ya disposeó el addon; soltar la ref
     if (pane.dataset.sid) sessions.delete(pane.dataset.sid);
   }
 
@@ -1535,7 +1556,13 @@
     persist();
   }
   function setClaudeFullscreenDefault(on) { claudeFsDefault = (on !== false); }
-  function setGpuRender(on) { gpuRender = (on !== false); }   // aplica a terminales NUEVAS (las abiertas siguen con su renderer)
+  function setGpuRender(on) { gpuRender = (on !== false); try { syncWebglVisibility(); scheduleRepaintVisible(); } catch (e) {} }   // aplica EN VIVO: on = attach a las visibles, off = detach de todas
+  function setScrollback(n) {
+    n = Number(n) || 5000;
+    scrollbackLines = n;
+    // aplica EN VIVO a las abiertas (options.scrollback es mutable; bajarlo recorta historial viejo)
+    terms.forEach(function (t) { try { t.term.options.scrollback = n; } catch (e) {} });
+  }
   function setFloatingPickers(on) { floatingPickers = (on !== false); }   // @ y / flotantes; OFF = van crudos a claude (su picker inline)
   // ¿hay una sesión de claude VIVA (PTY viva, no minimizada, no finalizada)? → para avisar antes de actualizar (corta la sesión)
   function hasActiveClaudeSessions() {
@@ -1892,8 +1919,10 @@
 
     var termOpts = {
       fontFamily: "'Geist Mono', ui-monospace, 'Cascadia Mono', monospace",
-      fontSize: 12.5, lineHeight: 1.15, cursorBlink: true, cursorStyle: 'bar',
-      allowProposedApi: true, scrollback: 12000, theme: THEME   // scroll instantáneo (el smoothScroll de v1.9.10 podía dejar la rueda "trabada")
+      // cursorBlink false: el blink de N terminales repinta N cursores para siempre; setFocus prende
+      // el blink SÓLO en la enfocada. scrollback configurable (12 bytes/celda → 12000 ≈ 29MB/term llena).
+      fontSize: 12.5, lineHeight: 1.15, cursorBlink: false, cursorStyle: 'bar',
+      allowProposedApi: true, scrollback: scrollbackLines, theme: THEME   // scroll instantáneo (el smoothScroll de v1.9.10 podía dejar la rueda "trabada")
     };
     // ConPTY-aware: en Windows xterm necesita saber que el backend es ConPTY para detectar bien las
     // líneas ENVUELTAS y NO doble-reflowear al hacer resize (xterm + ConPTY reflowean distinto → el
@@ -1918,17 +1947,7 @@
     // repinta full-screen en alt-screen) se siente lento/tosco. El addon WebGL dibuja las celdas en la GPU
     // → mucho más fluido. Carga DESPUÉS de term.open (necesita el canvas montado). Si la GPU no está / el
     // contexto se pierde → dispose → xterm vuelve solo al renderer DOM (sin regresión). 100% offline (HR3).
-    if (gpuRender) {
-      try {
-        if (WebglNS && WebglNS.WebglAddon) {
-          var wgl = new WebglNS.WebglAddon();
-          try { wgl.onContextLoss(function () { try { wgl.dispose(); } catch (e) {} pane._wgl = null; try { var lt = terms.get(pane.dataset.tid); if (lt && lt.term) lt.term.refresh(0, (lt.term.rows || 1) - 1); } catch (e2) {} }); } catch (e) {}   // contexto perdido → DOM + repaint para no dejar el canvas corrupto
-          term.loadAddon(wgl);
-          pane._gpu = 1;
-          pane._wgl = wgl;   // ref para invalidar el texture atlas (ver clearAtlas) cuando cambia la geometría de celda
-        }
-      } catch (e) { /* WebGL no disponible (GPU vieja/sandbox) → DOM built-in, igual que antes */ }
-    }
+    attachWebgl(pane, term);   // WebGL sólo mientras el panel se VE (ver attachWebgl/detachWebgl)
     // rutas de archivo clickeables: además del addon web-links (URLs), un link provider propio detecta
     // rutas y las abre (click → panel, Ctrl/Cmd+click → editor). Resuelve contra el cwd del panel.
     try {
@@ -2481,6 +2500,48 @@
   function clearAtlas(pane) {
     try { if (pane && pane._wgl && pane._wgl.clearTextureAtlas) pane._wgl.clearTextureAtlas(); } catch (e) {}
   }
+
+  /* ── WebGL por VISIBILIDAD ──
+     Cada terminal con WebGL es UN contexto GPU; Chromium los capea (~16 por página) y evicta el menos
+     usado → con muchas terminales el render entraba en ping-pong ("click arregla una, rompe la otra",
+     límite conocido de v1.9.17). Fix de raíz: el addon vive SÓLO mientras el panel se ve — al ir al pool /
+     minimizarse / ocultarse el dock se DISPONE (libera el contexto), y al volver a verse se re-crea
+     (loadAddon post-open está soportado; el atlas arranca fresco). Los ocultos no pintan nada igual. */
+  function attachWebgl(pane, term) {
+    if (!gpuRender || !pane || pane._wgl || (pane._wglFail || 0) >= 2) return;
+    if (pane.isConnected && pane.offsetParent === null) return;   // oculto (pool/minimizado) → sin contexto; syncWebglVisibility lo attachea al verse
+    if (!term) { var tt = terms.get(pane.dataset.tid); term = tt && tt.term; }
+    if (!term) return;
+    try {
+      if (WebglNS && WebglNS.WebglAddon) {
+        var wgl = new WebglNS.WebglAddon();
+        try {
+          wgl.onContextLoss(function () {   // contexto perdido → DOM + repaint (no dejar el canvas corrupto); 2 pérdidas = GPU rota → no reintentar
+            pane._wglFail = (pane._wglFail || 0) + 1;
+            try { wgl.dispose(); } catch (e) {}
+            pane._wgl = null;
+            try { var lt = terms.get(pane.dataset.tid); if (lt && lt.term) lt.term.refresh(0, (lt.term.rows || 1) - 1); } catch (e2) {}
+          });
+        } catch (e) {}
+        term.loadAddon(wgl);
+        pane._gpu = 1;
+        pane._wgl = wgl;      // ref para invalidar el texture atlas (ver clearAtlas) cuando cambia la geometría de celda
+        pane._atlasGeo = '';  // atlas nuevo → que el próximo syncTerm no lo dé por bueno
+      }
+    } catch (e) { pane._wglFail = 2; /* WebGL no disponible (GPU vieja/sandbox) → DOM built-in, igual que antes */ }
+  }
+  function detachWebgl(pane) {
+    if (!pane || !pane._wgl) return;
+    try { pane._wgl.dispose(); } catch (e) {}
+    pane._wgl = null;
+  }
+  function syncWebglVisibility() {
+    terms.forEach(function (t) {
+      if (!t.pane) return;
+      if (gpuRender && t.pane.offsetParent !== null) attachWebgl(t.pane, t.term);
+      else detachWebgl(t.pane);
+    });
+  }
   function syncTerm(term, fit, pane) {
     if (!term || !fit || !pane || pane.offsetParent === null) return;
     var wasBottom = nearBottom(term);
@@ -2493,6 +2554,8 @@
     // la geometría → con el guard se sigue limpiando cuando hace falta. (font-load: fonts.ready fuerza el clear.)
     var geo = cols + 'x' + rows;
     if (pane._atlasGeo !== geo) { pane._atlasGeo = geo; clearAtlas(pane); }
+    // panel angosto (muchas terminales lado a lado) → sólo los controles vitales en el head (CSS .pane-narrow)
+    try { pane.classList.toggle('pane-narrow', pane.offsetWidth > 0 && pane.offsetWidth < 350); } catch (e) {}
     if (wasBottom) { try { term.scrollToBottom(); } catch (e) {} }
     if (pane._sgGhostVisible) placeShellGhost(pane, term);   // autosuggest: el cursor se movió con el resize → reubicar el ghost
   }
@@ -2514,7 +2577,7 @@
     try { clearAtlas(pane); } catch (e) {}
     try { t.term.refresh(0, (t.term.rows || 1) - 1); } catch (e) {}
   }
-  function repaintVisible() { terms.forEach(function (t) { repaintPane(t.pane); }); }
+  function repaintVisible() { syncWebglVisibility(); terms.forEach(function (t) { repaintPane(t.pane); }); }
   function scheduleRepaintVisible() { if (repaintRaf) cancelAnimationFrame(repaintRaf); repaintRaf = requestAnimationFrame(function () { repaintRaf = null; repaintVisible(); }); }
 
   /* ── estados: show / minimize / restore / maximize / home / hide ── */
@@ -2522,13 +2585,13 @@
     ensureDock(); if (!host) return;
     host.hidden = false; host.classList.remove('minimized');
     document.body.classList.add('dock-open'); document.body.classList.remove('dock-min');
-    notifyMax(); refitSoon();
+    notifyMax(); refitSoon(); scheduleRepaintVisible();
   }
-  function minimize() { ensureDock(); if (!host || host.hidden) return; host.classList.remove('maximized'); host.classList.add('minimized'); document.body.classList.add('dock-min'); notifyMax(); persist(); }
-  function restore() { ensureDock(); host.classList.remove('minimized'); host.hidden = false; document.body.classList.add('dock-open'); document.body.classList.remove('dock-min'); notifyMax(); refitSoon(); persist(); }
+  function minimize() { ensureDock(); if (!host || host.hidden) return; host.classList.remove('maximized'); host.classList.add('minimized'); document.body.classList.add('dock-min'); notifyMax(); persist(); scheduleRepaintVisible(); }
+  function restore() { ensureDock(); host.classList.remove('minimized'); host.hidden = false; document.body.classList.add('dock-open'); document.body.classList.remove('dock-min'); notifyMax(); refitSoon(); persist(); scheduleRepaintVisible(); }
   function toggleMin() { if (host.classList.contains('minimized')) restore(); else minimize(); }
-  function toggleMax() { ensureDock(); host.classList.remove('minimized'); document.body.classList.remove('dock-min'); host.classList.toggle('maximized'); notifyMax(); refitSoon(); persist(); }
-  function hide() { if (!host) return; host.hidden = true; host.classList.remove('maximized', 'minimized'); document.body.classList.remove('dock-open', 'dock-min'); notifyMax(); }
+  function toggleMax() { ensureDock(); host.classList.remove('minimized'); document.body.classList.remove('dock-min'); host.classList.toggle('maximized'); notifyMax(); refitSoon(); persist(); scheduleRepaintVisible(); }
+  function hide() { if (!host) return; host.hidden = true; host.classList.remove('maximized', 'minimized'); document.body.classList.remove('dock-open', 'dock-min'); notifyMax(); scheduleRepaintVisible(); }
   function home() {
     ensureDock(); bindIpc();
     view = '__home__'; viewCwd = ''; viewName = '';
@@ -2587,7 +2650,7 @@
     setEditorOpener: setEditorOpener, setQuickTermHook: setQuickTermHook,
     setHomeProjects: setHomeProjects,
     setClaudeFullscreenDefault: setClaudeFullscreenDefault,
-    setGpuRender: setGpuRender, setFloatingPickers: setFloatingPickers, hasActiveClaudeSessions: hasActiveClaudeSessions,
+    setGpuRender: setGpuRender, setScrollback: setScrollback, setFloatingPickers: setFloatingPickers, hasActiveClaudeSessions: hasActiveClaudeSessions,
     setAutosuggest: setAutosuggest, setAutosuggestRebinder: setAutosuggestRebinder,
     openTourDemo: openTourDemo, closeTourDemo: closeTourDemo,
     openFilePanel: openFilePanel, activeTermCwd: activeTermCwd,

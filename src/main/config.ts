@@ -29,6 +29,7 @@ export interface AppConfig {
   claudeConfigDir: string;     // perfil ACTIVO de Claude Code (config dir). '' = auto (env CLAUDE_CONFIG_DIR → ~/.claude). Multi-perfil (ej ~/.claude-max)
   claudeFullscreen: boolean;   // claude en modo "fullscreen" (input box ANCLADO abajo via alt-screen) en las terminales embebidas. inyecta CLAUDE_CODE_NO_FLICKER=1 (sólo env, no toca disco). default true
   gpuRender: boolean;          // render por GPU (WebGL) en las terminales embebidas → mucho más fluido. default true; opt-out si una GPU rinde mal (cae al renderer DOM)
+  scrollback: number;          // líneas de historial por terminal embebida. 12 bytes/celda → 12000 líneas ≈ 29MB por terminal llena; default 5000 (VS Code usa 3000)
   floatingPickers: boolean;    // selector flotante de @ y / (estilo Warp) en paneles claude. default true; off = @ y / van crudos a claude (su picker inline)
   seenProfileTour: boolean;    // ¿ya vio el tutorial de multi-perfil? (gate confiable bajo file://, no localStorage). Auto-salta 1 vez al actualizar
   seenWhatsNew18: boolean;     // ¿ya vio el tour de novedades v1.8.0? (gate confiable bajo file://). Auto-salta 1 vez tras actualizar
@@ -81,6 +82,7 @@ const DEFAULTS: AppConfig = {
   claudeConfigDir: '',
   claudeFullscreen: true,
   gpuRender: true,
+  scrollback: 5000,
   floatingPickers: true,
   seenProfileTour: false,
   seenWhatsNew18: false,
@@ -158,6 +160,13 @@ export function claudeProjectsPath(cfg?: AppConfig): string {
 /** settings.json del perfil activo (donde se instalan los hooks). */
 export function claudeSettingsPath(cfg?: AppConfig): string {
   return path.join(resolveClaudeDir(cfg), 'settings.json');
+}
+
+/** Store de tareas del perfil activo (<config-dir>/tasks/<sessionId>/<id>.json).
+    Claude Code persiste ahí el estado ACTUAL de sus Task tools — fuente mejor que
+    reconstruirlas del tail del transcript (que en archivos grandes las pierde). */
+export function claudeTasksPath(cfg?: AppConfig): string {
+  return path.join(resolveClaudeDir(cfg), 'tasks');
 }
 
 export interface ClaudeProfile {

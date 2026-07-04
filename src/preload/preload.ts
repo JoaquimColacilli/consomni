@@ -59,8 +59,8 @@ const api = {
   clipboardImageToTempPng: (): Promise<{ ok: boolean; file?: string; reason?: string; width?: number; height?: number; bytes?: number }> =>
     ipcRenderer.invoke('consomni:clipboardImageToTempPng'),
   /** Lee un archivo (visor embebido); guardado a los roots vigilados / cwds de sesión + el cwd del panel, cap 1MB, sin binarios. */
-  readFile: (p: string, cwd?: string, searchIfMissing?: boolean): Promise<{ ok: boolean; content?: string; error?: string; truncated?: boolean; resolvedPath?: string }> =>
-    ipcRenderer.invoke('consomni:readFile', p, cwd, searchIfMissing),
+  readFile: (p: string, cwd?: string, searchIfMissing?: boolean, prevMtimeMs?: number): Promise<{ ok: boolean; content?: string; error?: string; truncated?: boolean; resolvedPath?: string; unchanged?: boolean; mtimeMs?: number }> =>
+    ipcRenderer.invoke('consomni:readFile', p, cwd, searchIfMissing, prevMtimeMs),
   /** Lista archivos del cwd (picker flotante de @); guardado a los roots vigilados; walk acotado. */
   listFiles: (dir: string): Promise<{ ok: boolean; files?: string[]; error?: string; truncated?: boolean }> =>
     ipcRenderer.invoke('consomni:listFiles', dir),
@@ -149,6 +149,8 @@ const api = {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     create: (opts: any): Promise<any> => ipcRenderer.invoke('consomni:termCreate', opts),
     write: (id: string, data: string): void => ipcRenderer.send('consomni:termWrite', { id, data }),
+    /** Flow control: confirma bytes ya escritos en xterm (callback de term.write) → el main reanuda el PTY si pausó. */
+    ack: (id: string, bytes: number): void => ipcRenderer.send('consomni:termAck', { id, bytes }),
     /** Traducir lenguaje natural → comando (claude local). Devuelve {ok,command} o {ok:false,error}. */
     nl: (text: string, cwd?: string): Promise<{ ok: boolean; command?: string; error?: string }> =>
       ipcRenderer.invoke('consomni:nlCommand', { text, cwd }),

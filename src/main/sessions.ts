@@ -10,8 +10,8 @@ import { app } from 'electron';
 import { execFile, execFileSync } from 'child_process';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { parseSessionFile, parseSessionDetail, normalizeWorktreeCwd, type SessionDetail } from './jsonl';
-import { loadConfig, loadLocalState, claudeProjectsPath, type AppConfig } from './config';
-import type { Session, Snapshot, SessionState, SessionMode, SubagentInfo, PlanDoc } from './types';
+import { loadConfig, loadLocalState, claudeProjectsPath, claudeTasksPath, type AppConfig } from './config';
+import type { Session, Snapshot, SessionState, SessionMode, SubagentInfo, PlanDoc, PlanTodo, TodoStatus } from './types';
 
 /** Raíces a vigilar: el projects del perfil ACTIVO + los dirs extra de watchedDirs (dedupe).
     Garantiza vigilar el perfil aunque venga solo del env (sin haber repointado watchedDirs). */
@@ -56,7 +56,8 @@ function computeDiffStat(cwd: string): void {
   const git = getGit();
   const key = diffKey(cwd);
   if (!git) { diffCache.set(key, { added: 0, removed: 0, files: 0, ts: Date.now() }); return; }
-  execFile(git, ['-C', cwd, 'diff', '--shortstat', 'HEAD'], { timeout: 5000, windowsHide: true, maxBuffer: 1 << 20 }, (err, stdout) => {
+  // --no-optional-locks: el poller de fondo no refresca/escribe el index → no compite con el git del usuario
+  execFile(git, ['--no-optional-locks', '-C', cwd, 'diff', '--shortstat', 'HEAD'], { timeout: 5000, windowsHide: true, maxBuffer: 1 << 20 }, (err, stdout) => {
     let added = 0, removed = 0, files = 0;
     if (!err) {
       const out = String(stdout || '');
@@ -78,10 +79,15 @@ function computeDiffStat(cwd: string): void {
     ASÍNCRONO (fs.stat/fs.readFile → NO bloquea el event loop del main, ni con muchos archivos) y
     DETERMINÍSTICO: procesa SIEMPRE el mismo set (orden estable de git status, capado por CANTIDAD) → el
     número no parpadea entre recálculos (un break por presupuesto de tiempo daba sumas parciales distintas). */
+interface UntrackedEntry { size: number; mtimeMs: number; lines: number; }
+// cache de líneas por archivo untracked (key = diffKey(cwd)): sólo se RE-LEE el contenido de un
+// archivo si cambió su size/mtime. Antes se leían hasta 200 archivos (≤256KB c/u ≈ 50MB) ENTEROS
+// en cada recálculo (~3-4s) — el mayor consumo de disco/CPU en reposo de toda la app.
+const untrackedCache = new Map<string, Map<string, UntrackedEntry>>();
 function countUntrackedAdds(git: string, cwd: string, cb: (files: number, added: number) => void): void {
   // core.quotepath=false: si no, git C-quotea rutas con espacios/no-ASCII y no resuelven. --untracked-files=all
   // respeta .gitignore (node_modules suele quedar afuera); el tope de archivos es el backstop por las dudas.
-  execFile(git, ['-C', cwd, '-c', 'core.quotepath=false', 'status', '--porcelain', '--untracked-files=all'],
+  execFile(git, ['--no-optional-locks', '-C', cwd, '-c', 'core.quotepath=false', 'status', '--porcelain', '--untracked-files=all'],
     { timeout: 5000, windowsHide: true, maxBuffer: 4 << 20 }, (err, stdout) => {
     if (err) { cb(0, 0); return; }
     const paths: string[] = [];
@@ -92,20 +98,30 @@ function countUntrackedAdds(git: string, cwd: string, cb: (files: number, added:
       if (p) paths.push(p);
       if (paths.length >= UNTRACKED_MAX_FILES) break;    // cap por CANTIDAD (set fijo → determinístico)
     }
-    if (!paths.length) { cb(0, 0); return; }
+    const key = diffKey(cwd);
+    if (!paths.length) { untrackedCache.delete(key); cb(0, 0); return; }
+    const prev = untrackedCache.get(key);
+    const next = new Map<string, UntrackedEntry>();      // map fresco → GC implícito de archivos que ya no están
     let files = 0, added = 0, pending = paths.length;
-    const done = (): void => { if (--pending === 0) cb(files, added); };
+    const done = (): void => { if (--pending === 0) { untrackedCache.set(key, next); cb(files, added); } };
     for (const rel of paths) {
       const abs = path.join(cwd, rel);
       fs.stat(abs, (e, st) => {
         if (e || !st.isFile()) { done(); return; }
         files++;
         if (st.size > UNTRACKED_MAX_BYTES) { done(); return; }   // grande → contamos el archivo, no las líneas
+        const hit = prev && prev.get(rel);
+        if (hit && hit.size === st.size && hit.mtimeMs === st.mtimeMs) {   // sin cambios → líneas cacheadas, cero I/O
+          added += hit.lines; next.set(rel, hit); done(); return;
+        }
         fs.readFile(abs, (e2, buf) => {
+          let lines = 0;
           if (!e2 && buf && !buf.subarray(0, 8192).includes(0)) {   // saltar binarios (NUL en el head)
             const txt = buf.toString('utf8');
-            if (txt.length) added += txt.split('\n').length - (txt.endsWith('\n') ? 1 : 0);   // líneas del archivo nuevo
+            if (txt.length) lines = txt.split('\n').length - (txt.endsWith('\n') ? 1 : 0);   // líneas del archivo nuevo
           }
+          added += lines;
+          next.set(rel, { size: st.size, mtimeMs: st.mtimeMs, lines });
           done();
         });
       });
@@ -297,6 +313,11 @@ function mergeOverlay(sessions: Session[]): Session[] {
 /** Lista los transcripts top-level (projects/<proj>/<id>.jsonl), sin subagents. */
 function listSessionFiles(): string[] {
   const cfg = loadConfig();
+  // cache TTL: buildSnapshot corre hasta ~1×/s y este listado hacía readdirSync de TODOS los
+  // roots + subdirs en cada pasada (I/O de metadata repetido con 100+ proyectos). Un archivo
+  // NUEVO llega vía chokidar 'add' → invalida el cache al instante (ver startWatcher).
+  const now = Date.now();
+  if (fileListCache && now - fileListCache.ts < FILE_LIST_TTL_MS) return fileListCache.files;
   const files: string[] = [];
   for (const root of watchRoots(cfg)) {
     let projDirs: string[] = [];
@@ -313,8 +334,11 @@ function listSessionFiles(): string[] {
       }
     }
   }
+  fileListCache = { files, ts: now };
   return files;
 }
+let fileListCache: { files: string[]; ts: number } | null = null;
+const FILE_LIST_TTL_MS = 5000;
 
 /* ════════ cache de scan (evita re-parsear transcripts sin cambios) ════════
    buildSnapshot se dispara hasta ~4×/seg (chokidar + hooks + diffTimer); sin cache, cada disparo
@@ -325,8 +349,66 @@ function listSessionFiles(): string[] {
 interface ScanCacheEntry { mtimeMs: number; size: number; localSig: string; session: Session; }
 const scanCache = new Map<string, ScanCacheEntry>();
 
+/* ════════ store de tareas en disco (<config-dir>/tasks/<sessionId>/<id>.json) ════════
+   Claude Code persiste ahí el estado ACTUAL de sus Task tools:
+   { id, subject, description, status, blocks, blockedBy }. Es la fuente PRIMARIA de
+   tareas: siempre al día y no sufre el límite del tail del transcript (collectPlan
+   pierde los TaskCreate en .jsonl de varios MB). El collectPlan del jsonl queda de
+   fallback (TodoWrite / versiones de claude sin store). Se lee sólo en el branch
+   NO-cacheado de scan(): cada TaskUpdate también escribe al transcript → su mtime
+   cambia → el cache se invalida → acá se relee fresco. */
+const TASK_STATUSES = new Set<TodoStatus>(['pending', 'in_progress', 'completed']);
+function readTaskStore(root: string, sessionId: string): { todos: PlanTodo[]; at: number } | null {
+  const dir = path.join(root, sessionId);
+  let entries: fs.Dirent[] = [];
+  try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return null; }
+  const items: { id: number; todo: PlanTodo; mtime: number }[] = [];
+  for (const e of entries) {
+    if (!e.isFile() || !/\.json$/i.test(e.name)) continue;
+    try {
+      const full = path.join(dir, e.name);
+      const raw = JSON.parse(fs.readFileSync(full, 'utf8'));
+      if (!raw || typeof raw !== 'object') continue;
+      const status = String(raw.status || '');
+      if (!TASK_STATUSES.has(status as TodoStatus)) continue; // cancelled/deleted/etc → fuera
+      const content = String(raw.subject || raw.description || '').trim();
+      if (!content) continue;
+      const todo: PlanTodo = { content: content.slice(0, 200), status: status as TodoStatus };
+      if (raw.activeForm) todo.activeForm = String(raw.activeForm).slice(0, 200);
+      let mtime = 0;
+      try { mtime = fs.statSync(full).mtimeMs; } catch { /* noop */ }
+      items.push({ id: Number(raw.id ?? e.name.replace(/\.json$/i, '')) || 0, todo, mtime });
+    } catch { /* json corrupto / a medio escribir: saltar */ }
+  }
+  if (!items.length) return null;
+  items.sort((a, b) => a.id - b.id);
+  return { todos: items.slice(0, 60).map((x) => x.todo), at: Math.max(...items.map((x) => x.mtime)) };
+}
+
+/** Pisa las tareas del plan (reconstruidas del jsonl) con el store en disco si existe.
+    Preserva hasPlan/planAt (ExitPlanMode sólo vive en el transcript). Muta s in place. */
+function applyTaskStore(s: Session, tasksRoot: string): void {
+  const store = readTaskStore(tasksRoot, s.id);
+  if (!store) return;
+  let pending = 0, inProgress = 0, completed = 0;
+  for (const t of store.todos) {
+    if (t.status === 'completed') completed++;
+    else if (t.status === 'in_progress') inProgress++;
+    else pending++;
+  }
+  const prev = s.plan;
+  s.plan = {
+    hasPlan: prev?.hasPlan ?? false,
+    planAt: prev?.planAt,
+    todos: store.todos,
+    pending, inProgress, completed,
+    todoAt: Math.max(store.at, prev?.todoAt || 0) || undefined,
+  };
+}
+
 export function scan(): Session[] {
   const local = loadLocalState();
+  const tasksRoot = claudeTasksPath();
   const sessions: Session[] = [];
   const seen = new Set<string>();
   for (const f of listSessionFiles()) {
@@ -343,6 +425,7 @@ export function scan(): Session[] {
     try {
       const s = parseSessionFile(f, local[id]);
       if (s) {
+        applyTaskStore(s, tasksRoot);  // store en disco gana sobre lo pescado del tail del jsonl
         scanCache.set(f, { mtimeMs: st.mtimeMs, size: st.size, localSig, session: s });
         sessions.push({ ...s });
       }
@@ -387,13 +470,36 @@ export function buildSnapshot(): Snapshot {
   };
 }
 
+/* ── modo eco: el trabajo de MONITOREO se pausa cuando nadie mira ──
+   Los timers del main NO los throttlea Chromium (es Node) → con la ventana oculta/minimizada
+   seguían corriendo parses + git + pushes. Ahora: oculta → se marca dirty y no se hace nada;
+   al volver a verse → UN push fresco. Las PTYs/hooks/notificaciones nativas NO pasan por acá
+   (attn va por setAttnCallback) → nada de lo que las terminales ejecutan se ve afectado. */
+let uiVisible = true;
+let uiDirty = false;
+let onBattery = false;
+export function setUiVisible(v: boolean): void {
+  if (uiVisible === v) return;
+  uiVisible = v;
+  if (v && uiDirty) { uiDirty = false; scheduleUpdate(); }
+}
+export function setOnBattery(v: boolean): void { onBattery = v; }
+
+let lastBuildTs = 0;
+const MIN_BUILD_GAP_MS = 1000;   // máx 1 rebuild/push por segundo (antes hasta 4/s con claude activo)
+
 function pushUpdate(): void {
+  lastBuildTs = Date.now();
   if (onUpdateCb) onUpdateCb(buildSnapshot());
 }
 
 function scheduleUpdate(): void {
+  if (!uiVisible) { uiDirty = true; return; }   // nadie mira → ni parse ni push (refresh al volver)
   if (debounceTimer) clearTimeout(debounceTimer);
-  debounceTimer = setTimeout(pushUpdate, 250); // ≤ 1 update / 250ms
+  // debounce 250ms + piso de 1s entre rebuilds: el primer evento tras quietud sigue siendo ágil,
+  // la escritura CONTINUA del transcript activo ya no re-parsea/re-renderiza 4×/s
+  const wait = Math.max(250, MIN_BUILD_GAP_MS - (Date.now() - lastBuildTs));
+  debounceTimer = setTimeout(pushUpdate, wait);
 }
 
 export function setHooksConnected(v: boolean): void {
@@ -404,15 +510,17 @@ export function setHooksConnected(v: boolean): void {
 }
 
 function onFs(p: string): void { if (p.toLowerCase().endsWith('.jsonl')) scheduleUpdate(); }
+function onFsList(p: string): void { fileListCache = null; onFs(p); }   // add/unlink: invalidar el listado cacheado
 
 function startWatcher(): void {
   const cfg = loadConfig();
+  fileListCache = null;
   watcher = chokidar.watch(watchRoots(cfg), {
     ignoreInitial: true,
     depth: 2,
     ignored: /(^|[/\\])subagents([/\\]|$)/,
   });
-  watcher.on('add', onFs).on('change', onFs).on('unlink', onFs);
+  watcher.on('add', onFsList).on('change', onFs).on('unlink', onFsList);
 }
 
 export function start(onUpdate: (s: Snapshot) => void): void {
@@ -425,7 +533,14 @@ export function start(onUpdate: (s: Snapshot) => void): void {
   // AHORA: sólo recalcula git diff de los cwds activos; computeDiffStat ya hace scheduleUpdate() SÓLO si
   // un valor cambió → cero push cuando no hay cambios reales (git ni jsonl).
   if (diffTimer) clearInterval(diffTimer);
-  diffTimer = setInterval(() => refreshDiffStats(lastSessions), 4000);
+  // modo eco: con la ventana oculta no se recalcula git (nadie ve el badge); con batería,
+  // 1 de cada 8 ticks (~32s) para no quemar spawns de git + Defender todo el día.
+  let diffTick = 0;
+  diffTimer = setInterval(() => {
+    if (!uiVisible) return;
+    if (onBattery && (diffTick++ % 8) !== 0) return;
+    refreshDiffStats(lastSessions);
+  }, 4000);
 }
 
 /** Reinicia el watcher (p.ej. tras cambiar watchedDirs en settings). */
@@ -450,16 +565,10 @@ export function rescanNow(): Snapshot {
 
 /* ════════ detalle de una sesión (panel E2) ════════ */
 export function findSessionFile(id: string): string | null {
-  const cfg = loadConfig();
-  for (const root of watchRoots(cfg)) {
-    let dirs: string[] = [];
-    try {
-      dirs = fs.readdirSync(root, { withFileTypes: true }).filter((d) => d.isDirectory()).map((d) => path.join(root, d.name));
-    } catch { continue; }
-    for (const d of dirs) {
-      const f = path.join(d, id + '.jsonl');
-      if (fs.existsSync(f)) return f;
-    }
+  // reusa el listado cacheado (TTL 5s) en vez de re-caminar todos los roots con readdirSync
+  const want = (id + '.jsonl').toLowerCase();
+  for (const f of listSessionFiles()) {
+    if (path.basename(f).toLowerCase() === want) return f;
   }
   return null;
 }
@@ -499,7 +608,7 @@ export function findPlanDocs(cwd: string): PlanDoc[] {
   try { if (!fs.statSync(cwd).isDirectory()) return []; } catch { return []; }
   const out: PlanDoc[] = [];
   const walk = (dir: string, depth: number): void => {
-    if (depth > 3 || out.length >= 60) return;
+    if (depth > 5 || out.length >= 60) return;  // prof 5: cubre docs anidados (ej syl/docs/superpowers/plans/x.md)
     let entries: fs.Dirent[] = [];
     try { entries = fs.readdirSync(dir, { withFileTypes: true }); } catch { return; }
     for (const e of entries) {

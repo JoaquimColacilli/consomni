@@ -7,13 +7,13 @@ import { app, BrowserWindow, ipcMain, session, Notification, dialog, clipboard }
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { start as startSessions, stop as stopSessions, buildSnapshot, knownCwds, rescanNow, setHooksConnected, applyHookEvent, getDetail, findSessionFile, findPlanDocs, setAttnCallback, restartWatcher, type AttnInfo } from './sessions';
+import { start as startSessions, stop as stopSessions, buildSnapshot, knownCwds, rescanNow, setHooksConnected, applyHookEvent, getDetail, findSessionFile, findPlanDocs, setAttnCallback, restartWatcher, setUiVisible, setOnBattery, type AttnInfo } from './sessions';
 import { runAction, type ActionPayload } from './actions';
 import { startHooksServer, stopHooksServer, isServerListening } from './hooks-server';
 import { install as installHooks, uninstall as uninstallHooks, getStatus as getHooksStatus, isInstalled } from './hooks-install';
 import { loadConfig, saveConfig, setLocalState, loadDock, saveDock, loadLibrary, saveLibrary, loadNotifications, saveNotifications, loadTermHistory, saveTermHistory, detectClaudeProfiles, claudeProjectsPath, resolveClaudeDir, type AppConfig } from './config';
 import { checkForUpdate, initAutoUpdate, triggerAutoCheck, downloadUpdate, getUpdateStatus } from './updates';
-import { setTerminalWindow, createTerm, writeTerm, resizeTerm, killTerm, listTerms, killAllTerms, terminalsAvailable, nlToCommand } from './terminals';
+import { setTerminalWindow, createTerm, writeTerm, resizeTerm, killTerm, listTerms, killAllTerms, terminalsAvailable, nlToCommand, termAck } from './terminals';
 import type { Snapshot, LocalSessionState } from './types';
 
 const RENDERER_DIR = path.join(__dirname, '..', '..', 'src', 'renderer');
@@ -95,6 +95,16 @@ function createWindow(): void {
   });
 
   mainWindow.once('ready-to-show', () => mainWindow?.show());
+  // modo eco: con la ventana minimizada/oculta se pausa el MONITOREO (parses, git diff, pushes) —
+  // las PTYs/hooks/notificaciones siguen; al volver a verse hay un refresh inmediato.
+  const syncVis = (): void => {
+    const w = mainWindow;
+    setUiVisible(!!w && !w.isDestroyed() && w.isVisible() && !w.isMinimized());
+  };
+  mainWindow.on('minimize', syncVis);
+  mainWindow.on('restore', syncVis);
+  mainWindow.on('show', syncVis);
+  mainWindow.on('hide', syncVis);
   void mainWindow.loadFile(path.join(RENDERER_DIR, 'index.html'));
 
   if (process.env.CONSOMNI_DEVTOOLS === '1') {
@@ -204,6 +214,9 @@ if (!gotLock) {
     ipcMain.handle('consomni:termAvailable', () => terminalsAvailable());
     ipcMain.handle('consomni:termCreate', (_e, opts: { cwd?: string; kind?: 'shell' | 'claude'; cols?: number; rows?: number; resume?: string; skip?: boolean; pick?: boolean; fullscreen?: boolean }) => createTerm(opts || {}));
     ipcMain.on('consomni:termWrite', (_e, arg: { id: string; data: string }) => writeTerm(String(arg?.id), String(arg?.data ?? '')));
+    // flow control: el renderer confirma bytes ya dibujados (callback de term.write) → el main
+    // reanuda la lectura del PTY si estaba pausada por watermark
+    ipcMain.on('consomni:termAck', (_e, arg: { id: string; bytes: number }) => termAck(String(arg?.id), Number(arg?.bytes) || 0));
     ipcMain.on('consomni:termResize', (_e, arg: { id: string; cols: number; rows: number }) => resizeTerm(String(arg?.id), Number(arg?.cols), Number(arg?.rows)));
     ipcMain.handle('consomni:termKill', (_e, id: string) => { killTerm(String(id)); return true; });
     ipcMain.handle('consomni:termList', () => listTerms());
@@ -294,7 +307,7 @@ if (!gotLock) {
 
     // lectura de un archivo para el VISOR embebido (click en una ruta del chat/terminal). GUARDADO:
     // solo dentro de los roots vigilados / projects del perfil / cwds de sesiones; cap 1MB; rechaza binarios.
-    ipcMain.handle('consomni:readFile', (_e, filePath: string, cwd?: string, searchIfMissing?: boolean) => {
+    ipcMain.handle('consomni:readFile', (_e, filePath: string, cwd?: string, searchIfMissing?: boolean, prevMtimeMs?: number) => {
       try {
         let fp = path.resolve(String(filePath || ''));
         if (!fp) return { ok: false, error: 'sin ruta' };
@@ -325,6 +338,9 @@ if (!gotLock) {
         if (!fs.existsSync(fp)) return { ok: false, error: 'no existe: ' + path.basename(fp) };
         const st = fs.statSync(fp);
         if (!st.isFile()) return { ok: false, error: 'no es un archivo' };
+        // poll del visor en vivo: si el archivo no cambió (mtime+size del poll anterior), NO re-leer
+        // ni re-mandar hasta 1MB por IPC cada segundo — un "304" barato
+        if (prevMtimeMs && st.mtimeMs === prevMtimeMs) return { ok: true, unchanged: true, mtimeMs: st.mtimeMs };
         const CAP = 1024 * 1024;
         const truncated = st.size > CAP;
         // leer SÓLO los primeros CAP bytes (no el archivo entero) → un .log/.jsonl gigante no infla la RAM del main
@@ -336,7 +352,7 @@ if (!gotLock) {
         const data = read < want ? buf.subarray(0, read) : buf;
         if (data.subarray(0, Math.min(data.length, 4096)).includes(0)) return { ok: false, error: 'archivo binario' };
         // resolvedPath sólo cuando la búsqueda redirigió → el visor actualiza su path (título/poll/botones)
-        return { ok: true, content: data.toString('utf8'), truncated, ...(redirected ? { resolvedPath: fp } : {}) };
+        return { ok: true, content: data.toString('utf8'), truncated, mtimeMs: st.mtimeMs, ...(redirected ? { resolvedPath: fp } : {}) };
       } catch { return { ok: false, error: 'no se pudo leer' }; }
     });
 
@@ -535,6 +551,14 @@ if (!gotLock) {
 
     // Notificación nativa del SO cuando una sesión pasa a 'attn'.
     setAttnCallback(notifyAttn);
+
+    // modo eco: con batería el recálculo de git se estira (~32s); powerMonitor recién anda post-ready
+    try {
+      const { powerMonitor } = require('electron');
+      setOnBattery(typeof powerMonitor.isOnBatteryPower === 'function' ? !!powerMonitor.isOnBatteryPower() : !!powerMonitor.onBatteryPower);
+      powerMonitor.on('on-battery', () => setOnBattery(true));
+      powerMonitor.on('on-ac', () => setOnBattery(false));
+    } catch { /* sin powerMonitor (tests headless) → siempre modo AC */ }
 
     // Server de hooks (127.0.0.1). Los eventos refinan el estado vivo.
     await startHooksServer(cfg.port, (event, payload) => applyHookEvent(event, payload));

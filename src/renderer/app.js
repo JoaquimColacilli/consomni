@@ -43,6 +43,7 @@
     hiddenProjects: [],          // proyectos marcados "esto no es un proyecto" (projKey) — fuera de board/sidebar/archivados; reversible
     confirmCloseTerminal: true,  // avisar antes de cerrar una terminal viva
     plansOpen: false,            // vista "Planes" (frentes: planes/specs/tareas detectados)
+    planTodosOpen: {},           // estado abierto/cerrado de los checklists (sid → bool; sobrevive re-renders)
     frentes: {},                 // estado MANUAL por frente (projKey → {status,note}) — privado, persistido
     planDocs: {},                // cwd → [{path,name,mtime}] (docs plan/spec, cargados on-demand)
     libraryOpen: false,          // vista "Biblioteca" (prompts/skills/rules reutilizables)
@@ -277,6 +278,7 @@
       C.statusbar(o) + C.crt() + '</div>';
   }
   var rafPending = false;
+  var lastScrollView = '';   // vista del último render (el scroll sólo se restaura dentro de la MISMA vista)
   function render() {
     var root = document.getElementById('root');
     if (!root) return;
@@ -284,7 +286,23 @@
     var ae = document.activeElement, noteKey = null, notePos = 0, libQ = false, libPos = 0;
     if (ae && ae.classList && ae.classList.contains('frente-note')) { noteKey = ae.getAttribute('data-frente'); try { notePos = ae.selectionStart; } catch (e0) {} }
     if (ae && ae.classList && ae.classList.contains('lib-search')) { libQ = true; try { libPos = ae.selectionStart; } catch (e0b) {} }
+    // preservar scroll del board (los snapshots vivos re-renderizan: sin esto el scroll salta al inicio)
+    // — sólo si la VISTA no cambió (el scroll de planes no debe aplicarse al board, etc.)
+    var viewKey = (state.plansOpen ? 'plans' : state.libraryOpen ? 'lib' : 'board:' + (state.activeProject || ''));
+    var sb = document.querySelector('main.board'), sbTop = sb ? sb.scrollTop : 0, sbLeft = sb ? sb.scrollLeft : 0;
+    if (viewKey !== lastScrollView) { sbTop = 0; sbLeft = 0; }
+    lastScrollView = viewKey;
+    // preservar el estado abierto/cerrado de los checklists de Planes (interacción del usuario > default)
+    document.querySelectorAll('.plan-card[data-sid] .plan-todos').forEach(function (dt) {
+      var pcard = dt.closest('.plan-card'); if (pcard) state.planTodosOpen[pcard.getAttribute('data-sid')] = dt.open;
+    });
+    // preservar la altura custom (resize manual) de las notas de frente
+    var noteHeights = {};
+    document.querySelectorAll('.frente-note').forEach(function (na) { if (na.style.height) noteHeights[na.getAttribute('data-frente')] = na.style.height; });
     root.innerHTML = buildShell();
+    var sb2 = document.querySelector('main.board');
+    if (sb2 && (sbTop || sbLeft)) { sb2.scrollTop = sbTop; sb2.scrollLeft = sbLeft; }
+    for (var nhKey in noteHeights) { var nh = document.querySelector('.frente-note[data-frente="' + cssEsc(nhKey) + '"]'); if (nh) nh.style.height = noteHeights[nhKey]; }
     document.body.classList.toggle('compacto', state.density === 'compacto');
     document.body.classList.toggle('sb-collapsed', !!state.collapsed);   // el dock arranca a la derecha del sidebar
     document.body.classList.toggle('view-archived', state.activeProject === '__archived');   // archivados: columnas en grilla (wrap), no scroll infinito a la derecha
@@ -309,10 +327,13 @@
     var ss = snap.sessions || [];
     for (var i = 0; i < ss.length; i++) {
       var s = ss[i];
-      parts.push(s.id + '|' + s.state + '|' + (s.ctxPct | 0) + '|' + s.tokensTotal + '|' + s.mode + '|' + s.model +
-        '|' + (s.statusText || '') + '|' + (s.statusEm || '') + '|' + (s.attnReason || '') + '|' + (s.lastActivity || 0) +
+      // lastActivity cuantizado a 5s y tokens a 1k: la escritura continua del transcript activo cambiaba
+      // la firma en CADA push → innerHTML del board entero hasta 4×/s (la card muestra "hace Xs" y "45k"
+      // igual de bien con granularidad gruesa; el push del main ya viene capado a 1/s además)
+      parts.push(s.id + '|' + s.state + '|' + (s.ctxPct | 0) + '|' + ((s.tokensTotal / 1000) | 0) + '|' + s.mode + '|' + s.model +
+        '|' + (s.statusText || '') + '|' + (s.statusEm || '') + '|' + (s.attnReason || '') + '|' + (((s.lastActivity || 0) / 5000) | 0) +
         '|' + (s.pinned ? 1 : 0) + '|' + (s.fav ? 1 : 0) + '|' + (s.branch || '') + '|' + (s.name || '') +
-        '|' + (s.subagents ? s.subagents.length : 0) + '|' + (s.plan ? ((s.plan.updatedAt || 0) + '.' + (s.plan.todos ? s.plan.todos.length : 0)) : 0));
+        '|' + (s.subagents ? s.subagents.length : 0) + '|' + (s.plan ? ((s.plan.todoAt || 0) + '.' + (s.plan.todos ? s.plan.todos.length : 0) + '.' + (s.plan.completed || 0) + '.' + (s.plan.inProgress || 0)) : 0));
     }
     parts.push('H' + (snap.hooksConnected ? 1 : 0) + 'T' + (snap.tokensToday || 0) + 'V' + (snap.appVersion || ''));
     var d = snap.diffStats || {}, dk = Object.keys(d).sort();
@@ -323,7 +344,7 @@
   function setSnapshot(snap) {
     state.snapshot = snap;
     var sig = snapSig(snap);
-    if (sig !== lastSnapSig) { lastSnapSig = sig; scheduleRender(); }
+    if (sig !== lastSnapSig) { lastSnapSig = sig; scheduleRender(); maybeReloadPlanDocs(); }
     if (state.detailId) refreshDetail();
   }
 
@@ -582,6 +603,22 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.23', date: '04 jul 2026', title: 'Modo eco: la app gasta MUCHO menos CPU, GPU, disco y batería', items: [
+      'Con la ventana minimizada u oculta, Consomni deja de trabajar: no parsea transcripts, no corre git, no actualiza la UI (al volver, se pone al día al instante). Tus terminales y claude siguen corriendo exactamente igual — sólo se pausa el monitoreo.',
+      'El badge de cambios (+N/−N) ya no relee el contenido de tus archivos nuevos en cada recálculo (hasta 50MB de disco cada 3 segundos): ahora cachea por archivo y sólo relee lo que cambió. Con batería, además, se recalcula cada ~30s.',
+      'Con claude activo, el tablero se reconstruía hasta 4 veces por segundo; ahora máximo 1 (imperceptible, y el primer cambio tras quietud sigue siendo inmediato).',
+      'Las terminales tienen control de flujo real (el mecanismo de VS Code): si un proceso escupe output más rápido de lo que se puede dibujar, se pausa la lectura unos milisegundos en vez de acumular hasta 50MB en memoria. El output además se agrupa (~8ms) → muchos menos mensajes internos.',
+      'El historial por terminal (scrollback) ahora es configurable en Ajustes (3k/5k/12k líneas; default 5k ≈ 12MB menos de RAM por terminal llena que antes) y el cursor sólo parpadea en la terminal enfocada.',
+      'El visor de archivos en vivo ya no relee y remanda hasta 1MB por segundo si el archivo no cambió (chequea la fecha de modificación primero).',
+      'Menos I/O de fondo: el listado de sesiones se cachea (antes se recorrían todos tus proyectos en disco hasta 4 veces por segundo), el detalle de una sesión no se re-parsea si el transcript no cambió, y los git de fondo usan --no-optional-locks para no interferir con tu git.',
+    ] },
+    { v: '1.9.22', date: '04 jul 2026', title: 'Planes detecta tus tareas siempre + muchas terminales sin bugs visuales', items: [
+      'El tablero de Planes ahora lee las tareas del store que Claude Code guarda en disco (tasks/<sesión>/*.json) en vez de pescarlas del final del transcript. En sesiones largas (transcripts de varios MB) las tareas quedaban fuera del tramo leído y el frente no aparecía: ahora aparece con el estado SIEMPRE actual, y con su título real.',
+      'Con muchas terminales abiertas, el texto ya no se corrompe al cambiar de foco: el render por GPU ahora vive sólo en los paneles VISIBLES (los minimizados o de otras vistas liberan su contexto gráfico y lo recuperan al mostrarse).',
+      'Los paneles del mosaico ya no se aplastan hasta ser ilegibles: cada terminal mantiene un ancho mínimo usable y el mosaico scrollea. En paneles angostos, la cabecera muestra sólo los controles vitales (minimizar/fijar/cerrar).',
+      'En la barra de terminales, el chip de la terminal enfocada se trae solo a la vista (con muchas pestañas quedaba fuera del carrusel).',
+      'La vista Planes ya no pierde el scroll, ni el estado de los checklists, ni la altura de tu nota cuando llega actividad nueva; los frentes 100% terminados se atenúan para que el ojo vaya a lo pendiente; y los docs de plan/spec del repo se descubren más profundo (hasta 5 niveles) y se refrescan solos.',
+    ] },
     { v: '1.9.21', date: '04 jul 2026', title: 'Un worktree ya no es "otro proyecto" + renombrar terminales + visor sin scroll horizontal', items: [
       'Las sesiones que trabajan en un worktree git (una branch aislada, tipo pb-124-reconcile) ahora se agrupan en su repo REAL en vez de fabricar un proyecto por branch. La branch se sigue viendo en la card; las acciones (terminal, editor, diff) siguen yendo al worktree donde está el laburo.',
       'Renombrá cualquier terminal o sesión del dock con click derecho en su chip de la barra de sesiones o en la cabecera del panel (las shells abiertas a mano quedaban "sin nombre"). Enter guarda, vacío vuelve al nombre automático, y el nombre sobrevive al reiniciar.',
@@ -1332,12 +1369,21 @@
     return arr;
   }
 
+  var planDocsSig = null;   // firma de los cwds ya pedidos (para re-pedir sólo si cambió el set de frentes)
   function loadPlanDocs() {
     if (!api || !api.getPlanDocs) return;
     var groups = planView(), cwds = [];
     groups.forEach(function (g) { if (g.cwd && cwds.indexOf(g.cwd) < 0) cwds.push(g.cwd); });
+    planDocsSig = cwds.slice().sort().join('|');
     if (!cwds.length) { state.planDocs = {}; return; }
     api.getPlanDocs(cwds).then(function (m) { state.planDocs = m || {}; if (state.plansOpen) render(); }).catch(function () {});
+  }
+  /** Con Planes abierto, si un snapshot trae frentes nuevos (cwds que no pedimos), recargar docs solos. */
+  function maybeReloadPlanDocs() {
+    if (!state.plansOpen || !api || !api.getPlanDocs) return;
+    var cwds = [];
+    planView().forEach(function (g) { if (g.cwd && cwds.indexOf(g.cwd) < 0) cwds.push(g.cwd); });
+    if (cwds.slice().sort().join('|') !== planDocsSig) loadPlanDocs();
   }
   function openDocFile(p) {
     if (!p || !api || !api.action) return;
@@ -1376,7 +1422,7 @@
       '<div class="plan-card-sub"><span style="color:' + stColor(s.state) + '">' + esc(s.state) + '</span>' +
         '<span class="sep">·</span><span>' + relTime(s.lastActivity) + '</span>' + planChip + '</div>' +
       '<div class="plan-roll">' + rollHtml(p) + '</div>' +
-      (todos.length ? '<details class="plan-todos"' + (p.inProgress ? ' open' : '') + '><summary>' + C.svg('chevR', 10, 2.4) + ' ' + todos.length + (todos.length === 1 ? ' tarea' : ' tareas') + '</summary><div class="tw-list">' + todos.map(todoLine).join('') + '</div></details>' : '') +
+      (todos.length ? '<details class="plan-todos"' + ((state.planTodosOpen[s.id] != null ? state.planTodosOpen[s.id] : p.inProgress) ? ' open' : '') + '><summary>' + C.svg('chevR', 10, 2.4) + ' ' + todos.length + (todos.length === 1 ? ' tarea' : ' tareas') + '</summary><div class="tw-list">' + todos.map(todoLine).join('') + '</div></details>' : '') +
       '<div class="plan-card-acts">' +
         '<button class="pc-act" data-act="plan-resume" data-sid="' + esc(s.id) + '" title="continuar esta sesión (claude --resume)">' + C.svg('reply', 11, 1.8) + ' continuar</button>' +
         '<button class="pc-act" data-act="plan-detail" data-sid="' + esc(s.id) + '">detalle</button>' +
@@ -1401,7 +1447,8 @@
     }).join('') + '</div>' : '';
     var note = '<div class="frente-note-wrap"><div class="pd-lbl">NOTA PRIVADA / IDEA</div>' +
       '<textarea class="frente-note" data-frente="' + esc(g.id) + '" rows="2" placeholder="lo que estás flageando para implementar/mejorar… (sólo local, nunca sale de tu máquina)">' + esc(fr.note || '') + '</textarea></div>';
-    return '<section class="col plan-col" data-frente="' + esc(g.id) + '">' + head + prog +
+    var allDone = g.total > 0 && !g.pending && !g.inProgress;   // frente terminado → atenuado (menos ruido)
+    return '<section class="col plan-col' + (allDone ? ' plan-col--done' : '') + '" data-frente="' + esc(g.id) + '">' + head + prog +
       '<div class="col-cards">' + cards + docsHtml + note + '</div></section>';
   }
   function plansIntro() {
@@ -2152,6 +2199,8 @@
         '<div style="font-size:10px;color:var(--text-4);margin-top:4px">modo fullscreen de claude (alt-screen) → el input queda abajo de todo, como WezTerm · off = inline (input sigue al contenido, scrollback en el buffer) · aplica a terminales nuevas</div>' +
         '<div class="set-row"><span class="k">render por GPU (terminal más fluida) <span style="color:var(--text-3)">· WebGL</span></span>' + seg2('gpuRender', cfg.gpuRender !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
         '<div style="font-size:10px;color:var(--text-4);margin-top:4px">dibuja las terminales en la GPU (WebGL) → mucho más fluido, sobre todo en claude · off = renderer DOM (apagalo sólo si ves la terminal rara en tu GPU) · aplica a terminales nuevas</div>' +
+        '<div class="set-row"><span class="k">historial por terminal (scrollback)</span>' + seg2('scrollback', String(cfg.scrollback || 5000), [['3000', '3k'], ['5000', '5k'], ['12000', '12k']]) + '</div>' +
+        '<div style="font-size:10px;color:var(--text-4);margin-top:4px">líneas que guarda cada terminal para scrollear hacia arriba · más historial = más RAM (12k ≈ 29MB por terminal llena) · aplica en vivo</div>' +
         '<div class="set-row"><span class="k">selector flotante de @ y / <span style="color:var(--text-3)">· estilo Warp</span></span>' + seg2('floatingPickers', cfg.floatingPickers !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
         '<div style="font-size:10px;color:var(--text-4);margin-top:4px">al tipear @ (archivos) o / (comandos) en una terminal de claude, abre una cajita flotante para elegir (no corre la pantalla) · off = @ y / van directo a claude (su selector inline) · aplica en vivo</div>' +
         '<div class="set-row"><span class="k">autocompletar con Tab (terminal)</span>' + seg2('autosuggest', cfg.autosuggest !== false ? 'on' : 'off', [['on', 'on'], ['off', 'off']]) + '</div>' +
@@ -2265,7 +2314,8 @@
           return;
         }
         var patch = {};
-        if (key === 'sounds' || key === 'checkUpdates' || key === 'claudeFullscreen' || key === 'autosuggest' || key === 'gpuRender' || key === 'floatingPickers') patch[key] = (val === 'on'); else patch[key] = val;
+        if (key === 'sounds' || key === 'checkUpdates' || key === 'claudeFullscreen' || key === 'autosuggest' || key === 'gpuRender' || key === 'floatingPickers') patch[key] = (val === 'on'); else if (key === 'scrollback') patch[key] = parseInt(val, 10) || 5000; else patch[key] = val;
+        if (key === 'scrollback') { if (window.ConsomniTerms && window.ConsomniTerms.setScrollback) window.ConsomniTerms.setScrollback(parseInt(val, 10) || 5000); }   // aplica EN VIVO a todas las terminales
         if (key === 'quickTermKind') state.quickTermKind = val;   // aplica sin reiniciar
         if (key === 'autosuggest') { state.autosuggest = (val === 'on'); pushAutosuggest(); }   // aplica en vivo a las terminales
         if (key === 'claudeFullscreen') { state.claudeFullscreen = (val === 'on'); if (window.ConsomniTerms && window.ConsomniTerms.setClaudeFullscreenDefault) window.ConsomniTerms.setClaudeFullscreenDefault(state.claudeFullscreen); }   // default para terminales claude NUEVAS
@@ -2686,7 +2736,7 @@
 
   /* ── ticker: refresca "última actualización" sin re-render ── */
   setInterval(function () {
-    if (!state.snapshot) return;
+    if (document.hidden || !state.snapshot) return;   // ventana oculta → cero trabajo (Chromium degrada el timer, el laburo lo evitamos nosotros)
     var right = document.querySelector('.statusbar .right');
     if (right) right.textContent = 'auto-refresh 2s · última actualización ' + relTime(state.snapshot.generatedAt || Date.now());
   }, 1000);
@@ -2748,6 +2798,7 @@
         if (window.ConsomniTerms && window.ConsomniTerms.setClaudeFullscreenDefault) window.ConsomniTerms.setClaudeFullscreenDefault(state.claudeFullscreen);   // default de modo render para terminales claude nuevas
         if (window.ConsomniTerms && window.ConsomniTerms.setGpuRender) window.ConsomniTerms.setGpuRender(state.gpuRender);   // default de render GPU/WebGL para terminales nuevas
         if (window.ConsomniTerms && window.ConsomniTerms.setFloatingPickers) window.ConsomniTerms.setFloatingPickers(state.floatingPickers);   // selector flotante de @ y / en paneles claude
+        if (window.ConsomniTerms && window.ConsomniTerms.setScrollback) window.ConsomniTerms.setScrollback(cfg.scrollback || 5000);   // historial por terminal (config)
         applyTheme();
       }
       render();

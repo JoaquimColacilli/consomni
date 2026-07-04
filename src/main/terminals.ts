@@ -58,6 +58,8 @@ interface IPty {
   write(data: string): void;
   resize(cols: number, rows: number): void;
   kill(signal?: string): void;
+  pause?(): void;    // flow control (node-pty ≥0.10; guardado con typeof por si el fork no lo trae)
+  resume?(): void;
 }
 interface PtyModule {
   spawn(file: string, args: string[] | string, opts: {
@@ -67,7 +69,43 @@ interface PtyModule {
 }
 
 type TermKind = 'shell' | 'claude';
-interface Term { id: string; proc: IPty; title: string; cwd: string; kind: TermKind; cols: number; rows: number; bootCmd: string | null; }
+interface Term {
+  id: string; proc: IPty; title: string; cwd: string; kind: TermKind; cols: number; rows: number; bootCmd: string | null;
+  pendingOut: string; flushTimer: NodeJS.Timeout | null; unacked: number; paused: boolean;
+}
+
+/* ── flow control + batching PTY→renderer (patrón oficial de xterm.js / VS Code) ──
+   Batching: los chunks del PTY se juntan ~8ms antes del send → muchos menos mensajes IPC con
+   output rápido (imperceptible: < 1 frame de 60Hz). Watermark: si el renderer acumula >512KB
+   sin confirmar (term:ack), se PAUSA la lectura del PTY hasta drenar a <128KB — el proceso
+   NO se pausa (el SO bufferea su salida y el resume llega en ms); evita que un `claude`
+   vomitando output encole hasta 50MB en el write buffer de xterm y clave el renderer. */
+const FLOW_HIGH = 512 * 1024;
+const FLOW_LOW = 128 * 1024;
+const FLUSH_MS = 8;
+const FLUSH_MAX = 64 * 1024;   // flush inmediato si el lote crece demasiado
+function flushOut(t: Term): void {
+  if (t.flushTimer) { clearTimeout(t.flushTimer); t.flushTimer = null; }
+  if (!t.pendingOut) return;
+  const chunk = t.pendingOut;
+  t.pendingOut = '';
+  t.unacked += chunk.length;
+  send('term:data', { id: t.id, data: chunk });
+  if (!t.paused && t.unacked > FLOW_HIGH && typeof t.proc.pause === 'function') {
+    t.paused = true;
+    try { t.proc.pause(); } catch { /* noop */ }
+  }
+}
+/** El renderer confirma bytes ya escritos en xterm (callback de term.write) → reanudar si drenó. */
+export function termAck(id: string, bytes: number): void {
+  const t = terms.get(id);
+  if (!t) return;
+  t.unacked = Math.max(0, t.unacked - (Number(bytes) || 0));
+  if (t.paused && t.unacked < FLOW_LOW) {
+    t.paused = false;
+    try { if (typeof t.proc.resume === 'function') t.proc.resume(); } catch { /* noop */ }
+  }
+}
 
 const terms = new Map<string, Term>();
 let seq = 0;
@@ -161,15 +199,17 @@ export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number;
   const title = kind === 'claude'
     ? (resumed ? 'claude ↻ ' + base : ((opts.skip ? 'claude ⚡ ' : 'claude · ') + base))
     : base + ' · ' + sh.label;
-  const t: Term = { id, proc, title, cwd, kind, cols, rows, bootCmd };
+  const t: Term = { id, proc, title, cwd, kind, cols, rows, bootCmd, pendingOut: '', flushTimer: null, unacked: 0, paused: false };
   terms.set(id, t);
 
   proc.onData((data) => {
     // tipear el comando de arranque recién cuando el shell ya muestra prompt (primer chunk)
     if (t.bootCmd) { const cmd = t.bootCmd; t.bootCmd = null; try { proc.write(cmd + '\r'); } catch { /* noop */ } }
-    send('term:data', { id, data });
+    t.pendingOut += data;
+    if (t.pendingOut.length >= FLUSH_MAX) { flushOut(t); return; }
+    if (!t.flushTimer) t.flushTimer = setTimeout(() => flushOut(t), FLUSH_MS);
   });
-  proc.onExit(({ exitCode }) => { terms.delete(id); send('term:exit', { id, exitCode }); });
+  proc.onExit(({ exitCode }) => { flushOut(t); terms.delete(id); send('term:exit', { id, exitCode }); });
 
   return { ok: true, id, title, cwd, kind };
 }
@@ -195,7 +235,7 @@ export function resizeTerm(id: string, cols: number, rows: number): void {
 
 export function killTerm(id: string): void {
   const t = terms.get(id);
-  if (t) { try { t.proc.kill(); } catch { /* noop */ } terms.delete(id); }
+  if (t) { if (t.flushTimer) clearTimeout(t.flushTimer); try { t.proc.kill(); } catch { /* noop */ } terms.delete(id); }
 }
 
 export function listTerms(): Array<{ id: string; title: string; cwd: string; kind: TermKind }> {
