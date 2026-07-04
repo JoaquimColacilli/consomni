@@ -262,13 +262,53 @@ if (!gotLock) {
       } catch { return { ok: false, reason: 'error' }; }
     });
 
+    // búsqueda por BASENAME para el visor (link con nombre pelado que no existe en el cwd del panel):
+    // BFS acotado (depth/entradas/tiempo) sobre los cwds candidatos, mismos ignorados que listFiles.
+    // Devuelve el PRIMER match (el cwd del panel va primero → gana el más cercano al contexto del click).
+    const findFileByName = (startDirs: string[], baseName: string): string | null => {
+      if (!baseName) return null;
+      const IGNORE = new Set(['node_modules', '.git', 'dist', 'build', '.next', 'out', '.cache', 'coverage', 'release', '.turbo', '.venv', 'venv', '__pycache__', '.idea', '.vscode-test']);
+      const nameLc = baseName.toLowerCase();
+      const deadline = Date.now() + 1200;
+      let seen = 0;
+      const visited = new Set<string>();   // dedupe de cwds repetidos (varias sesiones en el mismo proyecto)
+      for (const start of startDirs) {
+        const key = start.toLowerCase();
+        if (visited.has(key)) continue;
+        visited.add(key);
+        const queue: Array<{ d: string; depth: number }> = [{ d: start, depth: 0 }];
+        while (queue.length) {
+          if (Date.now() > deadline || seen > 8000) return null;
+          const { d, depth } = queue.shift()!;
+          let ents: fs.Dirent[];
+          try { ents = fs.readdirSync(d, { withFileTypes: true }); } catch { continue; }
+          for (const en of ents) {
+            seen++;
+            if (en.isFile()) { if (en.name.toLowerCase() === nameLc) return path.join(d, en.name); }
+            else if (en.isDirectory() && depth < 6 && !IGNORE.has(en.name) && !en.name.startsWith('.')) queue.push({ d: path.join(d, en.name), depth: depth + 1 });
+          }
+        }
+      }
+      return null;
+    };
+
     // lectura de un archivo para el VISOR embebido (click en una ruta del chat/terminal). GUARDADO:
     // solo dentro de los roots vigilados / projects del perfil / cwds de sesiones; cap 1MB; rechaza binarios.
-    ipcMain.handle('consomni:readFile', (_e, filePath: string, cwd?: string) => {
+    ipcMain.handle('consomni:readFile', (_e, filePath: string, cwd?: string, searchIfMissing?: boolean) => {
       try {
-        const fp = path.resolve(String(filePath || ''));
+        let fp = path.resolve(String(filePath || ''));
         if (!fp) return { ok: false, error: 'sin ruta' };
         const cfg = loadConfig();
+        // link con NOMBRE PELADO (sin ruta): claude a veces menciona un archivo que vive en OTRO proyecto,
+        // y el join contra el cwd del panel da un path inexistente → ENOENT → "no se pudo leer". Antes de
+        // rendirse, buscar el basename en el cwd del panel + los cwds de sesiones conocidas (walk acotado;
+        // sólo en la lectura INICIAL del visor — los polls de sync ya llegan con el path resuelto).
+        let redirected = false;
+        if (searchIfMissing && !fs.existsSync(fp)) {
+          const starts = [...(cwd ? [String(cwd)] : []), ...knownCwds()].map((r) => path.resolve(String(r))).filter(Boolean);
+          const found = findFileByName(starts, path.basename(fp));
+          if (found) { fp = path.resolve(found); redirected = true; }
+        }
         const roots = [
           claudeProjectsPath(cfg),
           ...(Array.isArray(cfg.watchedDirs) ? cfg.watchedDirs : []),
@@ -282,6 +322,7 @@ if (!gotLock) {
         const fpc = ci ? fp.toLowerCase() : fp;
         const allowed = roots.some((root) => { const r = ci ? root.toLowerCase() : root; return fpc === r || fpc.startsWith(r + path.sep); });
         if (!allowed) return { ok: false, error: 'fuera del alcance permitido' };
+        if (!fs.existsSync(fp)) return { ok: false, error: 'no existe: ' + path.basename(fp) };
         const st = fs.statSync(fp);
         if (!st.isFile()) return { ok: false, error: 'no es un archivo' };
         const CAP = 1024 * 1024;
@@ -294,7 +335,8 @@ if (!gotLock) {
         try { read = fs.readSync(fd, buf, 0, want, 0); } finally { fs.closeSync(fd); }
         const data = read < want ? buf.subarray(0, read) : buf;
         if (data.subarray(0, Math.min(data.length, 4096)).includes(0)) return { ok: false, error: 'archivo binario' };
-        return { ok: true, content: data.toString('utf8'), truncated };
+        // resolvedPath sólo cuando la búsqueda redirigió → el visor actualiza su path (título/poll/botones)
+        return { ok: true, content: data.toString('utf8'), truncated, ...(redirected ? { resolvedPath: fp } : {}) };
       } catch { return { ok: false, error: 'no se pudo leer' }; }
     });
 

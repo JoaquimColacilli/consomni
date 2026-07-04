@@ -273,7 +273,7 @@
   function openFilePanel(filePath, cwd) {
     if (!filePath) return;
     ensureDock(); show();
-    var ex = allPanes().filter(function (p) { return p.dataset.kind === 'file' && p.dataset.fpath === filePath; })[0];
+    var ex = allPanes().filter(function (p) { return p.dataset.kind === 'file' && (p.dataset.fpath === filePath || p.dataset.fsrc === filePath); })[0];
     if (ex) { if (!rootEl.contains(ex)) showView(view); setFocus(ex); return; }
     var pane = makePaneShell('file');
     pane.dataset.kind = 'file'; pane.dataset.fpath = filePath;
@@ -332,7 +332,17 @@
     if (!api || !api.readFile) { if (isInitial) { var p0 = body.querySelector('.dk-fv-pre'); if (p0) p0.textContent = 'lector de archivos no disponible'; } return; }
     // pasamos el cwd del panel → el main lo suma al allowlist (un .md abierto desde una terminal cuyo cwd
     // no es una sesión JSONL trackeada se rechazaba con "fuera del alcance" → "no se pudo leer"). Bug fix.
-    api.readFile(fpath, (pane && pane.dataset.cwd) || '').then(function (r) { applyFileRead(pane, body, r, isMd, isInitial); })
+    // 3er arg: sólo en la lectura INICIAL el main busca el basename en los proyectos conocidos si el path
+    // no existe (link con nombre pelado que vive en OTRO proyecto) y devuelve resolvedPath → redirigimos.
+    api.readFile(fpath, (pane && pane.dataset.cwd) || '', !!isInitial).then(function (r) {
+      if (isInitial && r && r.ok && r.resolvedPath && r.resolvedPath !== fpath) {
+        pane.dataset.fsrc = fpath;                 // path pedido original → el dedupe de openFilePanel lo reconoce
+        pane.dataset.fpath = r.resolvedPath;
+        setPaneMeta(pane, svg('ext', 12, 1.8), fileBase(r.resolvedPath), projLabel(pane));
+        stopFilePoll(pane); startFilePoll(pane, r.resolvedPath, body, isMd);
+      }
+      applyFileRead(pane, body, r, isMd, isInitial);
+    })
       .catch(function () { if (isInitial) { var pre = body.querySelector('.dk-fv-pre'); if (pre) pre.textContent = '✗ error al leer'; } });
   }
   function startFilePoll(pane, fpath, body, isMd) {
@@ -369,8 +379,10 @@
       var bd = pane.querySelector('.dk-pane-body'); bd.querySelector('.dk-fv-pre').hidden = s.view; bd.querySelector('.dk-fv-md').hidden = !s.view;
     });
     mk('dk-fv-copy', 'copiar todo', 'copy', function () { var s = pane._fileState; if (s && api && api.action) api.action('copyText', { text: s.content }).then(function () { notifier('archivo copiado'); }); });
-    mk('dk-fv-edit', 'abrir en editor', 'ext', function () { openFileEditor(fpath, dir); });
-    mk('dk-fv-reveal', 'revelar ubicación', 'folder', function () { revealFilePath(fpath); });
+    // leer el path VIVO del dataset (no el closure): la lectura inicial puede REDIRIGIR el panel al
+    // path real (link con nombre pelado encontrado en otro proyecto) después de crear estos botones.
+    mk('dk-fv-edit', 'abrir en editor', 'ext', function () { var f = pane.dataset.fpath || fpath; openFileEditor(f, fileDir(f) || dir); });
+    mk('dk-fv-reveal', 'revelar ubicación', 'folder', function () { revealFilePath(pane.dataset.fpath || fpath); });
   }
   // cabecera del dock: "TERMINALES" en inicio; el NOMBRE del proyecto cuando estás dentro de uno.
   function updateTitle() {

@@ -1912,6 +1912,40 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.20 — Visor de archivo: busca el basename en los proyectos conocidos ("no se pudo leer")
+> Bug reportado por Facundo: click en un archivo linkeado en la conversación/terminal → "✗ no se pudo leer".
+> Bump **1.9.19 → 1.9.20**. Causa raíz CONFIRMADA empíricamente (archivo real localizado en disco + ENOENT
+> reproducido). Aditivo, respeta las 4 Hard Rules (sólo `fs` local read-only dentro del allowlist existente).
+
+- **Causa raíz:** el link era un **nombre pelado** (`REI_Workflows_and_Agent.md`, sin ruta) mencionado por
+  claude en un panel cuyo cwd era el proyecto `BigDipper`, pero el archivo vivía en el proyecto HERMANO
+  (`D:\code\whatsnap\Rei Alchemist\`). `resolveFilePath` une el nombre al cwd del panel → path inexistente →
+  `statSync` ENOENT → el catch genérico del IPC devolvía "no se pudo leer". **NO** era el allowlist (ese
+  devuelve "fuera del alcance permitido"). Caso: claude trabaja "cruzado" (crea/menciona archivos de otro cwd).
+- **Fix (main, `index.ts`):** `consomni:readFile` acepta 3er arg `searchIfMissing`. Si el path no existe,
+  **busca el basename** con `findFileByName(starts, base)`: BFS acotado (depth ≤6, ≤8000 entradas, ≤1.2s,
+  mismos IGNORE que `listFiles`, case-insensitive, dedupe de starts) sobre `[cwd del panel, ...knownCwds()]`
+  — el cwd del panel va PRIMERO (gana el match más cercano al contexto del click). El path encontrado re-pasa
+  el allowlist (los starts ya son parte de él → defensa en profundidad gratis). Devuelve `resolvedPath` sólo
+  si redirigió. Además: si no existe (con o sin búsqueda) → error claro `no existe: <basename>` en vez del
+  catch genérico.
+- **Renderer (`terminals-ui.js`):** `refreshFile` pasa `!!isInitial` como `searchIfMissing` (**sólo la lectura
+  inicial busca**; el poll de sync 1s ya llega con el path resuelto → cero walks por segundo). Si la respuesta
+  trae `resolvedPath` distinto → **redirect del panel**: `dataset.fsrc` guarda el path pedido original (el
+  dedupe de `openFilePanel` matchea ambos → re-click del mismo link enfoca el panel, no abre otro),
+  `dataset.fpath` pasa al real, se actualiza el título (`setPaneMeta`) y se reinicia el poll con el path real.
+  Los botones "abrir en editor"/"revelar" leen `pane.dataset.fpath` VIVO (antes capturaban el path por closure
+  → tras un redirect habrían abierto el path inexistente).
+- **Preload:** `readFile(p, cwd?, searchIfMissing?)` + `resolvedPath?` en el tipo.
+- **Verificación:** unit test node 10/10 (réplica exacta de `findFileByName`: hermano/case/inexistente/
+  node_modules/depth 3/depth>6/dup starts/start inexistente/basename vacío + **caso REAL contra el disco**:
+  encuentra `REI_Workflows_and_Agent.md` en `Rei Alchemist` partiendo de BigDipper). `tsc` limpio,
+  `node --check` OK. **Límite del entorno:** la app del usuario estaba corriendo (single-instance lock) → el
+  e2e con click real lo confirma el usuario al reiniciar la app.
+- **Límite conocido:** archivos homónimos en varios proyectos → abre el primero (cwd del panel primero, después
+  orden de `knownCwds`). Rutas relativas con subcarpeta (`docs/x.md`) que no existan bajo el cwd también entran
+  a la búsqueda por basename (se pierde el hint del directorio; aceptable, el caso dominante es nombre pelado).
+
 ## Diseño: qué parametrizar (sin cambiar markup ni clases)
 `window.Chrome = { icon, svg, eye, card, column, qa, topbar, sidebar, statusbar, board, crt, mount, DATA, I }`
 (todos devuelven **HTML string**; `mount(o)` reemplaza `[data-chrome]` por `el.outerHTML`).

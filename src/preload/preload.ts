@@ -59,8 +59,8 @@ const api = {
   clipboardImageToTempPng: (): Promise<{ ok: boolean; file?: string; reason?: string; width?: number; height?: number; bytes?: number }> =>
     ipcRenderer.invoke('consomni:clipboardImageToTempPng'),
   /** Lee un archivo (visor embebido); guardado a los roots vigilados / cwds de sesión + el cwd del panel, cap 1MB, sin binarios. */
-  readFile: (p: string, cwd?: string): Promise<{ ok: boolean; content?: string; error?: string; truncated?: boolean }> =>
-    ipcRenderer.invoke('consomni:readFile', p, cwd),
+  readFile: (p: string, cwd?: string, searchIfMissing?: boolean): Promise<{ ok: boolean; content?: string; error?: string; truncated?: boolean; resolvedPath?: string }> =>
+    ipcRenderer.invoke('consomni:readFile', p, cwd, searchIfMissing),
   /** Lista archivos del cwd (picker flotante de @); guardado a los roots vigilados; walk acotado. */
   listFiles: (dir: string): Promise<{ ok: boolean; files?: string[]; error?: string; truncated?: boolean }> =>
     ipcRenderer.invoke('consomni:listFiles', dir),

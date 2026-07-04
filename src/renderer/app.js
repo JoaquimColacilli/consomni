@@ -582,6 +582,10 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.20', date: '03 jul 2026', title: 'Los archivos que claude nombra se abren aunque vivan en otro proyecto', items: [
+      'Al clickear un archivo mencionado por su nombre pelado (sin ruta) en el chat o la terminal, el visor a veces decía "no se pudo leer": el archivo existía, pero en OTRO proyecto. Ahora Consomni lo busca en tus proyectos conocidos y lo abre igual (el panel se redirige al archivo real y el sync en vivo sigue ese archivo).',
+      'Si de verdad no existe, el error ahora dice QUÉ archivo no encontró (antes era un "no se pudo leer" genérico).',
+    ] },
     { v: '1.9.19', date: '03 jul 2026', title: 'Ctrl+C copia en la terminal de claude (con texto seleccionado)', items: [
       'En la terminal de claude, Ctrl+C con texto seleccionado ahora COPIA (como en cualquier consola de Windows); sin selección sigue interrumpiendo a claude, como siempre.',
       'Sin conflictos: copiar consume la selección, así que un segundo Ctrl+C siempre interrumpe. Y si un redibujo de claude te borra el resaltado justo antes de copiar, Consomni igual copia lo que habías seleccionado (solo por unos segundos — un Ctrl+C tardío para interrumpir nunca copia algo viejo).',
