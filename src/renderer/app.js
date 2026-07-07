@@ -603,6 +603,14 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.24', date: '07 jul 2026', title: 'Dock de terminales: abrir claude de un toque, agrupar por color, reordenar pestañas y nombres claros', items: [
+      'El botón "proyecto" del dock ahora abre claude directo (antes caías en un powershell donde había que tipear claude a mano y el panel quedaba mal nombrado). El selector de proyecto ofrece claude / claude ⚡ / terminal por fila, y el default sale de tus Ajustes.',
+      'Aviso al abrir una terminal en un proyecto que YA tiene una abierta: podés saltar a la existente en vez de abrir otra igual.',
+      'Las pestañas del carrusel son más legibles y ahora se REORDENAN arrastrándolas; el scroll del carrusel pasó a un slider más grueso y fácil de agarrar (se sacó el drag-to-scroll de los chips para que no pelee con el reordenar).',
+      'Agrupá terminales por color en el mosaico: Ctrl+click en la barra de título de varias y "agrupar" les pone un borde del mismo color, editable después (recolor, renombrar el grupo, desagrupar). Las contiguas se leen como un bloque, sin reacomodar el mosaico.',
+      'Copiar en la terminal de claude: seleccionar con el mouse (arrastrando) ahora copia de verdad, y el cartel "Copied N" dejó de mentir — Consomni vuelve a honrar el copiado que anuncia claude.',
+      'Los nombres de terminal ahora ponen SIEMPRE el proyecto primero y el tipo (claude/powershell) atenuado al final, consistente en todas.',
+    ] },
     { v: '1.9.23', date: '04 jul 2026', title: 'Modo eco: la app gasta MUCHO menos CPU, GPU, disco y batería', items: [
       'Con la ventana minimizada u oculta, Consomni deja de trabajar: no parsea transcripts, no corre git, no actualiza la UI (al volver, se pone al día al instante). Tus terminales y claude siguen corriendo exactamente igual — sólo se pausa el monitoreo.',
       'El badge de cambios (+N/−N) ya no relee el contenido de tus archivos nuevos en cada recálculo (hasta 50MB de disco cada 3 segundos): ahora cachea por archivo y sólo relee lo que cambió. Con batería, además, se recalcula cada ~30s.',
@@ -2316,7 +2324,7 @@
         var patch = {};
         if (key === 'sounds' || key === 'checkUpdates' || key === 'claudeFullscreen' || key === 'autosuggest' || key === 'gpuRender' || key === 'floatingPickers') patch[key] = (val === 'on'); else if (key === 'scrollback') patch[key] = parseInt(val, 10) || 5000; else patch[key] = val;
         if (key === 'scrollback') { if (window.ConsomniTerms && window.ConsomniTerms.setScrollback) window.ConsomniTerms.setScrollback(parseInt(val, 10) || 5000); }   // aplica EN VIVO a todas las terminales
-        if (key === 'quickTermKind') state.quickTermKind = val;   // aplica sin reiniciar
+        if (key === 'quickTermKind') { state.quickTermKind = val; if (window.ConsomniTerms && window.ConsomniTerms.setQuickTermDefault) window.ConsomniTerms.setQuickTermDefault(val); }   // aplica sin reiniciar (botón "proyecto" + Ctrl+Espacio)
         if (key === 'autosuggest') { state.autosuggest = (val === 'on'); pushAutosuggest(); }   // aplica en vivo a las terminales
         if (key === 'claudeFullscreen') { state.claudeFullscreen = (val === 'on'); if (window.ConsomniTerms && window.ConsomniTerms.setClaudeFullscreenDefault) window.ConsomniTerms.setClaudeFullscreenDefault(state.claudeFullscreen); }   // default para terminales claude NUEVAS
         if (key === 'gpuRender') { state.gpuRender = (val === 'on'); if (window.ConsomniTerms && window.ConsomniTerms.setGpuRender) window.ConsomniTerms.setGpuRender(state.gpuRender); }   // aplica a terminales NUEVAS
@@ -2799,6 +2807,7 @@
         if (window.ConsomniTerms && window.ConsomniTerms.setGpuRender) window.ConsomniTerms.setGpuRender(state.gpuRender);   // default de render GPU/WebGL para terminales nuevas
         if (window.ConsomniTerms && window.ConsomniTerms.setFloatingPickers) window.ConsomniTerms.setFloatingPickers(state.floatingPickers);   // selector flotante de @ y / en paneles claude
         if (window.ConsomniTerms && window.ConsomniTerms.setScrollback) window.ConsomniTerms.setScrollback(cfg.scrollback || 5000);   // historial por terminal (config)
+        if (window.ConsomniTerms && window.ConsomniTerms.setQuickTermDefault) window.ConsomniTerms.setQuickTermDefault(state.quickTermKind);   // default del botón "proyecto" + Ctrl+Espacio
         applyTheme();
       }
       render();

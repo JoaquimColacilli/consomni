@@ -195,10 +195,10 @@ export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number;
   }
 
   const id = 't' + (++seq);
-  const base = path.basename(cwd) || sh.label;
+  // El título del main es SÓLO el TIPO (el renderer arma "<proyecto/cwd> · <tipo>").
   const title = kind === 'claude'
-    ? (resumed ? 'claude ↻ ' + base : ((opts.skip ? 'claude ⚡ ' : 'claude · ') + base))
-    : base + ' · ' + sh.label;
+    ? (resumed ? 'claude ↻' : (opts.skip ? 'claude ⚡' : 'claude'))
+    : sh.label;
   const t: Term = { id, proc, title, cwd, kind, cols, rows, bootCmd, pendingOut: '', flushTimer: null, unacked: 0, paused: false };
   terms.set(id, t);
 

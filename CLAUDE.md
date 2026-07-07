@@ -1948,6 +1948,62 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.24 — Dock: botón "proyecto" abre claude · aviso de terminal existente · chips reordenables · grupos por color · copiar en claude · nombres proyecto-primero
+> Batch de feedback de Facundo sobre el dock de terminales (roadmap local de 6 pedidos → 5 items + naming).
+> Bump **1.9.23 → 1.9.24** (`package.json` + fallbacks `brand-ver`/`.ver` en `chrome.js` + entrada en `CHANGELOG`
+> de `app.js`). Todo "mejorar lo que existe", cero superficie nueva. Aditivo, respeta las 4 Hard Rules (CSS con
+> tokens; responsive; cero API de Anthropic; cero atribución a IA). `tsc` limpio; `node --check` OK en los 3 .js
+> del renderer. Lo DOM/GPU/timing (drag, grupos, OSC 52) se confirma en vivo.
+
+### 1) Botón "proyecto" del dock abre claude, no un shell pelado (`terminals-ui.js` + `app.js` + `app.css`)
+- **Problema:** `.dk-new-proj` **siempre spawneaba shell** → caías en powershell, tipeabas `claude` a mano y el
+  panel quedaba mal nombrado. **Fix:** el chooser (`openDirChooser` en modo `launch`) ofrece **claude / claude ⚡ /
+  terminal** por fila; Enter = el default de **`config.quickTermKind`** (ya existía, lo comparte Ctrl+Espacio). El
+  default se empuja a `ConsomniTerms.setQuickTermDefault` al boot + al cambiarlo en Settings. `launchKind(kindStr,
+  cwd, dir)` mapea el string al spawn (`shell` / `claude` / `claude`+`{skip}`).
+- **Naming arreglado de yapa:** al abrir claude directo el panel nace `<proyecto> · claude ⚡` (no "powershell").
+
+### 2) Aviso "ya tenés terminal en este proyecto" (`terminals-ui.js` + `app.css`)
+- Al abrir terminal/claude en un cwd que ya tiene N terminales VIVAS (`liveTermsForCwd`, match por `normCwd`, no
+  dead) → popover `#dkExist` (`confirmExistingTerminal`) con **"saltar a la existente"** (`jumpToExisting`) vs
+  **"abrir igual"**. Cablea el botón "proyecto" (Item 1) y los chips de inicio (`launchInProject`).
+
+### 3) Pestañas del carrusel: legibles + reordenables por drag + slider grueso (`terminals-ui.js` + `app.css`)
+- **Legibilidad:** `.dk-sess-chip` de `--text-3` → `--text-2`. **Slider:** scrollbar del carrusel 4px → 9px
+  (thumb visible). **Se sacó el drag-to-scroll de los chips** (peleaba con el reorder) → el scroll va SÓLO por el
+  slider. **Reorder manual:** drag del chip (umbral 5px) reordena en vivo; `commitChipOrder` asigna `dataset.order`
+  0..n, persistido en `dock.json`. `renderSessionBar` ordena por `chipOrder` (los sin orden van al final, sort
+  estable). Sin grupos en la barra (los grupos viven en el mosaico = Item 4).
+
+### 4) Grupos de terminales por color en el mosaico (opción B: borde por panel, sin re-tiling) (`terminals-ui.js` + `app.css`)
+- **Multi-select:** **Ctrl/Cmd+click** en la barra de título de cada terminal (`toggleGroupMark`; guard en
+  `wirePaneDrag` para no arrancar drag). **Agrupar:** color auto de `GROUP_COLORS` (8) → borde fino
+  (`.dk-pane--grouped{box-shadow:inset 0 0 0 2px var(--grp)}`); contiguas fusionan el borde (efecto "tetris") **sin
+  reacomodar** el mosaico. **Editable:** menú `#dkGrpMenu` (swatches para recolor, input para renombrar, botones
+  desagrupar). `group`/`groupColor`/`groupName` persistidos por panel en `dock.json`. Por qué opción B: un hull
+  continuo sólo cierra limpio si los paneles están pegados; como no se re-tilea, el borde por panel da el efecto
+  sin mover nada.
+
+### 5) Copiar en la terminal de claude: OSC 52 re-enganchado (drag-select copia, cartel honesto) (`terminals-ui.js`)
+- **Investigado con harness PTY headless** contra `claude.exe` v2.1.202: claude emite **OSC 52** (`\x1b]52;c;<b64>`)
+  **SÓLO al soltar un drag-select real** (1 por gesto, con el texto en el payload) y muestra "Copied N characters".
+  La v1.9.10 había sacado el handler "porque pisaba el clipboard" → dejó el cartel **MINTIENDO**. **Fix:** se
+  **re-enganchó** `registerOscHandler(52, …)` en `mountTerminal`, scopeado a paneles claude (parsea `<sel>;<b64>`,
+  ignora query `?`, decodifica base64→UTF-8, escribe el clipboard vía `api.action('copyText')`). Efecto: en claude
+  **drag-select = copia** (select-to-copy tipo tmux) y el cartel es honesto. Sin doble-copia: con mouse-tracking ON
+  xterm no selecciona; en "modo selección"/I-beam se strippea el tracking → no hay OSC 52 (mutuamente excluyentes).
+  Ctrl+C queda como v1.9.19 (con selección copia, sin selección SIGINT) — coexiste sin conflicto.
+
+### 6) Nombres de terminal: PROYECTO siempre primero, tipo atenuado al final (`terminals.ts` + `terminals-ui.js`)
+- **Causa raíz:** el título lo armaba el **main** (`terminals.ts`) mezclando tipo+basename (`claude ⚡ DardoV2`), así
+  que el swap del renderer daba doble (`PepBox · claude ⚡ PepBox`) o invertido según si el panel tenía `proj`. **Fix:**
+  el main devuelve **sólo el TIPO** (`claude` / `claude ⚡` / `claude ↻` / label del shell); el renderer arma el nombre
+  principal = **`projLabel(pane) || cwdBase(cwd)`** y el tipo va de suffix atenuado (`.dk-pt-proj`). `setPaneMeta`
+  quedó en su forma original (principal + suffix), el rename manual (`cname`) sigue ganando como principal. Consistente
+  en todas: `DardoV2 · claude ⚡`, `consomni · powershell`.
+
+---
+
 ## v1.9.23 — MODO ECO (menos CPU/GPU/disco/batería) — investigación + auditoría + fixes
 > Pedido de Facundo: "que la app gaste menos recursos". Proceso: 2 agentes (auditoría exhaustiva del repo +
 > research web de best practices Electron/xterm/chokidar/git 2024-2026, con fuentes) + mediciones EN VIVO de

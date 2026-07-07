@@ -267,17 +267,18 @@ body.view-archived .board{ flex-wrap: wrap; align-content: flex-start; overflow-
 #terminals.dock.minimized .dk-resize{display:none;}
 
 /* ── F6 · barra de sesiones: chips de todas las terminales vivas de la vista (cambiar / minimizar sin matar) ── */
-.dk-sessions{flex:none;display:flex;align-items:center;gap:6px;height:34px;padding:0 9px;background:var(--bg-chrome);border-bottom:1px solid var(--border);overflow-x:auto;overflow-y:hidden;cursor:grab;}
-.dk-sessions.dragging,.dk-sessions.dragging .dk-sess-chip{cursor:grabbing;}
-.dk-sessions.dragging{user-select:none;}
-.dk-sessions::-webkit-scrollbar{height:4px;}
+/* Item 3 · carrusel: scroll SÓLO por el slider (engrosado), chips más legibles y arrastrables para reordenar */
+.dk-sessions{flex:none;display:flex;align-items:center;gap:6px;height:38px;padding:0 9px;background:var(--bg-chrome);border-bottom:1px solid var(--border);overflow-x:auto;overflow-y:hidden;}
+.dk-sessions.reordering{user-select:none;}
+.dk-sessions::-webkit-scrollbar{height:9px;}
 .dk-sessions::-webkit-scrollbar-track{background:transparent;}
-.dk-sessions::-webkit-scrollbar-thumb{background:rgba(255,255,255,.16);border-radius:4px;}
-.dk-sessions::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.28);}
-.dk-sess-chip{display:inline-flex;align-items:center;gap:6px;flex:none;max-width:200px;height:24px;padding:0 9px;border-radius:7px;border:1px solid var(--border-soft);background:var(--surface-input);color:var(--text-3);font-family:'Geist Mono',monospace;font-size:11px;cursor:pointer;}
-.dk-sess-chip svg{color:var(--text-4);flex:none;}
+.dk-sessions::-webkit-scrollbar-thumb{background:rgba(255,255,255,.28);border-radius:6px;min-width:40px;}
+.dk-sessions::-webkit-scrollbar-thumb:hover{background:rgba(255,255,255,.42);}
+.dk-sess-chip{display:inline-flex;align-items:center;gap:6px;flex:none;max-width:200px;height:24px;padding:0 9px;border-radius:7px;border:1px solid var(--border-soft);background:var(--surface-input);color:var(--text-2);font-family:'Geist Mono',monospace;font-size:11px;cursor:grab;}
+.dk-sess-chip svg{color:var(--text-3);flex:none;}
+.dk-sess-chip.dragging{opacity:.55;cursor:grabbing;border-color:var(--green);}
 .dk-sess-nm{white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
-.dk-sess-chip:hover{border-color:var(--border);color:var(--text-2);}
+.dk-sess-chip:hover{border-color:var(--border);color:var(--text-1);background:var(--surface-card);}
 .dk-sess-chip.active{border-color:var(--green);color:var(--text-1);background:rgba(34,197,94,.1);}
 .dk-sess-chip.active svg{color:var(--green);}
 .dk-sess-chip.min{opacity:.62;border-style:dashed;}
@@ -1110,3 +1111,42 @@ body.light .col-diff,body.light .dk-tb-diff{border-color:var(--border);}
 .dk-dir-item:hover{background:rgba(255,255,255,.06);color:#fff;}
 .dk-dir-item:hover .dk-dir-name{color:#fff;}
 .dk-dir-empty{padding:12px;color:#7a7a85;font-size:11px;text-align:center;}
+/* Item 1 — botón "proyecto": filas con acciones claude/⚡/shell (modo launch); default resaltado en verde */
+.dk-dir-hint{padding:0 11px 7px;color:#8a8a93;font-size:10px;line-height:1.45;}
+.dk-dir-hint b{color:#c8c8cf;font-weight:600;}
+.dk-dir-launch{padding:1px 4px 1px 0;gap:2px;cursor:default;}
+.dk-dir-launch:hover{background:transparent;}
+.dk-dir-main{display:flex;align-items:center;gap:8px;flex:1 1 auto;min-width:0;padding:6px 8px;border:0;border-radius:6px;background:transparent;color:#c8c8cf;font:inherit;font-size:12px;cursor:pointer;text-align:left;}
+.dk-dir-main svg{color:#7a7a85;flex:none;}
+.dk-dir-main .dk-dir-name{color:#e8e8ea;white-space:nowrap;flex:none;}
+.dk-dir-main .dk-dir-path{color:#6e6e78;font-size:10px;margin-left:auto;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;max-width:118px;padding-left:8px;}
+.dk-dir-main:hover{background:rgba(255,255,255,.06);color:#fff;}
+.dk-dir-main:hover .dk-dir-name{color:#fff;}
+.dk-dir-acts{display:flex;align-items:center;gap:2px;flex:none;}
+.dk-dir-go{display:inline-flex;align-items:center;justify-content:center;width:26px;height:26px;border:0;border-radius:6px;background:transparent;color:#8a8a93;cursor:pointer;}
+.dk-dir-go svg{color:inherit;}
+.dk-dir-go:hover{background:rgba(255,255,255,.1);color:#fff;}
+.dk-dir-go.is-default{color:var(--green);}
+.dk-dir-bolt{font-size:13px;line-height:1;}
+/* Item 2 — aviso "ya tenés terminal en este proyecto" */
+.dk-existconf{position:fixed;inset:0;z-index:82;display:flex;align-items:center;justify-content:center;background:rgba(0,0,0,.5);animation:atIn .1s ease-out;}
+.dk-existconf-card{width:360px;max-width:calc(100vw - 24px);background:#16161c;border:1px solid rgba(255,255,255,.12);border-radius:12px;box-shadow:0 18px 54px rgba(0,0,0,.6);padding:16px;font-family:'Geist Mono',ui-monospace,monospace;}
+.dk-existconf-ttl{display:flex;align-items:center;gap:8px;font-size:13px;font-weight:600;color:#e8e8ea;}
+.dk-existconf-ttl svg{color:#7a7a85;flex:none;}
+.dk-existconf-body{margin:9px 0 15px;font-size:11.5px;line-height:1.5;color:#a8a8b0;}
+.dk-existconf-btns{display:flex;gap:8px;justify-content:flex-end;}
+/* Item 4 — grupos de terminales por color (opción B: borde inset por panel; contiguas leen como bloque) */
+.dk-pane--grouped{box-shadow:inset 0 0 0 2px var(--grp);}
+.dk-pane--grouped.focused{box-shadow:inset 0 0 0 2px var(--grp),inset 0 0 0 3px rgba(74,222,128,.35);}
+.dk-pane.grp-mark{outline:2px dashed var(--blue-2);outline-offset:-2px;}
+.dk-pane-grp{width:11px;height:11px;border-radius:50%;border:0;padding:0;flex:none;cursor:pointer;box-shadow:0 0 0 1px rgba(0,0,0,.35);}
+.dk-pane-grpnm{flex:none;max-width:84px;font-family:'Geist Mono',monospace;font-size:10px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;}
+.dk-grpbar{position:fixed;left:50%;transform:translateX(-50%);bottom:42px;z-index:83;display:flex;align-items:center;gap:10px;padding:8px 12px;background:#16161c;border:1px solid rgba(255,255,255,.14);border-radius:10px;box-shadow:0 10px 34px rgba(0,0,0,.5);font-family:'Geist Mono',monospace;animation:atIn .1s ease-out;}
+.dk-grpbar-n{font-size:11.5px;color:var(--text-2);}
+.dk-grpmenu{width:212px;padding:8px;}
+.dk-grp-lbl{font-size:10px;color:var(--text-3);text-transform:uppercase;letter-spacing:.5px;padding:2px 4px 0;}
+.dk-grp-sws{display:flex;flex-wrap:wrap;gap:5px;margin:6px 4px 8px;}
+.dk-grp-sw{width:20px;height:20px;border-radius:5px;border:2px solid transparent;padding:0;cursor:pointer;}
+.dk-grp-sw.on{border-color:#fff;}
+.dk-grp-nm{display:block;width:calc(100% - 8px);margin:0 4px 6px;height:26px;padding:0 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:#0f0f14;color:#e8e8ea;font:inherit;font-family:'Geist Mono',monospace;font-size:11px;outline:none;}
+.dk-grp-nm:focus{border-color:rgba(34,197,94,.5);}

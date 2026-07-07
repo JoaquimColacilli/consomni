@@ -29,6 +29,7 @@
   var terms = new Map();       // ptyId -> { term, fit, pane, ro }
   var sessions = new Map();    // sid   -> pane
   var paneSeq = 0;
+  var groupSeq = 0;   // Item 4: contador de grupos de terminales (color) creados en runtime
   var focused = null;
   // "comandos rápidos": atajos deterministas (insertan al toque, gratis) + traducción
   // por lenguaje natural con tu claude LOCAL. Siempre visibles en las terminales.
@@ -49,6 +50,7 @@
   var quickTermHook = null;    // CTRL+ESPACIO dentro de un xterm → abre una terminal nueva (lo inyecta app.js)
   var homeProjects = null;     // provider de proyectos para el inicio (lo inyecta app.js) → [{id,name,cwd,fav}]
   var claudeFsDefault = true;  // default global config.claudeFullscreen (lo empuja app.js); fullscreen=input anclado abajo
+  var quickTermDefault = 'claude-skip';  // config.quickTermKind (shell|claude|claude-skip) — lo empuja app.js; default del botón "proyecto" y Ctrl+Espacio
   var claudeHistHintShown = false;  // tip "Ctrl+O = historial completo" una sola vez por sesión (al retomar un claude en fullscreen)
   var copyHintShown = false;  // tip "copiado · Ctrl+C sin selección interrumpe claude" una sola vez por sesión (la 1ª vez que Ctrl+C copia en claude)
   function isMaximized() { return !!host && host.classList.contains('maximized'); }
@@ -79,6 +81,8 @@
     if (d.pinned === '1') o.pinned = 1;
     if (d.min === '1') o.min = 1;   // F6: minimizada (sigue viva en la barra de sesiones)
     if (d.cname) o.cname = d.cname;   // nombre puesto por el usuario (renombrar panel)
+    if (d.order !== undefined && d.order !== '') o.order = Number(d.order) || 0;   // Item 3: orden manual del carrusel
+    if (d.group) { o.group = d.group; o.groupColor = d.groupColor || ''; if (d.groupName) o.groupName = d.groupName; }   // Item 4: grupo de color
     return o;
   }
   function buildPane(o) {
@@ -90,9 +94,12 @@
     if (o.pinned) pane.dataset.pinned = '1';
     if (o.min) pane.dataset.min = '1';   // F6: restaura minimizada (queda en el pool, viva)
     if (o.cname) pane.dataset.cname = o.cname;   // nombre puesto por el usuario (gana en setPaneMeta)
+    if (o.order !== undefined) pane.dataset.order = Number(o.order) || 0;   // Item 3: orden manual del carrusel
+    if (o.group) { pane.dataset.group = o.group; if (o.groupColor) pane.dataset.groupColor = o.groupColor; if (o.groupName) pane.dataset.groupName = o.groupName; }   // Item 4: grupo de color
     if (kind === 'session') { pane.dataset.sid = o.sid || ''; pane.dataset.sname = o.name || ''; }
     else { if (o.cwd) pane.dataset.cwd = o.cwd; if (o.resume) pane.dataset.resume = o.resume; if (o.skip) pane.dataset.skip = '1'; }
     if (kind === 'claude' && (o.fullscreen === 0 || o.fullscreen === 1)) pane.dataset.fullscreen = o.fullscreen ? '1' : '0';
+    applyPaneGroup(pane);   // Item 4: pintar el color de grupo restaurado
     return pane;
   }
   // compat v1: el dock viejo guardaba un árbol {layout}; extraemos sus paneles (como fijados).
@@ -451,26 +458,37 @@
       var r = c.getBoundingClientRect();
       openRename(pane, Math.round(r.left), Math.round(r.bottom + 6));
     });
-    // F6 carrusel: la barra de sesiones se DESBORDA a la derecha con muchas terminales. Drag-to-scroll
-    // (arrastrar la barra) + rueda vertical → scroll horizontal para llegar a todas. El drag suprime el
-    // click de fin (umbral 4px) para no enfocar un chip al soltar. Listeners de move/up en document para
-    // no perder el drag si el puntero sale de la barra.
+    // Item 3 · carrusel de sesiones: el SCROLL va sólo por el slider (scrollbar nativa engrosada) + rueda
+    // vertical → horizontal. El DRAG de un chip ahora REORDENA (antes scrolleaba la barra → chocaba). Se
+    // reordena el chip en el DOM en vivo y al soltar se persiste el orden (dataset.order por panel).
     (function () {
-      var down = false, sx = 0, sl = 0, moved = false;
+      var down = false, sx = 0, moved = false, chip = null;
       sessBarEl.addEventListener('mousedown', function (e) {
         if (e.button !== 0) return;
-        down = true; moved = false; sx = e.clientX; sl = sessBarEl.scrollLeft;
+        var c = e.target.closest && e.target.closest('.dk-sess-chip'); if (!c) return;   // sólo sobre un chip (el resto = scrollbar nativa)
+        down = true; moved = false; sx = e.clientX; chip = c;
       });
       g.document.addEventListener('mousemove', function (e) {
-        if (!down) return;
-        var dx = e.clientX - sx;
-        if (!moved && Math.abs(dx) > 4) { moved = true; sessBarEl.classList.add('dragging'); }
-        if (moved) sessBarEl.scrollLeft = sl - dx;
+        if (!down || !chip) return;
+        if (!moved && Math.abs(e.clientX - sx) > 5) { moved = true; sessBarEl.classList.add('reordering'); chip.classList.add('dragging'); }
+        if (!moved) return;
+        var chips = Array.prototype.slice.call(sessBarEl.querySelectorAll('.dk-sess-chip'));
+        var x = e.clientX, before = null;
+        for (var i = 0; i < chips.length; i++) {
+          var o = chips[i]; if (o === chip) continue;
+          var r = o.getBoundingClientRect(); if (x < r.left + r.width / 2) { before = o; break; }
+        }
+        if (before) { if (before !== chip.nextSibling) sessBarEl.insertBefore(chip, before); }
+        else if (chip !== sessBarEl.lastElementChild) sessBarEl.appendChild(chip);
       });
       g.document.addEventListener('mouseup', function () {
         if (!down) return; down = false;
-        if (moved) { sessBarEl._suppressClick = true; setTimeout(function () { sessBarEl._suppressClick = false; }, 0); }
-        sessBarEl.classList.remove('dragging');
+        if (moved) {
+          sessBarEl.classList.remove('reordering'); if (chip) chip.classList.remove('dragging');
+          commitChipOrder();
+          sessBarEl._suppressClick = true; setTimeout(function () { sessBarEl._suppressClick = false; }, 0);   // el drop no enfoca el chip
+        }
+        chip = null;
       });
       sessBarEl.addEventListener('wheel', function (e) {
         if (!e.deltaY) return;
@@ -486,14 +504,14 @@
     host.querySelector('.dk-new-claude-skip').addEventListener('click', function () { spawn('claude', null, null, { skip: true }); });
     host.querySelector('.dk-new-cmd').addEventListener('click', openQuickCommands);
     host.querySelector('.dk-new-proj').addEventListener('click', function (e) {
-      openDirChooser({ anchor: e.currentTarget, title: 'abrir terminal en…', onPick: function (ruta) { spawn('shell', ruta, 'right'); } });
+      openDirChooser({ anchor: e.currentTarget, title: 'abrir en un proyecto…', launch: true, onLaunch: function (ruta, kindStr) { launchInProject(ruta, kindStr, 'right'); } });
     });
     // chips de proyecto del placeholder de inicio (F5): abrir terminal/claude en el cwd del proyecto (suelta en inicio)
     host.addEventListener('click', function (e) {
       var hb = e.target.closest && e.target.closest('[data-home-open]');
       if (!hb) return;
       e.stopPropagation();
-      spawn(hb.getAttribute('data-home-open') === 'claude' ? 'claude' : 'shell', hb.getAttribute('data-cwd') || null, 'right');
+      launchInProject(hb.getAttribute('data-cwd') || '', hb.getAttribute('data-home-open') === 'claude' ? 'claude' : 'shell', 'right');
     });
     host.querySelector('.dk-exit').addEventListener('click', function () { host.classList.remove('maximized'); notifyMax(); refitSoon(); persist(); });
     host.querySelector('.dk-max').addEventListener('click', toggleMax);
@@ -605,10 +623,19 @@
     var k = pane.dataset.kind;
     return svg(k === 'claude' ? 'dispatch' : (k === 'session' ? 'reply' : 'term'), 11, 1.8);
   }
+  // Item 3 · orden manual del carrusel: dataset.order (asignado al reordenar por drag; los sin orden van al
+  // final conservando el orden de apertura porque Array.sort es estable). Persistido en dock.json.
+  function chipOrder(p) { var o = p.dataset.order; return (o === undefined || o === '') ? 1e9 : (Number(o) || 0); }
+  function commitChipOrder() {
+    var chips = Array.prototype.slice.call(sessBarEl.querySelectorAll('.dk-sess-chip')), i = 0;
+    chips.forEach(function (c) { var p = paneByKey(c.getAttribute('data-sess-pane')); if (p) p.dataset.order = (i++); });
+    persist(); renderSessionBar();
+  }
   function renderSessionBar() {
     if (!sessBarEl) return;
     if (host && host.classList.contains('minimized')) { sessBarEl.hidden = true; return; }
     var list = allPanes().filter(function (p) { return matchesView(p, view); });
+    list.sort(function (a, b) { return chipOrder(a) - chipOrder(b); });   // orden manual (drag) → dataset.order
     if (!list.length) { sessBarEl.hidden = true; sessBarEl.innerHTML = ''; return; }
     sessBarEl.hidden = false;
     sessBarEl.innerHTML = list.map(function (p) {
@@ -780,6 +807,12 @@
       '</div>' +
       '<div class="dk-pane-body"></div>';
     pane.addEventListener('mousedown', function () { setFocus(pane); });
+    // Item 4 · Ctrl+click en la cabecera → marcar/desmarcar para agrupar (los botones quedan afuera)
+    pane.querySelector('.dk-pane-head').addEventListener('click', function (e) {
+      if (!(e.ctrlKey || e.metaKey)) return;
+      if (e.target.closest && (e.target.closest('.dk-pbtn') || e.target.closest('.dk-pane-grp'))) return;
+      e.preventDefault(); e.stopPropagation(); toggleGroupMark(pane);
+    });
     // click derecho en la cabecera → renombrar el panel (los botones quedan afuera: tienen sus acciones)
     pane.querySelector('.dk-pane-head').addEventListener('contextmenu', function (e) {
       if (e.target.closest && e.target.closest('.dk-pbtn')) return;
@@ -824,7 +857,8 @@
   function setPaneMeta(pane, icon, title, proj) {
     pane._autoTitle = title;   // guardado para volver al nombre automático al des-renombrar (rename vacío)
     pane.querySelector('.dk-pane-ic').innerHTML = icon;
-    // si el usuario renombró el panel (dataset.cname), su nombre GANA sobre el título automático
+    // `title` = nombre PRINCIPAL (proyecto / rename / nombre de sesión), `proj` = suffix atenuado
+    // (el tipo claude/powershell en las terminales). El rename manual (cname) GANA como principal.
     pane.querySelector('.dk-pane-title').innerHTML = esc(pane.dataset.cname || title) + (proj ? ' <span class="dk-pt-proj">· ' + esc(proj) + '</span>' : '');
     // NO seteamos pane.title: el head del panel YA muestra el título visible, y un title nativo sobre el panel
     // entero flotaba en el medio de la terminal al hacer hover ("claude ⚡ X · X"). Sin tooltip redundante.
@@ -900,6 +934,7 @@
     doClosePane(pane);
   }
   function doClosePane(pane) {
+    if (pane.classList.contains('grp-mark')) { pane.classList.remove('grp-mark'); updateGroupBar(); }   // Item 4: si estaba marcado, recalcular la barra tras cerrar
     killPaneContent(pane);
     detachPane(pane);
     if (poolEl && poolEl.contains(pane)) poolEl.removeChild(pane);
@@ -1556,6 +1591,171 @@
     persist();
   }
   function setClaudeFullscreenDefault(on) { claudeFsDefault = (on !== false); }
+  function setQuickTermDefault(k) { if (k === 'shell' || k === 'claude' || k === 'claude-skip') quickTermDefault = k; }
+  // abrir una terminal según el "kind" string (shell|claude|claude-skip): shell / claude / claude ⚡ (skip permisos)
+  function launchKind(kindStr, cwd, dir) {
+    if (kindStr === 'shell') spawn('shell', cwd, dir || 'right');
+    else spawn('claude', cwd, dir || 'right', { skip: kindStr === 'claude-skip' });
+  }
+
+  /* ── Item 2 · aviso "ya tenés terminal en este proyecto" ──
+     Al abrir una terminal en un proyecto (botón "proyecto" / chips de inicio) que YA tiene terminales vivas
+     en ese mismo cwd → confirmar: saltar a la existente vs abrir igual. Evita duplicar sin querer. */
+  function normCwd(c) { return String(c || '').toLowerCase().replace(/\\/g, '/').replace(/\/+$/, ''); }
+  function cwdBase(c) { var p = String(c || '').replace(/[\\/]+$/, ''); return p.split(/[\\/]/).pop() || p; }
+  function liveTermsForCwd(cwd) {
+    var target = normCwd(cwd); if (!target) return [];
+    return allPanes().filter(function (p) {
+      var k = p.dataset.kind; if (k !== 'shell' && k !== 'claude') return false;
+      if (p.classList.contains('dead')) return false;
+      return normCwd(p.dataset.cwd) === target;
+    });
+  }
+  // enfocar una terminal existente (cambia de vista si vive en otro proyecto; restaura si estaba minimizada)
+  function jumpToExisting(pane) {
+    if (!pane) return;
+    var pv = pane.dataset.proj || '__home__';
+    if (pv !== view) setView(pv, pane.dataset.cwd || '', projLabel(pane));
+    if (pane.dataset.min === '1') restorePane(pane); else focusClaudePane(pane);
+  }
+  function launchInProject(cwd, kindStr, dir, projName) {
+    var existing = cwd ? liveTermsForCwd(cwd) : [];
+    if (existing.length) { confirmExistingTerminal(projName || cwdBase(cwd), existing, function () { launchKind(kindStr, cwd, dir); }); return; }
+    launchKind(kindStr, cwd, dir);
+  }
+  function onExistKey(e) { if (e.key === 'Escape') { e.preventDefault(); closeExistConf(); } }
+  function closeExistConf() { var m = g.document.getElementById('dkExist'); if (m) m.remove(); g.document.removeEventListener('keydown', onExistKey, true); }
+  function confirmExistingTerminal(projName, existing, onOpenAnyway) {
+    closeExistConf();
+    var n = existing.length, target = existing[existing.length - 1];   // la más reciente
+    var m = g.document.createElement('div'); m.id = 'dkExist'; m.className = 'dk-existconf';
+    m.innerHTML =
+      '<div class="dk-existconf-card" role="dialog" aria-modal="true">' +
+        '<div class="dk-existconf-ttl">' + svg('term', 14, 2) + ' Ya tenés ' + n + ' ' + (n === 1 ? 'terminal' : 'terminales') + ' en ' + esc(projName) + '</div>' +
+        '<div class="dk-existconf-body">¿Saltás a la que ya está abierta o abrís otra igual?</div>' +
+        '<div class="dk-existconf-btns">' +
+          '<button class="btn btn--sm btn--green" data-ec="jump">' + svg('reply', 12, 2) + ' saltar a la existente</button>' +
+          '<button class="btn btn--sm" data-ec="new">abrir igual</button>' +
+        '</div>' +
+      '</div>';
+    g.document.body.appendChild(m);
+    m.addEventListener('mousedown', function (e) { if (e.target === m) closeExistConf(); });   // click en el scrim = cancelar
+    m.addEventListener('click', function (e) {
+      var b = e.target.closest && e.target.closest('[data-ec]'); if (!b) return;
+      var a = b.getAttribute('data-ec'); closeExistConf();
+      if (a === 'jump') jumpToExisting(target); else if (a === 'new' && onOpenAnyway) onOpenAnyway();
+    });
+    g.document.addEventListener('keydown', onExistKey, true);
+  }
+
+  /* ════════ Item 4 · GRUPOS DE TERMINALES POR COLOR (opción B: borde por panel, sin reacomodar) ════════
+     Ctrl+click en la cabecera marca paneles → barra flotante "agrupar" → grupo con color auto (dataset.group
+     + groupColor + groupName). El color se pinta como box-shadow inset (no mueve el layout). Editable desde el
+     dot de color de la cabecera (recolor / renombrar / desagrupar). Persistido en dock.json. */
+  var GROUP_COLORS = ['#22c55e', '#3b82f6', '#f59e0b', '#a855f7', '#ec4899', '#06b6d4', '#ef4444', '#84cc16'];
+  function usedGroupColors() { var s = {}; allPanes().forEach(function (p) { if (p.dataset.groupColor) s[p.dataset.groupColor] = 1; }); return s; }
+  function nextGroupColor() {
+    var used = usedGroupColors();
+    for (var i = 0; i < GROUP_COLORS.length; i++) if (!used[GROUP_COLORS[i]]) return GROUP_COLORS[i];
+    return GROUP_COLORS[Object.keys(used).length % GROUP_COLORS.length];   // todas en uso → cicla
+  }
+  function newGroupId() {
+    var max = 0; allPanes().forEach(function (p) { var m = /^g(\d+)/.exec(p.dataset.group || ''); if (m) max = Math.max(max, +m[1]); });
+    groupSeq = Math.max(groupSeq, max); return 'g' + (++groupSeq);
+  }
+  function panesInGroup(gid) { return allPanes().filter(function (p) { return p.dataset.group === gid; }); }
+  // pinta (o limpia) el color de grupo de un panel + su dot en la cabecera
+  function applyPaneGroup(pane) {
+    var gid = pane.dataset.group, col = pane.dataset.groupColor;
+    if (gid && col) { pane.classList.add('dk-pane--grouped'); pane.style.setProperty('--grp', col); ensureGroupDot(pane); }
+    else { pane.classList.remove('dk-pane--grouped'); pane.style.removeProperty('--grp'); removeGroupDot(pane); }
+  }
+  function refreshGroups() { allPanes().forEach(applyPaneGroup); }
+  function ensureGroupDot(pane) {
+    var head = pane.querySelector('.dk-pane-head'); if (!head) return;
+    var dot = head.querySelector('.dk-pane-grp');
+    if (!dot) {
+      dot = g.document.createElement('button'); dot.className = 'dk-pane-grp'; dot.title = 'grupo (color / renombrar / desagrupar)';
+      dot.addEventListener('click', function (e) { e.stopPropagation(); openGroupMenu(pane); });
+      var ic = head.querySelector('.dk-pane-ic');
+      if (ic && ic.nextSibling) head.insertBefore(dot, ic.nextSibling); else head.insertBefore(dot, head.firstChild);
+    }
+    dot.style.background = pane.dataset.groupColor || '#888';
+    var nm = head.querySelector('.dk-pane-grpnm');
+    if (pane.dataset.groupName) {
+      if (!nm) { nm = g.document.createElement('span'); nm.className = 'dk-pane-grpnm'; dot.parentNode.insertBefore(nm, dot.nextSibling); }
+      nm.textContent = pane.dataset.groupName; nm.style.color = pane.dataset.groupColor || '';
+    } else if (nm) nm.remove();
+  }
+  function removeGroupDot(pane) {
+    var head = pane.querySelector('.dk-pane-head'); if (!head) return;
+    var d = head.querySelector('.dk-pane-grp'); if (d) d.remove();
+    var n = head.querySelector('.dk-pane-grpnm'); if (n) n.remove();
+  }
+  // ── marcado para agrupar ──
+  function markedPanes() { return allPanes().filter(function (p) { return p.classList.contains('grp-mark'); }); }
+  function toggleGroupMark(pane) { pane.classList.toggle('grp-mark'); updateGroupBar(); }
+  function clearGroupMarks() { allPanes().forEach(function (p) { p.classList.remove('grp-mark'); }); updateGroupBar(); }
+  function updateGroupBar() {
+    var n = markedPanes().length, bar = g.document.getElementById('dkGrpBar');
+    if (!n) { if (bar) bar.remove(); return; }
+    if (!bar) {
+      bar = g.document.createElement('div'); bar.id = 'dkGrpBar'; bar.className = 'dk-grpbar';
+      g.document.body.appendChild(bar);
+      bar.addEventListener('click', function (e) {
+        var b = e.target.closest && e.target.closest('[data-grpbar]'); if (!b) return;
+        if (b.getAttribute('data-grpbar') === 'group') applyGroupFromMarks(); else clearGroupMarks();
+      });
+    }
+    bar.innerHTML = '<span class="dk-grpbar-n">' + n + ' seleccionada' + (n > 1 ? 's' : '') + '</span>' +
+      '<button class="btn btn--sm btn--green" data-grpbar="group">agrupar</button>' +
+      '<button class="btn btn--sm" data-grpbar="clear">limpiar</button>';
+  }
+  function applyGroupFromMarks() {
+    var ps = markedPanes(); if (!ps.length) { updateGroupBar(); return; }
+    var gid = newGroupId(), col = nextGroupColor();
+    ps.forEach(function (p) { p.dataset.group = gid; p.dataset.groupColor = col; p.classList.remove('grp-mark'); applyPaneGroup(p); });
+    updateGroupBar(); persist();
+    try { notifier('agrupadas ' + ps.length + ' terminales'); } catch (e) {}
+  }
+  // ── acciones de grupo (menú del dot) ──
+  function recolorGroup(gid, col) { panesInGroup(gid).forEach(function (p) { p.dataset.groupColor = col; applyPaneGroup(p); }); persist(); }
+  function renameGroup(gid, name) {
+    panesInGroup(gid).forEach(function (p) { if (name) p.dataset.groupName = name; else p.removeAttribute('data-group-name'); applyPaneGroup(p); });
+    persist();
+  }
+  function ungroupPane(pane) { pane.removeAttribute('data-group'); pane.removeAttribute('data-group-color'); pane.removeAttribute('data-group-name'); applyPaneGroup(pane); persist(); }
+  function ungroupGroup(gid) { panesInGroup(gid).forEach(function (p) { p.removeAttribute('data-group'); p.removeAttribute('data-group-color'); p.removeAttribute('data-group-name'); applyPaneGroup(p); }); persist(); }
+  function closeGroupMenu() { var m = g.document.getElementById('dkGrpMenu'); if (m) m.remove(); g.document.removeEventListener('mousedown', onGrpMenuOutside, true); }
+  function onGrpMenuOutside(e) { if (!e.target.closest || !e.target.closest('#dkGrpMenu')) closeGroupMenu(); }
+  function openGroupMenu(pane) {
+    closeGroupMenu();
+    var gid = pane.dataset.group; if (!gid) return;
+    var m = g.document.createElement('div'); m.id = 'dkGrpMenu'; m.className = 'dk-ctx dk-grpmenu';
+    var sws = GROUP_COLORS.map(function (c) { return '<button class="dk-grp-sw' + (c === pane.dataset.groupColor ? ' on' : '') + '" data-col="' + c + '" style="background:' + c + '"></button>'; }).join('');
+    m.innerHTML =
+      '<div class="dk-grp-lbl">grupo</div>' +
+      '<div class="dk-grp-sws">' + sws + '</div>' +
+      '<input class="dk-grp-nm" type="text" maxlength="24" spellcheck="false" placeholder="nombre (opcional)" value="' + esc(pane.dataset.groupName || '') + '">' +
+      '<button class="dk-ctx-i" data-grp="ungroup-one">sacar esta del grupo</button>' +
+      '<button class="dk-ctx-i" data-grp="ungroup-all">desagrupar todo</button>';
+    g.document.body.appendChild(m);
+    var dot = pane.querySelector('.dk-pane-grp'), r = dot ? dot.getBoundingClientRect() : pane.getBoundingClientRect();
+    var mw = m.offsetWidth || 210, mh = m.offsetHeight || 150;
+    m.style.left = Math.max(6, Math.min(Math.round(r.left), g.innerWidth - mw - 6)) + 'px';
+    m.style.top = Math.max(6, Math.min(Math.round(r.bottom + 5), g.innerHeight - mh - 6)) + 'px';
+    m.addEventListener('click', function (e) {
+      var sw = e.target.closest && e.target.closest('.dk-grp-sw');
+      if (sw) { recolorGroup(gid, sw.getAttribute('data-col')); m.querySelectorAll('.dk-grp-sw').forEach(function (s) { s.classList.toggle('on', s === sw); }); return; }
+      var b = e.target.closest && e.target.closest('[data-grp]'); if (!b) return;
+      var a = b.getAttribute('data-grp'); closeGroupMenu();
+      if (a === 'ungroup-one') ungroupPane(pane); else if (a === 'ungroup-all') ungroupGroup(gid);
+    });
+    var nmInp = m.querySelector('.dk-grp-nm');
+    nmInp.addEventListener('keydown', function (e) { e.stopPropagation(); if (e.key === 'Enter') { renameGroup(gid, nmInp.value.trim()); closeGroupMenu(); } else if (e.key === 'Escape') closeGroupMenu(); });
+    nmInp.addEventListener('blur', function () { renameGroup(gid, nmInp.value.trim()); });
+    setTimeout(function () { g.document.addEventListener('mousedown', onGrpMenuOutside, true); }, 0);
+  }
   function setGpuRender(on) { gpuRender = (on !== false); try { syncWebglVisibility(); scheduleRepaintVisible(); } catch (e) {} }   // aplica EN VIVO: on = attach a las visibles, off = detach de todas
   function setScrollback(n) {
     n = Number(n) || 5000;
@@ -1703,13 +1903,31 @@
     opts = opts || {};
     closeDirChooser();
     var dirs = projectDirs();
+    // modo LAUNCH (botón "proyecto"): cada fila ofrece 3 acciones (claude / claude ⚡ / shell). El cuerpo de la
+    // fila y Enter usan el DEFAULT (quickTermDefault, config del usuario). El modo normal (cd) queda igual.
+    var launch = !!opts.launch;
+    function kindLabel(k) { return k === 'shell' ? 'terminal' : (k === 'claude-skip' ? 'claude ⚡' : 'claude'); }
+    function goBtn(cw, k) {
+      var ic = k === 'shell' ? svg('term', 12, 1.8) : svg('dispatch', 12, 1.8);
+      return '<button class="dk-dir-go' + (k === quickTermDefault ? ' is-default' : '') + '" data-cwd="' + cw + '" data-go="' + k + '" title="abrir ' + kindLabel(k) + '">' +
+        (k === 'claude-skip' ? '<span class="dk-dir-bolt">⚡</span>' : ic) + '</button>';
+    }
     function rowsHtml(filter) {
       var f = (filter || '').toLowerCase().trim();
       var list = f ? dirs.filter(function (d) { return d.name.toLowerCase().indexOf(f) >= 0 || d.cwd.toLowerCase().indexOf(f) >= 0; }) : dirs;
       if (!list.length) return '<div class="dk-dir-empty">' + (dirs.length ? 'sin coincidencias' : 'no hay proyectos conocidos — usá "otra…"') + '</div>';
       return list.map(function (d) {
-        return '<button class="dk-dir-item" data-cwd="' + esc(d.cwd) + '">' + svg('folder', 12, 1.7) +
-          '<span class="dk-dir-name">' + esc(d.name) + '</span><span class="dk-dir-path">' + esc(d.cwd) + '</span></button>';
+        var cw = esc(d.cwd);
+        if (!launch) {
+          return '<button class="dk-dir-item" data-cwd="' + cw + '">' + svg('folder', 12, 1.7) +
+            '<span class="dk-dir-name">' + esc(d.name) + '</span><span class="dk-dir-path">' + cw + '</span></button>';
+        }
+        return '<div class="dk-dir-item dk-dir-launch">' +
+          '<button class="dk-dir-main" data-cwd="' + cw + '" data-go="' + esc(quickTermDefault) + '" title="abrir ' + kindLabel(quickTermDefault) + '">' +
+            svg('folder', 12, 1.7) +
+            '<span class="dk-dir-name">' + esc(d.name) + '</span><span class="dk-dir-path">' + cw + '</span></button>' +
+          '<span class="dk-dir-acts">' + goBtn(cw, 'claude') + goBtn(cw, 'claude-skip') + goBtn(cw, 'shell') + '</span>' +
+        '</div>';
       }).join('');
     }
     var m = g.document.createElement('div'); m.id = 'dkDir'; m.className = 'dk-dir-chooser';
@@ -1717,6 +1935,7 @@
       '<div class="dk-dir-head"><span class="dk-dir-title">' + esc(opts.title || 'elegir directorio') + '</span>' +
         '<button class="dk-dir-pick" title="elegir otra carpeta">' + svg('folder', 12, 1.8) + ' otra…</button></div>' +
       '<input class="dk-dir-inp" placeholder="filtrar…" spellcheck="false">' +
+      (launch ? '<div class="dk-dir-hint">Enter / click en el proyecto abre <b>' + esc(kindLabel(quickTermDefault)) + '</b> · elegí otra a la derecha</div>' : '') +
       '<div class="dk-dir-list">' + rowsHtml('') + '</div>';
     g.document.body.appendChild(m);
     var aw = m.offsetWidth || 320, ah = m.offsetHeight || 240;
@@ -1729,14 +1948,24 @@
       m.style.top = '84px';
     }
     function pick(ruta) { closeDirChooser(); if (opts.onPick) opts.onPick(ruta); }
+    function doLaunch(ruta, kindStr) { closeDirChooser(); if (opts.onLaunch) opts.onLaunch(ruta, kindStr); }
     m.querySelector('.dk-dir-pick').addEventListener('click', function (e) {
       e.stopPropagation();
-      if (api && api.pickFolder) api.pickFolder().then(function (p) { if (p) pick(p); });
+      if (api && api.pickFolder) api.pickFolder().then(function (p) { if (!p) return; if (launch) doLaunch(p, quickTermDefault); else pick(p); });
     });
     var inp = m.querySelector('.dk-dir-inp'), listEl = m.querySelector('.dk-dir-list');
     inp.addEventListener('input', function () { listEl.innerHTML = rowsHtml(inp.value); });
+    inp.addEventListener('keydown', function (e) {
+      if (e.key !== 'Enter') return;
+      e.preventDefault(); e.stopPropagation();
+      if (launch) { var fm = listEl.querySelector('.dk-dir-main'); if (fm) doLaunch(fm.getAttribute('data-cwd'), fm.getAttribute('data-go')); }
+      else { var fb = listEl.querySelector('.dk-dir-item[data-cwd]'); if (fb) pick(fb.getAttribute('data-cwd')); }
+    });
     m.addEventListener('click', function (e) {
-      var b = e.target.closest && e.target.closest('.dk-dir-item'); if (!b) return;
+      // launch: cualquier botón con data-go (fila = default · acciones = kind puntual)
+      var go = e.target.closest && e.target.closest('[data-go]');
+      if (go) { doLaunch(go.getAttribute('data-cwd'), go.getAttribute('data-go')); return; }
+      var b = e.target.closest && e.target.closest('.dk-dir-item[data-cwd]'); if (!b) return;   // modo normal (cd)
       pick(b.getAttribute('data-cwd'));
     });
     setTimeout(function () {
@@ -1902,7 +2131,9 @@
     if (kind === 'claude' && pane.dataset.fullscreen !== '0' && pane.dataset.fullscreen !== '1') pane.dataset.fullscreen = claudeFsDefault ? '1' : '0';
     var ic = kind === 'claude' ? '<span class="dk-tdot"></span>' : svg('term', 11, 2);
     var lbl = kind === 'claude' ? ((resume || pick) ? 'claude ↻…' : (skip ? 'claude ⚡…' : 'claude…')) : 'shell…';
-    setPaneMeta(pane, ic, lbl, projLabel(pane));
+    // nombre principal = proyecto || basename del cwd; el tipo (lbl) va atenuado al final
+    var nm0 = projLabel(pane) || cwdBase(cwd || pane.dataset.cwd || '');
+    setPaneMeta(pane, ic, nm0 || lbl, nm0 ? lbl : '');
     updatePinUI(pane);
     ensureVscodeBtn(pane);   // botón VSCode en la cabecera de la terminal (abre su cwd en el editor)
     if (kind === 'shell') ensureCdBtn(pane);   // botón "cd" sólo en shells (cambiar de dir sin teclear cd a mano)
@@ -2110,8 +2341,10 @@
     } catch (e) {}
     // OSC 52 ("c to copy" / copy automático de la TUI): SACADO a propósito (pedido del usuario). Hacía que
     // seleccionar/copiar en la terminal PISARA el portapapeles del usuario sin que él lo pidiera. Ahora la
-    // terminal NUNCA escribe el clipboard sola; se copia SOLO con Ctrl+C / Ctrl+Shift+C / menú contextual
-    // "Copiar" (seleccionar texto + Ctrl+C sigue funcionando vía termCopy).
+    // Item 5 · OSC 52 (select-to-copy de la TUI de claude): claude emite OSC 52 SOLO al soltar un drag-select
+    // real (verificado por harness PTY: 1 por gesto, con el texto seleccionado) y muestra "Copied N chars".
+    // Lo honramos → el drag-select en claude COPIA de verdad y el cartel deja de mentir (v1.9.10 lo había sacado
+    // de más). Scopeado a claude (en shell no aplica: no emite OSC 52 y se copia con Ctrl+C).
     // cwd EN VIVO (cd tracking): el shell puede emitir OSC 7 (file://host/path) u OSC 9;9 (path) en cada
     // prompt → actualizamos pane.dataset.cwd para que "clonar la terminal activa" (Ctrl+Espacio) y las
     // rutas clickeables tomen el directorio REAL. Si el shell no lo emite, queda el cwd de arranque (no rompe nada).
@@ -2125,6 +2358,19 @@
       });
       term.parser.registerOscHandler(9, function (data) {
         try { var s = String(data || ''); if (s.slice(0, 2) === '9;') { var pth = s.slice(2).trim(); if (pth) updatePaneCwd(pane, pth); } } catch (e) {}
+        return true;
+      });
+      // OSC 52: <selección>;<base64>. Sólo claude. Query ('?') se ignora. base64 → UTF-8 → clipboard vía IPC.
+      term.parser.registerOscHandler(52, function (data) {
+        try {
+          if (pane.dataset.kind !== 'claude') return true;
+          var s = String(data || ''), i = s.indexOf(';'); if (i < 0) return true;
+          var b64 = s.slice(i + 1); if (!b64 || b64 === '?') return true;
+          var bin = atob(b64), arr = new Uint8Array(bin.length);
+          for (var j = 0; j < bin.length; j++) arr[j] = bin.charCodeAt(j);
+          var txt = new TextDecoder('utf-8').decode(arr);
+          if (txt && api && api.action) api.action('copyText', { text: txt }).catch(function () {});
+        } catch (e) {}
         return true;
       });
     } catch (e) {}
@@ -2159,7 +2405,9 @@
         pane.dataset.cwd = res.cwd || cwd || '';
         pane._ptySize = bootCols + 'x' + bootRows;   // el PTY nació con estas dims (último empuje conocido)
         terms.set(res.id, { term: term, fit: fit, pane: pane, ro: ro });
-        setPaneMeta(pane, ic, res.title || (kind === 'claude' ? 'claude' : 'shell'), projLabel(pane));
+        var kindLbl = res.title || (kind === 'claude' ? 'claude' : 'shell');
+        var nm = projLabel(pane) || cwdBase(res.cwd || cwd || pane.dataset.cwd || '');
+        setPaneMeta(pane, ic, nm || kindLbl, nm ? kindLbl : '');
         term.onData(function (d) { api.term.write(res.id, d); });
         term.onResize(function (sz) { pushPty(pane, res.id, sz.cols, sz.rows); });   // resize genuino (drag/ventana) → al PTY
         // RESCATE de copia (sólo claude): recordá la última selección no vacía. Si un redibujo de claude borra
@@ -2422,6 +2670,7 @@
     rootEl.addEventListener('mousedown', function (e) {
       var head = e.target.closest && e.target.closest('.dk-pane-head');
       if (!head || (e.target.closest && e.target.closest('.dk-pbtn'))) return;
+      if (e.ctrlKey || e.metaKey) return;   // Item 4: Ctrl+click reservado para marcar/agrupar (no arrastrar)
       var pane = head.closest('.dk-pane'); if (!pane) return;
       if (host.classList.contains('minimized')) return;
       e.preventDefault();   // evita que el drag seleccione texto
@@ -2650,6 +2899,7 @@
     setEditorOpener: setEditorOpener, setQuickTermHook: setQuickTermHook,
     setHomeProjects: setHomeProjects,
     setClaudeFullscreenDefault: setClaudeFullscreenDefault,
+    setQuickTermDefault: setQuickTermDefault,
     setGpuRender: setGpuRender, setScrollback: setScrollback, setFloatingPickers: setFloatingPickers, hasActiveClaudeSessions: hasActiveClaudeSessions,
     setAutosuggest: setAutosuggest, setAutosuggestRebinder: setAutosuggestRebinder,
     openTourDemo: openTourDemo, closeTourDemo: closeTourDemo,
