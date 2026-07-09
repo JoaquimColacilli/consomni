@@ -603,6 +603,11 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.25', date: '09 jul 2026', title: 'Dock: "saltar a la existente" te deja la terminal activa en el dashboard + atajo de proyecto + Ctrl+click revela el archivo', items: [
+      'Cuando abrís una terminal en un proyecto que ya tiene una y elegís "saltar a la existente", ahora la terminal queda activa DONDE ESTÁS (el dashboard), en vez de mandarte a la vista del proyecto.',
+      'Nuevo atajo Ctrl+Shift+O: abre el selector de proyecto (elegir un proyecto conocido y lanzar terminal/claude ahí) desde cualquier lado, incluso con una terminal enfocada.',
+      'Ctrl+click en una ruta de archivo (en la terminal o en la conversación) ahora la REVELA en el explorador de archivos; el click normal la sigue abriendo en un panel al costado.',
+    ] },
     { v: '1.9.24', date: '07 jul 2026', title: 'Dock de terminales: abrir claude de un toque, agrupar por color, reordenar pestañas y nombres claros', items: [
       'El botón "proyecto" del dock ahora abre claude directo (antes caías en un powershell donde había que tipear claude a mano y el panel quedaba mal nombrado). El selector de proyecto ofrece claude / claude ⚡ / terminal por fila, y el default sale de tus Ajustes.',
       'Aviso al abrir una terminal en un proyecto que YA tiene una abierta: podés saltar a la existente en vez de abrir otra igual.',
@@ -2595,6 +2600,11 @@
     // CTRL+ESPACIO: abre una terminal nueva (configurable en Settings: shell / claude / claude ⚡).
     // Dentro de un xterm enfocado lo intercepta terminals-ui (attachCustomKeyEventHandler); acá es el caso board.
     if (e.ctrlKey && e.code === 'Space') { e.preventDefault(); openQuickTerm(); return; }
+
+    // CTRL+SHIFT+O: abre el popup "proyecto" (elegir proyecto conocido → lanzar terminal/claude ahí).
+    if (e.ctrlKey && e.shiftKey && (e.code === 'KeyO' || e.key === 'O' || e.key === 'o')) {
+      e.preventDefault(); if (T && T.openProjectChooser) T.openProjectChooser(); return;
+    }
 
     // Abrir/cerrar el dock de terminales (Shift+T para no chocar con 't' = terminal de la card)
     if (!meta && (e.key === 'T')) { e.preventDefault(); T && T.toggle(); return; }

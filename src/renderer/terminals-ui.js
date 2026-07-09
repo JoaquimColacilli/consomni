@@ -227,7 +227,7 @@
   function onPathActivate(ev, token, pane) {
     var cwd = (pane && pane.dataset.cwd) || (view !== '__home__' ? viewCwd : '') || '';
     var resolved = resolveFilePath(token, cwd);
-    if (ev && (ev.ctrlKey || ev.metaKey)) openFileEditor(resolved, cwd);
+    if (ev && (ev.ctrlKey || ev.metaKey)) revealFilePath(resolved);
     else openFilePanel(resolved, cwd);
   }
   // menú contextual de archivo (reusa .dk-ctx + closeTermCtx/onCtxOutside/onCtxKey)
@@ -504,7 +504,7 @@
     host.querySelector('.dk-new-claude-skip').addEventListener('click', function () { spawn('claude', null, null, { skip: true }); });
     host.querySelector('.dk-new-cmd').addEventListener('click', openQuickCommands);
     host.querySelector('.dk-new-proj').addEventListener('click', function (e) {
-      openDirChooser({ anchor: e.currentTarget, title: 'abrir en un proyecto…', launch: true, onLaunch: function (ruta, kindStr) { launchInProject(ruta, kindStr, 'right'); } });
+      openProjectChooser(e.currentTarget);
     });
     // chips de proyecto del placeholder de inicio (F5): abrir terminal/claude en el cwd del proyecto (suelta en inicio)
     host.addEventListener('click', function (e) {
@@ -1611,17 +1611,28 @@
       return normCwd(p.dataset.cwd) === target;
     });
   }
-  // enfocar una terminal existente (cambia de vista si vive en otro proyecto; restaura si estaba minimizada)
+  // enfocar una terminal existente SIN teleportar: la trae a la vista ACTUAL (dashboard) y la activa ahí.
+  // Si no matchea la vista donde estás: en inicio la adoptamos (pin) para que aparezca acá; si estás en OTRA
+  // vista de proyecto y la terminal es de un proyecto distinto, sí vamos a su vista (menos sorpresa que retaguearla).
   function jumpToExisting(pane) {
     if (!pane) return;
-    var pv = pane.dataset.proj || '__home__';
-    if (pv !== view) setView(pv, pane.dataset.cwd || '', projLabel(pane));
+    if (!matchesView(pane, view)) {
+      if (view === '__home__') { pane.dataset.pinned = '1'; updatePinUI(pane); }   // adoptar a inicio → activa en el dashboard
+      else { var pv = pane.dataset.proj || '__home__'; setView(pv, pane.dataset.cwd || '', projLabel(pane)); }
+    }
     if (pane.dataset.min === '1') restorePane(pane); else focusClaudePane(pane);
+    persist();
   }
   function launchInProject(cwd, kindStr, dir, projName) {
     var existing = cwd ? liveTermsForCwd(cwd) : [];
     if (existing.length) { confirmExistingTerminal(projName || cwdBase(cwd), existing, function () { launchKind(kindStr, cwd, dir); }); return; }
     launchKind(kindStr, cwd, dir);
+  }
+  // abre el popup "proyecto" (elegir proyecto conocido → lanzar terminal/claude ahí). Usado por el botón del
+  // toolbar y por el shortcut global Ctrl+Shift+O. Sin anchor (shortcut) el chooser se centra.
+  function openProjectChooser(anchor) {
+    show();
+    openDirChooser({ anchor: anchor || null, title: 'abrir en un proyecto…', launch: true, onLaunch: function (ruta, kindStr) { launchInProject(ruta, kindStr, 'right'); } });
   }
   function onExistKey(e) { if (e.key === 'Escape') { e.preventDefault(); closeExistConf(); } }
   function closeExistConf() { var m = g.document.getElementById('dkExist'); if (m) m.remove(); g.document.removeEventListener('keydown', onExistKey, true); }
@@ -2281,6 +2292,8 @@
         // AUTOSUGGEST (ghost text, sólo SHELL): trackea el buffer sombra y, si aceptás la sugerencia, consume la tecla
         if (pane.dataset.kind === 'shell' && shellAutosuggestKey(pane, ev)) return false;
         if (ev.ctrlKey && ev.code === 'Space') { if (quickTermHook) quickTermHook(); return false; }
+        // Ctrl+Shift+O: abre el popup "proyecto" (funciona también con una terminal enfocada, que captura las teclas).
+        if (ev.ctrlKey && ev.shiftKey && !ev.altKey && !ev.metaKey && ev.code === 'KeyO') { openProjectChooser(); return false; }
         // Ctrl+W: cierra ESTA terminal (la enfocada, donde está el cursor). Pisa el "borrar palabra" del
         // shell a propósito (pedido del usuario); si es una terminal VIVA, closePane pide confirmación.
         // Diferido un tick: closePane puede disponer el xterm, y estamos DENTRO de su propio keydown.
@@ -2586,13 +2599,13 @@
       var b = e.target.closest && e.target.closest('[data-dock-act]');
       if (b) { e.stopPropagation(); actionHandler(b.getAttribute('data-dock-act'), b.getAttribute('data-sid')); }
     });
-    // rutas clickeables dentro de la conversación: click → panel, Ctrl/Cmd → editor, click derecho → menú
+    // rutas clickeables dentro de la conversación: click → panel al costado, Ctrl/Cmd → revelar en explorador, click derecho → menú
     var convo = body.querySelector('.dk-convo');
     convo.addEventListener('click', function (e) {
       var f = e.target.closest && e.target.closest('.cv-file'); if (!f) return;
       e.preventDefault(); e.stopPropagation();
       var p = f.getAttribute('data-path'), cw = pane.dataset.cwd || '';
-      if (e.ctrlKey || e.metaKey) openFileEditor(p, cw); else openFilePanel(p, cw);
+      if (e.ctrlKey || e.metaKey) revealFilePath(resolveFilePath(p, cw)); else openFilePanel(p, cw);
     });
     convo.addEventListener('contextmenu', function (e) {
       var f = e.target.closest && e.target.closest('.cv-file'); if (!f) return;
@@ -2904,6 +2917,7 @@
     setAutosuggest: setAutosuggest, setAutosuggestRebinder: setAutosuggestRebinder,
     openTourDemo: openTourDemo, closeTourDemo: closeTourDemo,
     openFilePanel: openFilePanel, activeTermCwd: activeTermCwd,
+    openProjectChooser: openProjectChooser,
     resetInputTrackingOnFocus: resetInputTrackingOnFocus
   };
   loadTermHistoryStore();   // cargar el historial de comandos para el autosuggest (una vez, al iniciar)
