@@ -1948,6 +1948,38 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.26 — El picker flotante de `/` y `@` no pierde la tecla (cursorRect robusto bajo WebGL + fail-safe)
+> Bug reportado por Facundo: "a veces pongo `/` (o `@`) en la terminal de claude y no me la toma la consola,
+> tengo que volver a clickear, como que se desconoce". Bump **1.9.25 → 1.9.26** (`package.json` + fallbacks
+> `brand-ver`/`.ver` en `chrome.js` + entrada en `CHANGELOG` de `app.js`). Cambio acotado a `terminals-ui.js`.
+> Aditivo, respeta las 4 Hard Rules. `node --check` OK en los 3 .js del renderer.
+
+- **Causa raíz:** en un panel claude, `/` y `@` se INTERCEPTAN (`return false`, no van a claude) para abrir el
+  picker flotante propio. Para ubicarlo, `cursorRect()` buscaba `.xterm-cursor`/`.xterm-rows` = elementos del
+  renderer **DOM**. Con **render WebGL** (GPU, default desde v1.9.9) el cursor se dibuja en `<canvas>` → esos
+  elementos NO existen → `cursorRect` devuelve `null` → `placeAtPicker` corta (`if (!c) return`) → el picker
+  queda **abierto pero invisible/mal ubicado, tragando teclas** (todo el handler retorna `false` mientras
+  `pane._atp`/`_slp` viven). La tecla no fue a claude NI a un picker visible = "no me la toma". Reclickear la
+  consola = mousedown afuera → `st.outside` → `closeAtPicker`/`closeSlashPicker` → destraba. El "a veces" =
+  WebGL se evicta/pierde contexto (v1.9.22 lo attachea por visibilidad) → a veces cae a DOM (anda) y a veces
+  WebGL activo (falla). NO era pérdida de foco (ahí morirían TODAS las teclas, no sólo `/`/`@`).
+- **Fix 1 (raíz) — `cursorRect` robusto bajo WebGL:** el 2º branch usa `.xterm-screen` (existe en TODOS los
+  renderers, mide el área de celdas) en vez de `.xterm-rows`, + dims de celda (`_renderService.dimensions`) +
+  **`buffer.active.cursorX/Y`** (la coordenada que xterm YA conoce, sin scrapear el DOM — el approach de las
+  terminales nativas tipo Warp). Fallback chain `.xterm-screen || .xterm-rows || .xterm` + guard de rect vacío.
+  Arregla también el ghost grisado (usa el mismo `cursorRect`).
+- **Fix 2 (defensa en profundidad) — fail-safe:** `passThroughPrefix(pane, ch)` escribe el prefijo literal a la
+  PTY (claude muestra su picker inline) y marca `_inputDirty`. `openAtPicker`/`openSlashPicker` lo llaman si
+  `paneTerm` es null O `cursorRect` sigue dando null al abrir → **nunca** se abre una trampa invisible; la tecla
+  `/`/`@` (ya suprimida por el handler) jamás se pierde. Espeja el patrón `failOpenAt` ya existente.
+- **Warp:** es terminal NATIVA (dueña de su línea de input, sabe el cursor nativamente); no aplica 1:1 (somos
+  xterm-sobre-PTY con la TUI de claude adentro), pero la lección —usar la coordenada conocida del cursor, no
+  scrapear el DOM— es exactamente el Fix 1.
+- **Límite del medio:** DOM/GPU → no reproducible headless (app con lock de instancia única). `node --check`
+  limpio; `.xterm-screen` confirmado presente en el bundle vendorizado. El usuario confirma en vivo al actualizar.
+
+---
+
 ## v1.9.24 — Dock: botón "proyecto" abre claude · aviso de terminal existente · chips reordenables · grupos por color · copiar en claude · nombres proyecto-primero
 > Batch de feedback de Facundo sobre el dock de terminales (roadmap local de 6 pedidos → 5 items + naming).
 > Bump **1.9.23 → 1.9.24** (`package.json` + fallbacks `brand-ver`/`.ver` en `chrome.js` + entrada en `CHANGELOG`

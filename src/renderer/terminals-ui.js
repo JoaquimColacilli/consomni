@@ -1017,8 +1017,13 @@
       if (ce) { var r = ce.getBoundingClientRect(); if (r.width && r.height) return { left: r.left, top: r.top, h: r.height }; }
     } catch (e) {}
     try {
-      var rowsEl = pane.querySelector('.xterm-rows'); if (!rowsEl) return null;
-      var rect = rowsEl.getBoundingClientRect();
+      // Renderer WebGL/canvas: NO existe .xterm-rows ni .xterm-cursor en el DOM (se dibujan en <canvas>) →
+      // scrapear el cursor del DOM falla. Como Warp: usar la coordenada del cursor que xterm YA conoce
+      // (buffer.active.cursorX/Y) + geometría de .xterm-screen (existe en TODOS los renderers, mide el área de celdas).
+      var scr = pane.querySelector('.xterm-screen') || pane.querySelector('.xterm-rows') || pane.querySelector('.xterm');
+      if (!scr) return null;
+      var rect = scr.getBoundingClientRect();
+      if (!rect.width || !rect.height) return null;
       var cw, ch;
       try { var d = term._core._renderService.dimensions; cw = (d.css && d.css.cell.width) || d.actualCellWidth; ch = (d.css && d.css.cell.height) || d.actualCellHeight; } catch (e2) {}
       if (!cw || !ch) { cw = rect.width / (term.cols || 80); ch = rect.height / (term.rows || 24); }
@@ -1090,9 +1095,18 @@
     var term = paneTerm(pane); if (term) { placeAtPicker(pane, term, st.el); placeGhost(pane, term, st); }
     var selEl = st.el.querySelector('.dk-at-item.sel'); if (selEl && selEl.scrollIntoView) try { selEl.scrollIntoView({ block: 'nearest' }); } catch (e) {}
   }
+  // FAIL-SAFE: si el picker NO se puede abrir bien (sin term / sin poder ubicar la cajita al cursor), NO abrimos
+  // una trampa invisible que traga teclas → escribimos el prefijo literal a la PTY (claude muestra su picker inline).
+  // La tecla '/'|'@' que el handler ya suprimió (return false) NUNCA se pierde. (Bug: "pongo / y no me la toma".)
+  function passThroughPrefix(pane, ch) {
+    try { var tid = pane.dataset.tid; if (tid && api && api.term && api.term.write) api.term.write(tid, ch); } catch (e) {}
+    pane._inputDirty = true;
+    try { var t = paneTerm(pane); if (t) t.focus(); } catch (e) {}
+  }
   function openAtPicker(pane) {
     if (pane._atp) return;
-    var term = paneTerm(pane); if (!term) return;
+    var term = paneTerm(pane); if (!term) { passThroughPrefix(pane, '@'); return; }
+    if (!cursorRect(pane, term)) { passThroughPrefix(pane, '@'); return; }   // no ubicable → no trampa invisible
     var el = g.document.createElement('div'); el.className = 'dk-at-picker';
     g.document.body.appendChild(el);
     var ghost = g.document.createElement('span'); ghost.className = 'dk-at-ghost';   // @texto grisado en vivo al cursor (fachero)
@@ -1235,7 +1249,8 @@
   }
   function openSlashPicker(pane) {
     if (pane._slp || pane._atp) return;
-    var term = paneTerm(pane); if (!term) return;
+    var term = paneTerm(pane); if (!term) { passThroughPrefix(pane, '/'); return; }
+    if (!cursorRect(pane, term)) { passThroughPrefix(pane, '/'); return; }   // no ubicable → no trampa invisible
     var el = g.document.createElement('div'); el.className = 'dk-at-picker';
     g.document.body.appendChild(el);
     var ghost = g.document.createElement('span'); ghost.className = 'dk-at-ghost';
