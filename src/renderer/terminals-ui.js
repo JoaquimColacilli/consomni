@@ -2261,6 +2261,10 @@
         //     timeout' que metia lag y a veces se leia como ESC (cancelar) + CR (enviar).
         // Scopeado a paneles claude: en un shell, Enter sigue ejecutando (mandar esto borraria lo tipeado).
         if ((ev.code === 'Enter' || ev.code === 'NumpadEnter') && ev.shiftKey && !ev.ctrlKey && !ev.altKey && !ev.metaKey && !ev.isComposing && pane.dataset.kind === 'claude') {
+          // preventDefault CLAVE: return false suprime a xterm PERO no cancela el evento nativo → el Enter llega
+          // igual al <textarea> oculto de xterm (inserta newline / dispara keypress) y a veces se cuela un '\r'
+          // a la PTY = ENVÍA (el "a veces manda" reportado). preventDefault mata el nativo → determinístico.
+          try { ev.preventDefault(); } catch (e) {}
           if (ev.type === 'keydown') {
             var ptid = pane.dataset.tid;
             if (ptid && api.term && api.term.write) api.term.write(ptid, '\n');

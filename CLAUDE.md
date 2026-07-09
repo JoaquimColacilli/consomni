@@ -1948,7 +1948,7 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
-## v1.9.26 — El picker flotante de `/` y `@` no pierde la tecla (cursorRect robusto bajo WebGL + fail-safe)
+## v1.9.26 — El picker flotante de `/` y `@` no pierde la tecla (cursorRect robusto bajo WebGL + fail-safe) + Shift+Enter determinístico
 > Bug reportado por Facundo: "a veces pongo `/` (o `@`) en la terminal de claude y no me la toma la consola,
 > tengo que volver a clickear, como que se desconoce". Bump **1.9.25 → 1.9.26** (`package.json` + fallbacks
 > `brand-ver`/`.ver` en `chrome.js` + entrada en `CHANGELOG` de `app.js`). Cambio acotado a `terminals-ui.js`.
@@ -1977,6 +1977,21 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
   scrapear el DOM— es exactamente el Fix 1.
 - **Límite del medio:** DOM/GPU → no reproducible headless (app con lock de instancia única). `node --check`
   limpio; `.xterm-screen` confirmado presente en el bundle vendorizado. El usuario confirma en vivo al actualizar.
+
+### Shift+Enter en claude: salto de línea determinístico (se folded en 1.9.26, aún sin release)
+- **Bug reportado por Facundo:** "a veces Shift+Enter hace salto de línea y otras manda el mensaje" en la
+  terminal de claude. Intermitente.
+- **Causa raíz (misma clase que los bugs de pegado v1.8.1 y del `@` v1.7.4):** el branch de Shift+Enter hacía
+  `return false` (suprime a xterm) pero **NO `ev.preventDefault()`**. `return false` corta el `onData` de xterm
+  pero NO cancela el evento nativo del navegador → el Enter llega igual al `<textarea>` oculto de xterm (inserta
+  newline / dispara `keypress`) y a veces se cuela un `\r` a la PTY → claude **submitea**. El "a veces" = depende
+  de composición/timing/estado del textarea.
+- **Fix (`terminals-ui.js`):** `try { ev.preventDefault(); } catch(e){}` al entrar al branch de Shift+Enter (todos
+  los tipos de evento) → mata el path nativo; queda SÓLO nuestro `api.term.write(tid, '\n')` (salto de línea) en
+  keydown. Determinístico. Scopeado a `kind==='claude'` (en shell, Shift+Enter sigue como estaba). `node --check` OK.
+  **Límite conocido pre-existente:** un panel abierto como SHELL donde tipeás `claude` a mano queda `kind:'shell'`
+  → ahí Shift+Enter no aplica (documentado desde v1.7.2). El fix cubre los paneles claude reales (botón claude /
+  `--resume` / picker).
 
 ---
 

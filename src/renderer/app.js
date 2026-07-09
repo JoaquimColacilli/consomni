@@ -606,7 +606,8 @@
     { v: '1.9.26', date: '09 jul 2026', title: 'Terminal de claude: el "/" y el "@" ya no se pierden (el selector flotante siempre aparece o deja pasar la tecla)', items: [
       'Arreglado: a veces tipeabas "/" o "@" en una terminal de claude y no pasaba nada — la tecla se perdía y había que reclickear la consola. Ahora el selector flotante siempre se ubica bien.',
       'Causa: con el render por GPU (WebGL) el selector no podía calcular dónde estaba tu cursor y quedaba invisible tragándose la tecla. Ahora usa la posición real del cursor (como hacen las terminales nativas).',
-      'Red de seguridad: si por lo que sea no puede abrir el selector, la tecla "/" o "@" se escribe igual (claude muestra su propio selector) — nunca más se pierde.'
+      'Red de seguridad: si por lo que sea no puede abrir el selector, la tecla "/" o "@" se escribe igual (claude muestra su propio selector) — nunca más se pierde.',
+      'Arreglado: Shift+Enter en la terminal de claude a veces mandaba el mensaje en vez de hacer salto de línea. Ahora hace salto de línea siempre.'
     ] },
     { v: '1.9.25', date: '09 jul 2026', title: 'Dock: "saltar a la existente" te deja la terminal activa en el dashboard + atajo de proyecto + Ctrl+click revela el archivo', items: [
       'Cuando abrís una terminal en un proyecto que ya tiene una y elegís "saltar a la existente", ahora la terminal queda activa DONDE ESTÁS (el dashboard), en vez de mandarte a la vista del proyecto.',
