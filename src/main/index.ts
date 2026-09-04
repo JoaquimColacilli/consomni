@@ -22,6 +22,33 @@ const PRELOAD = path.join(__dirname, '..', 'preload', 'preload.js');
 let mainWindow: BrowserWindow | null = null;
 let muted = false;
 
+/* ── red de seguridad: un error de fondo NO tumba la app ──────────────────────
+   Electron, ante una excepción no atrapada en el main, muestra el diálogo
+   "A JavaScript error occurred in the main process" y deja la app inservible.
+   Los pollers de fondo (git diff, watcher, timers) no valen eso: se loguea a
+   ~/.consomni/error.log y se sigue. Si todavía NO hay ventana (fallo de arranque
+   real, la app no sirve para nada) se muestra el diálogo, como antes. */
+function logCrash(kind: string, e: unknown): void {
+  const err = e as Error;
+  const line = '[' + new Date().toISOString() + '] ' + kind + ': ' + String(err?.stack || err?.message || e) + '\n';
+  try {
+    const dir = path.join(os.homedir(), '.consomni');
+    fs.mkdirSync(dir, { recursive: true });
+    fs.appendFileSync(path.join(dir, 'error.log'), line, 'utf8');
+  } catch { /* noop */ }
+  try { console.error(line); } catch { /* noop */ }
+}
+function installCrashGuard(): void {
+  process.on('uncaughtException', (e) => {
+    logCrash('uncaughtException', e);
+    if (!mainWindow || mainWindow.isDestroyed()) {
+      try { dialog.showErrorBox('Consomni', 'Error al iniciar:\n\n' + String((e as Error)?.message || e)); } catch { /* noop */ }
+    }
+  });
+  process.on('unhandledRejection', (e) => { logCrash('unhandledRejection', e); });
+}
+installCrashGuard();
+
 function jumpToSession(sid: string): void {
   if (!mainWindow) return;
   if (mainWindow.isMinimized()) mainWindow.restore();

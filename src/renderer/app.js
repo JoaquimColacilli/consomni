@@ -603,6 +603,12 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.27', date: '04 sep 2026', title: 'Se acabó el cartel de error que aparecía "cada tanto" (A JavaScript error occurred)', items: [
+      'Arreglado: cada tanto saltaba un cartel de error y la app quedaba inservible. Pasaba mientras Consomni calculaba en segundo plano los cambios sin commitear (+N / −N) de tus proyectos.',
+      'Causa: en Windows, arrancar un proceso (git) puede fallar de golpe por algo transitorio — antivirus, muchos procesos abiertos, una unidad de red que se cayó. Ese fallo tumbaba la app entera en vez de reintentarse solo.',
+      'Ahora un fallo así se ignora y se reintenta en el próximo ciclo (unos segundos). Lo mismo para abrir el editor, la carpeta, el diff, el PR y el traductor de comandos.',
+      'Red de seguridad: cualquier error de fondo se anota en ~/.consomni/error.log y la app sigue andando. El cartel sólo aparece si el problema es al arrancar (ahí sí la app no sirve).'
+    ] },
     { v: '1.9.26', date: '09 jul 2026', title: 'Terminal de claude: el "/" y el "@" ya no se pierden (el selector flotante siempre aparece o deja pasar la tecla)', items: [
       'Arreglado: a veces tipeabas "/" o "@" en una terminal de claude y no pasaba nada — la tecla se perdía y había que reclickear la consola. Ahora el selector flotante siempre se ubica bien.',
       'Causa: con el render por GPU (WebGL) el selector no podía calcular dónde estaba tu cursor y quedaba invisible tragándose la tecla. Ahora usa la posición real del cursor (como hacen las terminales nativas).',

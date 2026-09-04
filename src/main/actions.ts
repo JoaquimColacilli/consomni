@@ -38,9 +38,14 @@ function which(bin: string): string | null {
 
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 function spawnDetached(file: string, args: string[], opts: any = {}): void {
-  const child = spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true, ...opts });
-  child.on('error', () => { /* best-effort; nunca tirar */ });
-  child.unref();
+  // OJO: `spawn` TIRA de forma síncrona si la creación de proceso falla con algo fuera de
+  // EAGAIN/EMFILE/ENFILE/ENOENT (en Windows: UNKNOWN/EPERM por antivirus, handles agotados, unidad caída).
+  // Sin este try/catch, una falla transitoria crashea el main con el diálogo de "JavaScript error".
+  try {
+    const child = spawn(file, args, { detached: true, stdio: 'ignore', windowsHide: true, ...opts });
+    child.on('error', () => { /* best-effort; nunca tirar */ });
+    child.unref();
+  } catch { /* best-effort; nunca tirar */ }
 }
 
 function exists(p: string): boolean { try { return !!p && fs.existsSync(p); } catch { return false; } }
@@ -113,16 +118,21 @@ function gitDiff(cwd: string): Promise<ActionResult> {
   return new Promise((res) => {
     if (!exists(cwd)) return res({ ok: false, error: 'la carpeta no existe' });
     const git = which('git') || 'git';
-    execFile(git, ['-C', cwd, 'diff'], { maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
-      const diff = stdout || '';
-      if (err && !diff) return res({ ok: false, error: 'git diff falló (¿es un repo?)' });
-      if (!diff.trim()) return res({ ok: true, message: 'sin cambios sin commitear' });
-      const tmp = path.join(os.tmpdir(), 'consomni-diff-' + path.basename(cwd) + '.diff');
-      try { fs.writeFileSync(tmp, diff, 'utf8'); } catch { /* noop */ }
-      const exe = resolveEditorExe(loadConfig().editor);
-      if (exe) spawnDetached(exe, [tmp]); else void shell.openPath(tmp);
-      res({ ok: true, message: 'diff abierto' });
-    });
+    // try/catch: `execFile` puede TIRAR síncrono si falla la creación del proceso (UNKNOWN/EPERM en Windows)
+    try {
+      execFile(git, ['-C', cwd, 'diff'], { maxBuffer: 32 * 1024 * 1024, windowsHide: true }, (err, stdout) => {
+        const diff = stdout || '';
+        if (err && !diff) return res({ ok: false, error: 'git diff falló (¿es un repo?)' });
+        if (!diff.trim()) return res({ ok: true, message: 'sin cambios sin commitear' });
+        const tmp = path.join(os.tmpdir(), 'consomni-diff-' + path.basename(cwd) + '.diff');
+        try { fs.writeFileSync(tmp, diff, 'utf8'); } catch { /* noop */ }
+        const exe = resolveEditorExe(loadConfig().editor);
+        if (exe) spawnDetached(exe, [tmp]); else void shell.openPath(tmp);
+        res({ ok: true, message: 'diff abierto' });
+      }).on('error', () => res({ ok: false, error: 'no se pudo ejecutar git' }));
+    } catch (e) {
+      res({ ok: false, error: 'no se pudo ejecutar git: ' + String((e as Error)?.message || e) });
+    }
   });
 }
 

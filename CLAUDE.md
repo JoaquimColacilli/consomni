@@ -1948,6 +1948,44 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.27 — Crash del main: `Error: spawn UNKNOWN` en el poller de git (execFile/spawn que TIRAN síncrono)
+> Bug reportado por el usuario ("cada tanto me sale esto"): diálogo **"A JavaScript error occurred in the main
+> process" → `Uncaught Exception: Error: spawn UNKNOWN`** con stack `computeDiffStat → refreshDiffStats →
+> buildSnapshot → Timeout.pushUpdate`. Bump **1.9.26 → 1.9.27**. Aditivo, respeta las 4 Hard Rules.
+> `tsc` exit 0; `node --check` OK en los 3 .js del renderer.
+
+- **Causa raíz (confirmada por el stack + la semántica de Node):** `child_process.spawn` (y por ende `execFile`)
+  **NO** emite todos los fallos de creación de proceso como evento `'error'`. En `ChildProcess.prototype.spawn`,
+  sólo `EAGAIN/EMFILE/ENFILE/ENOENT` van por `process.nextTick(onErrorNT)`; **cualquier otro código (en Windows:
+  `UNKNOWN`, `EPERM`) se `throw`ea de forma SÍNCRONA**. El poller de git de `computeDiffStat` corre cada
+  `DIFF_RECOMPUTE_MS` (3s) por cada cwd activo → miles de spawns por sesión larga; un fallo transitorio de
+  `CreateProcess` (antivirus enganchado, handles/desktop-heap agotados, unidad de red o worktree que se cayó)
+  tiraba la excepción DENTRO del `setInterval` → nadie la atrapaba → Electron mostraba el diálogo y la app
+  quedaba inservible. El `err` del callback (que sí manejábamos) nunca llegaba a correr.
+- **Fix 1 (raíz) — `sessions.ts` `safeExecFile(file,args,opts,cb)`:** wrapper que envuelve el `execFile` en
+  `try/catch` **y** además engancha `child.on('error')` (para los códigos que sí van por evento), con guard
+  `done` para no llamar el callback dos veces. Un fallo se degrada a "sin datos" (`cb(err,'')`) → el resultado
+  cae en el path de error que YA existía (diff 0 / untracked 0) y se reintenta en el próximo ciclo. Aplicado a
+  los DOS spawns del poller: `git diff --shortstat HEAD` y `git status --porcelain` (`countUntrackedAdds`).
+- **Fix 2 (misma clase, otros call sites):**
+  - `actions.ts` **`spawnDetached`**: tenía `child.on('error')` pero el `spawn` podía TIRAR antes de devolver el
+    child → ahora todo el bloque va en `try/catch`. Cubre editor, carpeta, terminal externa, `explorer /select`,
+    `gh pr view`, dispatch de `claude`.
+  - `actions.ts` **`gitDiff`**: `execFile` en `try/catch` + `.on('error')` → resuelve el Promise con error en vez
+    de crashear (y de paso ya no queda colgado el `await` del renderer).
+  - `terminals.ts` **`nlToCommand`** (`claude -p` del traductor de comandos): idem, `try/catch` + `on('error')`
+    con guard `done`. (El `pty.spawn` de `createTerm` ya estaba guardado desde v0.6.0.)
+- **Fix 3 (red de seguridad) — `index.ts` `installCrashGuard()`:** `process.on('uncaughtException')` /
+  `'unhandledRejection'` a nivel main: loguea a **`~/.consomni/error.log`** (con timestamp + stack) y **sigue
+  andando**. El diálogo de error SÓLO se muestra si todavía **no hay ventana** (`!mainWindow ||
+  mainWindow.isDestroyed()`) = fallo de arranque real, donde la app no sirve igual. Se instala a nivel módulo
+  (antes de `whenReady`) para cubrir el bootstrap.
+- **Límite honesto:** el `UNKNOWN` es transitorio y del SO (no lo causa Consomni) → no es reproducible a pedido;
+  el fix es de resiliencia (no crashear + reintentar), no de eliminación de la causa externa. Si vuelve a pasar,
+  ahora queda la traza en `~/.consomni/error.log` en vez de un diálogo.
+
+---
+
 ## v1.9.26 — El picker flotante de `/` y `@` no pierde la tecla (cursorRect robusto bajo WebGL + fail-safe) + Shift+Enter determinístico
 > Bug reportado por Facundo: "a veces pongo `/` (o `@`) en la terminal de claude y no me la toma la consola,
 > tengo que volver a clickear, como que se desconoce". Bump **1.9.25 → 1.9.26** (`package.json` + fallbacks

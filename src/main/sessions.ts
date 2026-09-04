@@ -7,7 +7,7 @@
 import * as fs from 'fs';
 import * as path from 'path';
 import { app } from 'electron';
-import { execFile, execFileSync } from 'child_process';
+import { execFile, execFileSync, type ExecFileOptions } from 'child_process';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { parseSessionFile, parseSessionDetail, normalizeWorktreeCwd, type SessionDetail } from './jsonl';
 import { loadConfig, loadLocalState, claudeProjectsPath, claudeTasksPath, type AppConfig } from './config';
@@ -52,12 +52,32 @@ function getGit(): string | null {
   return gitBin;
 }
 function diffKey(cwd: string): string { return String(cwd || '').toLowerCase().replace(/\\/g, '/').replace(/\/+$/, ''); }
+/** execFile que NUNCA tira. En Windows la creación de proceso puede fallar transitoriamente (UNKNOWN/EPERM:
+    antivirus, agotamiento de handles, unidad de red que se cayó) y Node lanza ese error de forma **SÍNCRONA**
+    (sólo EAGAIN/EMFILE/ENFILE/ENOENT se emiten como evento 'error') → el poller de git del main crasheaba con
+    el diálogo "A JavaScript error occurred in the main process". Acá se degrada a "sin datos" y se reintenta
+    en el próximo ciclo (cada DIFF_RECOMPUTE_MS). */
+function safeExecFile(
+  file: string,
+  args: string[],
+  opts: ExecFileOptions,
+  cb: (err: Error | null, stdout: string) => void,
+): void {
+  let done = false;
+  const fin = (err: Error | null, stdout: string): void => { if (done) return; done = true; cb(err, stdout); };
+  try {
+    const child = execFile(file, args, opts, (err, stdout) => fin(err, String(stdout || '')));
+    child.on('error', (e: Error) => fin(e, ''));   // por si el fallo llega como evento (ENOENT/EMFILE/…)
+  } catch (e) {
+    fin(e as Error, '');                           // fallo SÍNCRONO de spawn (UNKNOWN & co.)
+  }
+}
 function computeDiffStat(cwd: string): void {
   const git = getGit();
   const key = diffKey(cwd);
   if (!git) { diffCache.set(key, { added: 0, removed: 0, files: 0, ts: Date.now() }); return; }
   // --no-optional-locks: el poller de fondo no refresca/escribe el index → no compite con el git del usuario
-  execFile(git, ['--no-optional-locks', '-C', cwd, 'diff', '--shortstat', 'HEAD'], { timeout: 5000, windowsHide: true, maxBuffer: 1 << 20 }, (err, stdout) => {
+  safeExecFile(git, ['--no-optional-locks', '-C', cwd, 'diff', '--shortstat', 'HEAD'], { timeout: 5000, windowsHide: true, maxBuffer: 1 << 20 }, (err, stdout) => {
     let added = 0, removed = 0, files = 0;
     if (!err) {
       const out = String(stdout || '');
@@ -87,7 +107,7 @@ const untrackedCache = new Map<string, Map<string, UntrackedEntry>>();
 function countUntrackedAdds(git: string, cwd: string, cb: (files: number, added: number) => void): void {
   // core.quotepath=false: si no, git C-quotea rutas con espacios/no-ASCII y no resuelven. --untracked-files=all
   // respeta .gitignore (node_modules suele quedar afuera); el tope de archivos es el backstop por las dudas.
-  execFile(git, ['--no-optional-locks', '-C', cwd, '-c', 'core.quotepath=false', 'status', '--porcelain', '--untracked-files=all'],
+  safeExecFile(git, ['--no-optional-locks', '-C', cwd, '-c', 'core.quotepath=false', 'status', '--porcelain', '--untracked-files=all'],
     { timeout: 5000, windowsHide: true, maxBuffer: 4 << 20 }, (err, stdout) => {
     if (err) { cb(0, 0); return; }
     const paths: string[] = [];

@@ -298,18 +298,30 @@ export function nlToCommand(text: string, cwd?: string): Promise<NlResult> {
       '--output-format', 'json',
     ];
     let done = false;
-    const child = execFile(claude, args, { cwd: wd, env, windowsHide: true, timeout: 30000, maxBuffer: 8 * 1024 * 1024 },
-      (err, stdout, stderr) => {
+    // try/catch: `execFile` TIRA síncrono si falla la creación del proceso con algo que no sea
+    // EAGAIN/EMFILE/ENFILE/ENOENT (en Windows: UNKNOWN/EPERM) → sin esto, crashea el main.
+    let child;
+    try {
+      child = execFile(claude, args, { cwd: wd, env, windowsHide: true, timeout: 30000, maxBuffer: 8 * 1024 * 1024 },
+        (err, stdout, stderr) => {
+          if (done) return; done = true;
+          const raw = String(stdout || '').trim();
+          if (!raw) return resolve({ ok: false, error: 'claude no respondió: ' + String((stderr || (err && err.message) || '')).slice(0, 100) });
+          let result = '';
+          try { const j = JSON.parse(raw); result = String(j.result || j.text || j.content || '').trim(); }
+          catch { result = raw; }
+          const cmd = sanitizeCommand(result);
+          if (!cmd) return resolve({ ok: false, error: 'no obtuve un comando' });
+          resolve({ ok: true, command: cmd });
+        });
+      child.on('error', (e: Error) => {
         if (done) return; done = true;
-        const raw = String(stdout || '').trim();
-        if (!raw) return resolve({ ok: false, error: 'claude no respondió: ' + String((stderr || (err && err.message) || '')).slice(0, 100) });
-        let result = '';
-        try { const j = JSON.parse(raw); result = String(j.result || j.text || j.content || '').trim(); }
-        catch { result = raw; }
-        const cmd = sanitizeCommand(result);
-        if (!cmd) return resolve({ ok: false, error: 'no obtuve un comando' });
-        resolve({ ok: true, command: cmd });
+        resolve({ ok: false, error: 'no pude lanzar claude: ' + String(e?.message || e) });
       });
+    } catch (e) {
+      if (!done) { done = true; resolve({ ok: false, error: 'no pude lanzar claude: ' + String((e as Error)?.message || e) }); }
+      return;
+    }
     // cerrar stdin: `claude -p` si no, espera ~3s a que llegue algo por stdin
     try { if (child.stdin) child.stdin.end(); } catch { /* noop */ }
   });
