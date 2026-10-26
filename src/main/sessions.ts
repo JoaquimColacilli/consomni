@@ -10,8 +10,8 @@ import { app } from 'electron';
 import { execFile, execFileSync, type ExecFileOptions } from 'child_process';
 import chokidar, { type FSWatcher } from 'chokidar';
 import { parseSessionFile, parseSessionDetail, normalizeWorktreeCwd, type SessionDetail } from './jsonl';
-import { loadConfig, loadLocalState, claudeProjectsPath, claudeTasksPath, type AppConfig } from './config';
-import type { Session, Snapshot, SessionState, SessionMode, SubagentInfo, PlanDoc, PlanTodo, TodoStatus } from './types';
+import { loadConfig, loadLocalState, claudeProjectsPath, claudeTasksPath, ensureConsomniDir, USAGE_PATH, type AppConfig } from './config';
+import type { UsageInfo, UsageWindow, Session, Snapshot, SessionState, SessionMode, SubagentInfo, PlanDoc, PlanTodo, TodoStatus } from './types';
 
 /** Raíces a vigilar: el projects del perfil ACTIVO + los dirs extra de watchedDirs (dedupe).
     Garantiza vigilar el perfil aunque venga solo del env (sin haber repointado watchedDirs). */
@@ -31,6 +31,10 @@ let onUpdateCb: ((s: Snapshot) => void) | null = null;
 let debounceTimer: NodeJS.Timeout | null = null;
 let diffTimer: NodeJS.Timeout | null = null;
 let hooksConnected = false;
+let usageSetup: 'ours' | 'foreign' | 'none' = 'none';
+let usage: UsageInfo | null = (() => {
+  try { return JSON.parse(fs.readFileSync(USAGE_PATH, 'utf8')); } catch { return null; }
+})();
 
 /* ════════ diff stat (+N/−N) por proyecto, estilo Warp ════════
    git diff --shortstat HEAD por cwd ACTIVO, cacheado y throttled (async, nunca bloquea el snapshot).
@@ -227,6 +231,7 @@ export function applyHookEvent(event: string, payload: Record<string, unknown>):
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const p = payload as any;
   hooksConnected = true;
+  if (event === 'StatusLine') { applyUsage(p.rate_limits); return; }   // uso del plan, no estado de sesión
   const sid = String(p.session_id || p.sessionId || '');
   if (!sid) { scheduleUpdate(); return; }
   const prev = overlay.get(sid) || { state: 'working' as SessionState, ts: 0 };
@@ -277,6 +282,35 @@ export function applyHookEvent(event: string, payload: Record<string, unknown>):
     attnCb({ sid: sid, name: live.name || (live.cwd ? path.basename(live.cwd) : sid), reason: live.attnReason });
   }
   scheduleUpdate();
+}
+
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function usageWin(w: any): UsageWindow | undefined {
+  if (!w || typeof w.used_percentage !== 'number') return undefined;
+  return { pct: w.used_percentage, resetsAt: Number(w.resets_at || 0) * 1000 };
+}
+/** statusLine corre en cada render de claude → sólo persiste/pushea si cambió algo visible. */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+function applyUsage(rl: any): void {
+  if (!rl) return;
+  const next: UsageInfo = { five: usageWin(rl.five_hour), week: usageWin(rl.seven_day), ts: Date.now() };
+  const key = (u: UsageInfo | null) => u ? [u.five?.pct, u.five?.resetsAt, u.week?.pct, u.week?.resetsAt].join('|') : '';
+  const changed = key(next) !== key(usage);
+  usage = next;
+  if (!changed) return;
+  ensureConsomniDir();
+  fs.writeFile(USAGE_PATH, JSON.stringify(usage), () => { /* best-effort */ });
+  scheduleUpdate();
+}
+function liveUsage(): UsageInfo | null {
+  if (!usage) return null;
+  const now = Date.now();
+  const ok = (w?: UsageWindow) => (w && w.resetsAt > now ? w : undefined);
+  const five = ok(usage.five), week = ok(usage.week);
+  return five || week ? { five, week, ts: usage.ts } : null;
+}
+export function setUsageSetup(v: 'ours' | 'foreign' | 'none'): void {
+  if (usageSetup !== v) { usageSetup = v; scheduleUpdate(); }
 }
 
 function syntheticSession(sid: string, live: LiveState): Session {
@@ -487,6 +521,8 @@ export function buildSnapshot(): Snapshot {
     watchedRoots: watchRoots(cfg),
     appVersion: app.getVersion(),
     diffStats,
+    usage: liveUsage(),
+    usageSetup,
   };
 }
 

@@ -110,4 +110,11 @@ export interface Snapshot {
   appVersion: string;
   /** cambios git sin commitear por proyecto. key = cwd normalizado (igual que projKey del renderer). */
   diffStats?: Record<string, { added: number; removed: number; files: number }>;
+  /** uso del plan (de `rate_limits` del statusLine de claude). Ventanas vencidas se omiten. */
+  usage?: UsageInfo | null;
+  /** estado del statusLine en el settings.json activo: nuestro / de otro / sin configurar. */
+  usageSetup?: 'ours' | 'foreign' | 'none';
 }
+
+export interface UsageWindow { pct: number; resetsAt: number }   // resetsAt en ms
+export interface UsageInfo { five?: UsageWindow; week?: UsageWindow; ts: number }

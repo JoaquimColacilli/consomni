@@ -58,6 +58,7 @@ export const DOCK_PATH = path.join(CONSOMNI_DIR, 'dock.json');
 export const LIBRARY_PATH = path.join(CONSOMNI_DIR, 'library.json');
 export const NOTIFICATIONS_PATH = path.join(CONSOMNI_DIR, 'notifications.json');
 export const TERM_HISTORY_PATH = path.join(CONSOMNI_DIR, 'term-history.json');
+export const USAGE_PATH = path.join(CONSOMNI_DIR, 'usage.json');
 export const BACKUPS_DIR = path.join(CONSOMNI_DIR, 'backups');
 export const SETUP_LOG = path.join(CONSOMNI_DIR, 'setup.log');
 

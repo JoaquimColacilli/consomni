@@ -1150,3 +1150,15 @@ body.light .col-diff,body.light .dk-tb-diff{border-color:var(--border);}
 .dk-grp-sw.on{border-color:#fff;}
 .dk-grp-nm{display:block;width:calc(100% - 8px);margin:0 4px 6px;height:26px;padding:0 8px;border-radius:6px;border:1px solid rgba(255,255,255,.12);background:#0f0f14;color:#e8e8ea;font:inherit;font-family:'Geist Mono',monospace;font-size:11px;outline:none;}
 .dk-grp-nm:focus{border-color:rgba(34,197,94,.5);}
+
+/* ── uso del plan en el statusbar (sesión 5h + semanal, del statusLine de claude) ── */
+.statusbar .sb-use{display:inline-flex;align-items:center;gap:6px;white-space:nowrap;cursor:default;}
+.sb-use-bar{display:inline-block;width:38px;height:5px;border-radius:3px;background:var(--surface-input);border:1px solid var(--border);overflow:hidden;}
+.sb-use-bar i{display:block;height:100%;background:var(--green);}
+.sb-use--amber i{background:var(--amber);}
+.sb-use--red i{background:var(--error);}
+.sb-use-r{color:var(--text-4);}
+.sb-use-dim{color:var(--text-4);white-space:nowrap;}
+.sb-use-setup{font:inherit;color:var(--text-3);background:none;border:0;padding:0;cursor:pointer;white-space:nowrap;text-decoration:underline dotted;text-underline-offset:2px;}
+.sb-use-setup:hover{color:var(--green);}
+@media (max-width:900px){ .statusbar .sb-use-r,.statusbar .sb-use-bar{display:none;} }

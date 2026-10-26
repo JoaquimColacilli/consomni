@@ -1986,6 +1986,30 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.28 — Uso del plan (sesión 5h + semanal) en el statusbar
+> Pedido del usuario: tener el `/usage` de claude a la vista. Bump **1.9.27 → 1.9.28**. Respeta las 4 Hard Rules
+> (**cero API de Anthropic**: el dato lo trae el propio `claude`; Consomni sólo recibe un POST local).
+
+- **Fuente (verificada en el binario 2.1.310):** el JSON que claude pasa por stdin al comando de **`statusLine`**
+  trae `rate_limits.five_hour` / `seven_day` `{used_percentage, resets_at (epoch s)}`. Sólo con suscripción y
+  **recién después de la 1ª respuesta de la API** (verificado con PTY real: sesión fresca → statusLine corre pero
+  sin `rate_limits`). claude NO lo cachea en disco → Consomni persiste el último valor en `~/.consomni/usage.json`.
+- **Helper `hooks/statusline.js`:** imprime `5h 42% · 7d 18%` para la barra de la TUI de claude y postea
+  `{event:'StatusLine', payload:{session_id, rate_limits}}` al `/hook` existente. Sale 0 ante cualquier error.
+- **Instalación** (`hooks-install.ts`): va JUNTO con los hooks (mismo botón, backup + merge). `statusLine` sólo
+  acepta `command` (sin `commandWindows`) → `node "<ruta posix>" <port>` (anda en bash/cmd/pwsh). **Un statusLine
+  AJENO no se pisa** (`statusLineState` = ours/foreign/none; sin chaining — agregarlo si alguien lo pide).
+  Uninstall sólo borra el nuestro. `getStatus().statusLine` → `setUsageSetup` (en `refreshHooksConn`).
+- **Main** (`sessions.ts`): `applyHookEvent('StatusLine')` → `applyUsage` (persiste + push SÓLO si cambió;
+  statusLine corre en cada render de claude) — NO toca el estado de sesiones. `buildSnapshot` → `usage`
+  (ventanas con `resets_at` vencido se omiten) + `usageSetup`.
+- **Renderer:** `usageItems`/`fmtReset` (app.js; lvl green<75/amber≤90/red como ctx), `usageHtml` en el statusbar
+  (chrome.js; mock del reference intacto), "reinicia en" tickea en el ticker de 1s. Estados: con dato → barras;
+  `none` → link **"uso: activar"** (`data-act="usage-setup"` → `installHooks`); `foreign` / `ours` sin dato → texto
+  atenuado. CSS `.sb-use*` aditivo (<900px oculta barra + reset).
+
+---
+
 ## v1.9.26 — El picker flotante de `/` y `@` no pierde la tecla (cursorRect robusto bajo WebGL + fail-safe) + Shift+Enter determinístico
 > Bug reportado por Facundo: "a veces pongo `/` (o `@`) en la terminal de claude y no me la toma la consola,
 > tengo que volver a clickear, como que se desconoce". Bump **1.9.25 → 1.9.26** (`package.json` + fallbacks

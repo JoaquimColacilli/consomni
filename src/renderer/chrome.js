@@ -201,7 +201,7 @@
 
     return '<header class="topbar">' +
       '<div class="brand">' + eye(27, hasAttn) + '<span class="wordmark">CONSOMNI</span>' +
-        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.9.27') + '</span>' +
+        '<span class="brand-meta"><span class="brand-ver">' + esc(o.version || 'v1.9.28') + '</span>' +
         '<button class="brand-changelog" data-act="changelog-all" title="ver todas las novedades">' + svg('sparkles', 10, 1.7) + '<span>Changelog</span></button></span></div>' +
       '<div class="divider-v"></div>' +
       '<div class="counters">' +
@@ -341,7 +341,7 @@
         '<button class="sbtn" data-act="terminals" title="terminales embebidas (Shift+T)">' + svg('term', 15, 1.8) + '</button>' +
         '<button class="sbtn" data-act="settings">' + svg('gear', 15, 1.7) + '</button>' +
         '<button class="sbtn" data-act="theme" title="' + (o.light ? 'modo oscuro' : 'modo claro') + '">' + svg(o.light ? 'moon' : 'sun', 14, 1.7) + '</button>' +
-        '<span class="ver">' + esc(o.version || 'v1.9.27') + '</span></div>' +
+        '<span class="ver">' + esc(o.version || 'v1.9.28') + '</span></div>' +
     '</aside>';
   }
 
@@ -367,8 +367,24 @@
       '<span><b>' + activeCount + '</b> sesiones activas</span>' +
       // "esperan atención" sólo si hay alguno (oculto en 0); el separador va adentro para no quedar colgado.
       (attnCount > 0 ? '<span class="sep">·</span><span style="color:var(--amber)">' + attnCount + ' esperan atención</span>' : '') +
+      usageHtml(st) +
       '<span class="right">auto-refresh ' + refreshSecs + 's · última actualización ' + esc(lastUpdate) + '</span>' +
     '</footer>';
+  }
+
+  /* uso del plan (sesión 5h + semanal) — viene del statusLine de claude vía Consomni */
+  function usageHtml(st) {
+    if (st.usage) {
+      return st.usage.map(function (u) {
+        return '<span class="sep">·</span><span class="sb-use" title="' + esc(u.title) + '">' + esc(u.label) +
+          '<span class="sb-use-bar sb-use--' + u.lvl + '"><i style="width:' + Math.min(100, Math.max(0, u.pct)) + '%"></i></span>' +
+          '<b>' + u.pct + '%</b><span class="sb-use-r" data-reset="' + u.resetsAt + '">' + esc(u.reset) + '</span></span>';
+      }).join('');
+    }
+    if (st.usageSetup === 'none') return '<span class="sep">·</span><button class="sb-use-setup" data-act="usage-setup" title="Muestra el uso del plan (sesión 5h + semanal). Configura el statusLine de claude (con backup).">uso: activar</button>';
+    if (st.usageSetup === 'foreign') return '<span class="sep">·</span><span class="sb-use-dim" title="Ya tenés un statusLine propio en settings.json; Consomni no lo pisa.">uso: statusLine propio</span>';
+    if (st.usageSetup === 'ours') return '<span class="sep">·</span><span class="sb-use-dim" title="Aparece con el próximo mensaje de una sesión de claude.">uso: esperando a claude</span>';
+    return '';
   }
 
   function crt() { return '<div class="crt-vignette"></div><div class="crt-scan"></div>'; }

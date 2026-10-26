@@ -17,6 +17,8 @@ const EVENTS = [
 
 export interface HooksStatus {
   installed: boolean;
+  /** statusLine (uso del plan): nuestro / de otro (no se pisa) / sin configurar */
+  statusLine: 'ours' | 'foreign' | 'none';
   settingsPath: string;
   port: number;
 }
@@ -41,9 +43,9 @@ function isOurEntry(entry: Json): boolean {
   });
 }
 
-/** Ruta del helper post.js, manejando asar (debe ir asar-unpacked). */
-export function resolvePostJs(appPath: string): { posix: string; win: string } {
-  let p = path.join(appPath, 'hooks', 'post.js');
+/** Ruta de un helper de hooks/ (post.js, statusline.js), manejando asar (debe ir asar-unpacked). */
+export function resolvePostJs(appPath: string, file = 'post.js'): { posix: string; win: string } {
+  let p = path.join(appPath, 'hooks', file);
   if (p.includes('app.asar' + path.sep) && !p.includes('app.asar.unpacked')) {
     p = p.replace('app.asar' + path.sep, 'app.asar.unpacked' + path.sep);
   }
@@ -58,6 +60,18 @@ function hookEntry(event: string, postJs: { posix: string; win: string }, port: 
   return entry;
 }
 
+function statusLineState(s: Json): 'ours' | 'foreign' | 'none' {
+  const cmd = s && s.statusLine ? String(s.statusLine.command || '') : '';
+  if (!cmd) return 'none';
+  return /statusline\.js/i.test(cmd) && /consomni/i.test(cmd) ? 'ours' : 'foreign';
+}
+
+/** statusLine sólo acepta `command` (sin commandWindows) → `node "<ruta>"` corre igual en bash/cmd/pwsh. */
+function applyStatusLine(s: Json, appPath: string, port: number): void {
+  if (statusLineState(s) === 'foreign') { logSetup('statusLine ajeno presente → no se pisa (sin uso del plan)'); return; }
+  s.statusLine = { type: 'command', command: 'node "' + resolvePostJs(appPath, 'statusline.js').posix + '" ' + port };
+}
+
 export function isInstalled(): boolean {
   const s = readSettings();
   if (!s.hooks) return false;
@@ -65,7 +79,7 @@ export function isInstalled(): boolean {
 }
 
 export function getStatus(): HooksStatus {
-  return { installed: isInstalled(), settingsPath: claudeSettingsPath(), port: loadConfig().port };
+  return { installed: isInstalled(), statusLine: statusLineState(readSettings()), settingsPath: claudeSettingsPath(), port: loadConfig().port };
 }
 
 function backupSettings(): string | null {
@@ -102,6 +116,7 @@ export function install(appPath: string, port: number): InstallResult {
       cleaned.push(hookEntry(ev, postJs, port));
       s.hooks[ev] = cleaned;
     }
+    applyStatusLine(s, appPath, port);
     writeSettingsAtomic(s);
     logSetup('hooks instalados (puerto ' + port + ', ' + EVENTS.length + ' eventos)');
     return { ok: true, backupPath };
@@ -124,6 +139,7 @@ export function uninstall(): InstallResult {
       }
       if (Object.keys(s.hooks).length === 0) delete s.hooks;
     }
+    if (statusLineState(s) === 'ours') delete s.statusLine;
     writeSettingsAtomic(s);
     logSetup('hooks desinstalados');
     return { ok: true, backupPath };
@@ -144,5 +160,6 @@ export function previewInstall(appPath: string, port: number, current: Json): Js
     cleaned.push(hookEntry(ev, postJs, port));
     s.hooks[ev] = cleaned;
   }
+  applyStatusLine(s, appPath, port);
   return s;
 }

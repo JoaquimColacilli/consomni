@@ -90,6 +90,27 @@
     if (pa !== pb) return pa - pb;
     return (b.lastActivity || 0) - (a.lastActivity || 0);
   }
+  /* ── uso del plan (statusLine de claude): "reinicia en…" ── */
+  var WDAY = ['dom', 'lun', 'mar', 'mié', 'jue', 'vie', 'sáb'];
+  function hhmm(d) { return String(d.getHours()).padStart(2, '0') + ':' + String(d.getMinutes()).padStart(2, '0'); }
+  function fmtReset(at) {
+    var m = Math.round((at - Date.now()) / 60000);
+    if (m <= 0) return '—';
+    if (m < 60) return m + 'm';
+    if (m < 1440) return Math.floor(m / 60) + 'h' + String(m % 60).padStart(2, '0');
+    var d = new Date(at); return WDAY[d.getDay()] + ' ' + hhmm(d);
+  }
+  function usageItems(u) {
+    if (!u) return null;
+    var out = [];
+    [['five', '5h', 'Sesión (5h)'], ['week', '7d', 'Semanal']].forEach(function (k) {
+      var w = u[k[0]]; if (!w) return;
+      var pct = Math.round(w.pct), d = new Date(w.resetsAt);
+      out.push({ label: k[1], pct: pct, lvl: pct < 75 ? 'green' : pct <= 90 ? 'amber' : 'red', resetsAt: w.resetsAt, reset: fmtReset(w.resetsAt),
+        title: k[2] + ': ' + pct + '% usado · reinicia ' + WDAY[d.getDay()] + ' ' + d.getDate() + '/' + (d.getMonth() + 1) + ' ' + hhmm(d) + ' · dato ' + relTime(u.ts) });
+    });
+    return out.length ? out : null;
+  }
   function relTime(ms) {
     var s = Math.max(0, Math.floor((Date.now() - ms) / 1000));
     if (s < 60) return 'hace ' + s + 's';
@@ -252,6 +273,7 @@
       tokensToday: formatTokens(snap.tokensToday || 0),
       activeCount: activeCount, attnCount: counts.attn,
       refreshSecs: 2, lastUpdate: relTime(snap.generatedAt || Date.now()),
+      usage: usageItems(snap.usage), usageSetup: snap.usageSetup || 'none',
     };
 
     return { counts: counts, tree: { active: state.activeProject, home: homeView, plans: state.plansOpen, library: state.libraryOpen, groups: grp, ci: ci }, status: status, cols: cols, liveGroups: liveGroups };
@@ -336,6 +358,8 @@
         '|' + (s.subagents ? s.subagents.length : 0) + '|' + (s.plan ? ((s.plan.todoAt || 0) + '.' + (s.plan.todos ? s.plan.todos.length : 0) + '.' + (s.plan.completed || 0) + '.' + (s.plan.inProgress || 0)) : 0));
     }
     parts.push('H' + (snap.hooksConnected ? 1 : 0) + 'T' + (snap.tokensToday || 0) + 'V' + (snap.appVersion || ''));
+    var u = snap.usage;
+    parts.push('U' + (snap.usageSetup || '') + (u ? [u.five && u.five.pct, u.five && u.five.resetsAt, u.week && u.week.pct, u.week && u.week.resetsAt].join('/') : ''));
     var d = snap.diffStats || {}, dk = Object.keys(d).sort();
     for (var j = 0; j < dk.length; j++) { var dv = d[dk[j]]; parts.push(dk[j] + ':' + dv.added + '/' + dv.removed + '/' + dv.files); }
     return parts.join(';');
@@ -603,6 +627,12 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.28', date: '26 oct 2026', title: 'El uso de tu plan de claude, siempre a la vista (sesión de 5h + semanal)', items: [
+      'Nuevo: la barra de abajo muestra cuánto usaste de tu plan de claude — la ventana de 5 horas y la semanal — con su barrita de color y cuándo se reinicia cada una.',
+      'El dato lo da el propio claude mientras trabajás: Consomni no se conecta a nada externo. Aparece después de la primera respuesta de claude en una sesión.',
+      'Para activarlo: tocá "uso: activar" en la barra de abajo (se instala junto con los hooks, con backup de tu configuración). Si ya tenías una barra de estado propia en claude, no se pisa.',
+      'Bonus: la barra de estado dentro de claude también muestra el uso (5h y 7d).'
+    ] },
     { v: '1.9.27', date: '04 sep 2026', title: 'Se acabó el cartel de error que aparecía "cada tanto" (A JavaScript error occurred)', items: [
       'Arreglado: cada tanto saltaba un cartel de error y la app quedaba inservible. Pasaba mientras Consomni calculaba en segundo plano los cambios sin commitear (+N / −N) de tus proyectos.',
       'Causa: en Windows, arrancar un proceso (git) puede fallar de golpe por algo transitorio — antivirus, muchos procesos abiertos, una unidad de red que se cayó. Ese fallo tumbaba la app entera en vez de reintentarse solo.',
@@ -2506,6 +2536,15 @@
       // ── buscador del topbar: el click activa lo mismo que la tecla "/" (antes era sólo visual al click) ──
       if (act === 'search') { e.stopPropagation(); activateSearch(); return; }
       if (act === 'search-clear') { e.stopPropagation(); deactivateSearch(true); return; }   // × borra el filtro y sale
+      // ── uso del plan: activa el statusLine (va junto con los hooks; backup + merge no-destructivo) ──
+      if (act === 'usage-setup') {
+        e.stopPropagation();
+        if (!api || !api.installHooks) { toast('no disponible', 'err'); return; }
+        api.installHooks().then(function (r) {
+          toast(r && r.ok ? 'uso activado · aparece con el próximo mensaje de claude' : '✗ ' + ((r && r.error) || 'no se pudo instalar'), r && r.ok ? '' : 'err');
+        }).catch(function () { toast('✗ no se pudo instalar', 'err'); });
+        return;
+      }
       // ── notificaciones + changelog ──
       if (act === 'notifs') { e.stopPropagation(); state.notifOpen ? closeNotifPanel() : openNotifPanel(); return; }
       if (act === 'notif-all') { e.stopPropagation(); closeNotifPanel(); openNotifHistory(); return; }
@@ -2769,6 +2808,7 @@
     if (document.hidden || !state.snapshot) return;   // ventana oculta → cero trabajo (Chromium degrada el timer, el laburo lo evitamos nosotros)
     var right = document.querySelector('.statusbar .right');
     if (right) right.textContent = 'auto-refresh 2s · última actualización ' + relTime(state.snapshot.generatedAt || Date.now());
+    document.querySelectorAll('.sb-use-r[data-reset]').forEach(function (el) { el.textContent = fmtReset(+el.getAttribute('data-reset')); });
   }, 1000);
 
   /* ── init ── */

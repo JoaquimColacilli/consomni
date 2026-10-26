@@ -7,7 +7,7 @@ import { app, BrowserWindow, ipcMain, session, Notification, dialog, clipboard }
 import * as path from 'path';
 import * as fs from 'fs';
 import * as os from 'os';
-import { start as startSessions, stop as stopSessions, buildSnapshot, knownCwds, rescanNow, setHooksConnected, applyHookEvent, getDetail, findSessionFile, findPlanDocs, setAttnCallback, restartWatcher, setUiVisible, setOnBattery, type AttnInfo } from './sessions';
+import { start as startSessions, stop as stopSessions, buildSnapshot, knownCwds, rescanNow, setHooksConnected, setUsageSetup, applyHookEvent, getDetail, findSessionFile, findPlanDocs, setAttnCallback, restartWatcher, setUiVisible, setOnBattery, type AttnInfo } from './sessions';
 import { runAction, type ActionPayload } from './actions';
 import { startHooksServer, stopHooksServer, isServerListening } from './hooks-server';
 import { install as installHooks, uninstall as uninstallHooks, getStatus as getHooksStatus, isInstalled } from './hooks-install';
@@ -530,7 +530,7 @@ if (!gotLock) {
     });
 
     const status = () => ({ ...getHooksStatus(), serverUp: isServerListening() });
-    const refreshHooksConn = (): void => { setHooksConnected(isServerListening() && isInstalled()); };
+    const refreshHooksConn = (): void => { setHooksConnected(isServerListening() && isInstalled()); setUsageSetup(getHooksStatus().statusLine); };
     ipcMain.handle('consomni:getHooksStatus', () => status());
     ipcMain.handle('consomni:installHooks', () => {
       const r = installHooks(app.getAppPath(), cfg.port);
