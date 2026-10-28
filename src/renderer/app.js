@@ -627,6 +627,11 @@
      Registro local (offline, sin red, sin emojis) de TODO lo que se fue haciendo.
      Al sacar una versión nueva: agregar su entrada acá arriba (newest-first). */
   var CHANGELOG = [
+    { v: '1.9.29', date: '28 oct 2026', title: 'Las terminales siempre encuentran claude (adiós "claude no se reconoce")', items: [
+      'Arreglado: a veces, después de que Consomni se reabría (por ejemplo tras actualizarse), todas las terminales decían que "claude" no se reconocía como comando, aunque estuviera instalado.',
+      'La causa: Consomni podía quedar con una lista de carpetas de programas (PATH) vieja o incompleta, y cada terminal nueva la heredaba.',
+      'Ahora cada terminal nueva lee la lista actualizada directo de Windows, así encuentra claude (y cualquier programa que hayas instalado) sin tener que reiniciar nada.'
+    ] },
     { v: '1.9.28', date: '26 oct 2026', title: 'El uso de tu plan de claude, siempre a la vista (sesión de 5h + semanal)', items: [
       'Nuevo: la barra de abajo muestra cuánto usaste de tu plan de claude — la ventana de 5 horas y la semanal — con su barrita de color y cuándo se reinicia cada una.',
       'El dato lo da el propio claude mientras trabajás: Consomni no se conecta a nada externo. Aparece después de la primera respuesta de claude en una sesión.',

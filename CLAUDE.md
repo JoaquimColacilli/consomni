@@ -1986,6 +1986,26 @@ en claro), `.cv-file` (subrayado `var(--blue-2)`), `.dk-ctx-sep`, `.dk-fileview`
 
 ---
 
+## v1.9.29 — Terminales con PATH fresco del registro ("claude no se reconoce")
+> Bug reportado por el usuario: TODAS las terminales embebidas tiraban `claude : El término 'claude' no se
+> reconoce…` aunque claude estaba instalado. Bump **1.9.28 → 1.9.29**. Respeta las 4 Hard Rules (sólo lee el
+> registro local con `reg.exe`; cero red/API).
+- **Causa raíz (CONFIRMADA en vivo):** `$env:Path -split ';' | Select-String 'local\\bin|npm-global|CLConnect'`
+  dentro de una terminal de Consomni → **vacío**, mientras el registro (HKCU) sí tenía los 3 dirs. Electron hereda
+  el entorno de quien lo lanzó; si Consomni se (re)lanza desde un contexto con PATH viejo/incompleto (relaunch del
+  auto-update, etc.), `createTerm` copiaba `process.env` tal cual → todas las shells nacían sin los dirs de usuario.
+- **Fix (`terminals.ts` `refreshProcessPath()`):** re-lee `Path` de HKLM (`Session Manager\Environment`) + HKCU
+  (`Environment`) con **`reg.exe` por ruta ABSOLUTA** (`%SystemRoot%\System32\reg.exe` — con el PATH roto ni `reg`
+  resuelve, verificado), expande `%VARS%`, mergea machine;user + lo heredado que sobre al final (dedupe
+  case-insensitive, sin trailing slash) y **muta `process.env.Path`** (sirve a `where`/git/actions). Si cambió,
+  limpia `whichCache` + `claudeBin` (antes un "claude no encontrado" quedaba cacheado para siempre). Throttle 5s.
+  Si el registro no es legible no toca nada. Se llama en `createTerm` y `nlToCommand`. No-op fuera de win32.
+- **Verificado:** test node con PATH simulado roto (`system32;WINDOWS`) → 60 entradas, sin `%` sin expandir, y
+  `where claude` encuentra las 3 copias. `tsc` limpio. Las terminales ya abiertas con PATH roto no se curan (el
+  env de un proceso vivo no se cambia) → abrir una nueva.
+
+---
+
 ## v1.9.28 — Uso del plan (sesión 5h + semanal) en el statusbar
 > Pedido del usuario: tener el `/usage` de claude a la vista. Bump **1.9.27 → 1.9.28**. Respeta las 4 Hard Rules
 > (**cero API de Anthropic**: el dato lo trae el propio `claude`; Consomni sólo recibe un POST local).

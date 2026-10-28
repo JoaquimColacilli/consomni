@@ -24,6 +24,48 @@ function applyClaudeProfileEnv(env: NodeJS.ProcessEnv): void {
   if ((cfg.claudeConfigDir || '').trim()) env.CLAUDE_CONFIG_DIR = resolveClaudeDir(cfg);
 }
 
+/** PATH FRESCO del registro (Windows). Electron hereda el entorno de quien lo lanzó: si Consomni se
+    relanza desde un contexto con PATH viejo/incompleto (ej. el relaunch del auto-update), TODAS las
+    terminales nacen sin los dirs de usuario → `claude` "no se reconoce". Como Windows Terminal, re-leemos
+    HKLM + HKCU (machine;user, expandiendo %VARS%) y lo mergeamos con lo heredado (extras al final, dedupe).
+    Muta process.env (sirve también a `where`/git/actions) y limpia la cache de `which` si cambió. Throttle 5s. */
+let pathRefreshedAt = 0;
+function readRegPath(key: string): string {
+  try {
+    // ruta ABSOLUTA: justamente el PATH heredado puede estar roto
+    const reg = path.join(process.env.SystemRoot || 'C:\\Windows', 'System32', 'reg.exe');
+    const out = execFileSync(reg, ['query', key, '/v', 'Path'], { encoding: 'utf8', windowsHide: true, timeout: 3000 });
+    const m = /^\s*Path\s+REG_(?:EXPAND_)?SZ\s+(.*)$/im.exec(String(out));
+    return m ? m[1].trim() : '';
+  } catch { return ''; }
+}
+export function refreshProcessPath(): void {
+  if (process.platform !== 'win32') return;
+  const now = Date.now();
+  if (now - pathRefreshedAt < 5000) return;
+  pathRefreshedAt = now;
+  const expand = (s: string) => s.replace(/%([^%]+)%/g, (all, name) => process.env[name] ?? all);
+  const reg = [
+    readRegPath('HKLM\\SYSTEM\\CurrentControlSet\\Control\\Session Manager\\Environment'),
+    readRegPath('HKCU\\Environment'),
+  ].filter(Boolean).map(expand).join(';');
+  if (!reg) return;                                          // sin registro legible → no tocar nada
+  const seen = new Set<string>();
+  const parts: string[] = [];
+  for (const p of (reg + ';' + (process.env.Path || '')).split(';')) {
+    const t = p.trim();
+    const k = t.replace(/[\\/]+$/, '').toLowerCase();
+    if (!t || seen.has(k)) continue;
+    seen.add(k); parts.push(t);
+  }
+  const next = parts.join(';');
+  if (next !== process.env.Path) {
+    process.env.Path = next;
+    for (const k of Object.keys(whichCache)) delete whichCache[k];
+    claudeBin = undefined;
+  }
+}
+
 /** Modo "fullscreen" de Claude Code: ancla el input box ABAJO (alt-screen, como vim/htop) en vez del
     render inline por defecto, que en una sesión sin conversación deja el input ARRIBA con filas vacías
     abajo (la diferencia con WezTerm/Ghostty). Es una env var SÓLO-claude, NO toca disco (respeta Hard
@@ -164,6 +206,7 @@ export function createTerm(opts: { cwd?: string; kind?: TermKind; cols?: number;
   const kind: TermKind = opts.kind === 'claude' ? 'claude' : 'shell';
   const cols = Math.max(8, opts.cols || 80);
   const rows = Math.max(2, opts.rows || 24);
+  refreshProcessPath();                 // PATH fresco del registro (no el heredado, que puede estar viejo)
   const sh = resolveShell();
 
   const env: NodeJS.ProcessEnv = { ...process.env, TERM: 'xterm-256color' };
@@ -283,6 +326,7 @@ export function nlToCommand(text: string, cwd?: string): Promise<NlResult> {
   return new Promise((resolve) => {
     const prompt = String(text || '').trim().slice(0, 400);
     if (!prompt) return resolve({ ok: false, error: 'pedido vacío' });
+    refreshProcessPath();
     const claude = resolveClaude();
     if (!claude) return resolve({ ok: false, error: 'claude no está en PATH' });
     const model = loadConfig().nlModel || 'haiku';
